@@ -91,6 +91,29 @@ pub struct OperationResult {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CreateComponentRequest {
+    pub name: String,
+    pub kind: ComponentKind,
+    pub destination: PathBuf,
+    pub mcs_compatible: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CopyComponentRequest {
+    pub component_id: String,
+    pub destination: PathBuf,
+    pub mcs_compatible: bool,
+    pub identity_policy: IdentityPolicy,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MoveComponentRequest {
+    pub component_id: String,
+    pub destination: PathBuf,
+    pub mcs_compatible: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DiscoveryWarning {
     pub path: PathBuf,
     pub message: String,

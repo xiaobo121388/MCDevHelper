@@ -19,6 +19,7 @@ pub struct TemplateRequest {
     pub kind: ComponentKind,
     pub destination: PathBuf,
     pub mcs_compatible: bool,
+    pub component_uid: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -49,7 +50,10 @@ impl TemplateService {
             return Err(CoreError::InvalidInput("目标路径必须是绝对路径".into()));
         }
 
-        let component_uid = Uuid::new_v4().simple().to_string();
+        let component_uid = request
+            .component_uid
+            .clone()
+            .unwrap_or_else(|| Uuid::new_v4().simple().to_string());
         let suffix = &Uuid::new_v4().simple().to_string()[..8];
         let behavior_directory = format!("behavior_pack_{suffix}");
         let resource_directory = format!("resource_pack_{suffix}");
@@ -287,6 +291,7 @@ mod tests {
                     kind,
                     destination: destination.clone(),
                     mcs_compatible: true,
+                    component_uid: None,
                 })
                 .unwrap();
             assert!(component_uids.insert(rendered.component_uid.clone()));
@@ -322,6 +327,7 @@ mod tests {
                 kind: ComponentKind::Material,
                 destination: PathBuf::from(r"D:\Projects"),
                 mcs_compatible: false,
+                component_uid: None,
             })
             .unwrap();
         assert_eq!(rendered.files.len(), 1);
