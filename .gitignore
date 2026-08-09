@@ -8,3 +8,6 @@ Thumbs.db
 .idea/
 .vscode/
 src-tauri/gen/
+src-tauri/binaries/*.exe
+src-tauri/release-resources/
+release/

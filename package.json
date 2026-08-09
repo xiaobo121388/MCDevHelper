@@ -8,7 +8,11 @@
     "build": "tsc -b && vite build",
     "test": "vitest run",
     "test:watch": "vitest",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "license-report": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/generate-license-report.ps1",
+    "release:prepare": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/prepare-sidecar.ps1",
+    "release:package": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/package-portable.ps1",
+    "release:windows": "pnpm license-report && pnpm release:prepare && tauri build && pnpm release:package"
   },
   "dependencies": {
     "@radix-ui/react-dialog": "^1.1.15",

@@ -25,7 +25,24 @@
     }
   },
   "bundle": {
-    "active": false,
-    "targets": ["nsis"]
+    "active": true,
+    "targets": ["nsis"],
+    "publisher": "xiaobo121388",
+    "category": "DeveloperTool",
+    "shortDescription": "离线管理网易中国版 Minecraft PE 创作组件",
+    "externalBin": ["binaries/mcdh-mcp"],
+    "resources": [
+      "release-resources/README.md",
+      "release-resources/THIRD_PARTY_LICENSES.md"
+    ],
+    "windows": {
+      "webviewInstallMode": {
+        "type": "skip"
+      },
+      "nsis": {
+        "installMode": "currentUser",
+        "languages": ["SimpChinese", "English"]
+      }
+    }
   }
 }
