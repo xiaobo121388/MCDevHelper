@@ -6,6 +6,7 @@ mod error;
 mod index;
 mod model;
 mod operations;
+mod path_utils;
 mod template;
 
 pub use error::{CoreError, ErrorPayload, Result};

@@ -8,6 +8,7 @@ use fs2::FileExt;
 use rusqlite::{Connection, OptionalExtension, params};
 use uuid::Uuid;
 
+use crate::path_utils::canonicalize;
 use crate::{CoreError, Result, SourceKind, SourceRecord};
 
 const SCHEMA: &str = r#"
@@ -281,7 +282,7 @@ fn normalize_existing_path(path: &Path) -> Result<PathBuf> {
     if !path.exists() {
         return Err(CoreError::NotFound(path.to_path_buf()));
     }
-    fs::canonicalize(path).map_err(|error| CoreError::io(path, error))
+    canonicalize(path)
 }
 
 fn normalize_path(path: &Path) -> Result<PathBuf> {

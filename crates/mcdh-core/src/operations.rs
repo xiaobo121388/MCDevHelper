@@ -12,6 +12,7 @@ use walkdir::{DirEntry, WalkDir};
 use crate::archive::{
     expand_nested_mcpacks, extract_archive, is_supported_archive, temporary_zip_path, write_zip,
 };
+use crate::path_utils::canonicalize;
 use crate::{
     BumpManifestVersionRequest, ComponentKind, ComponentSummary, CopyComponentRequest, CoreError,
     CreateComponentRequest, DiscoveryService, ExportComponentRequest, IdentityPolicy,
@@ -197,8 +198,7 @@ impl ComponentService {
 
     pub fn import_component(&self, request: &ImportComponentRequest) -> Result<OperationResult> {
         let _guard = self.index.try_lock_mutations()?;
-        let source = fs::canonicalize(&request.source)
-            .map_err(|error| CoreError::io(&request.source, error))?;
+        let source = canonicalize(&request.source)?;
         let destination = existing_directory(&request.destination)?;
         if source.is_dir() {
             ensure_not_inside(&source, &destination)?;
@@ -1126,7 +1126,7 @@ fn existing_directory(path: &Path) -> Result<PathBuf> {
     if !path.is_dir() {
         return Err(CoreError::NotFound(path.to_path_buf()));
     }
-    fs::canonicalize(path).map_err(|error| CoreError::io(path, error))
+    canonicalize(path)
 }
 
 fn ensure_not_inside(source: &Path, destination: &Path) -> Result<()> {

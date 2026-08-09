@@ -6,6 +6,7 @@ use chrono::{DateTime, Utc};
 use serde_json::Value;
 use uuid::Uuid;
 
+use crate::path_utils::canonicalize;
 use crate::{
     ComponentKind, ComponentOrigin, ComponentSummary, CoreError, DiscoveryResult, DiscoveryWarning,
     LocalIndex, ManifestSummary, McsInfo, Result, SourceKind, SourceRecord,
@@ -176,7 +177,7 @@ impl DiscoveryService {
         warnings: &mut Vec<DiscoveryWarning>,
         visited: &mut HashSet<String>,
     ) {
-        let canonical = match fs::canonicalize(path) {
+        let canonical = match canonicalize(path) {
             Ok(path) => path,
             Err(error) => {
                 warnings.push(DiscoveryWarning {
