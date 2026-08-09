@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::ffi::OsStr;
 use std::fs;
+use std::io::Write;
 use std::path::{Component, Path, PathBuf};
 
 use serde_json::Value;
@@ -11,9 +12,10 @@ use crate::archive::{
     expand_nested_mcpacks, extract_archive, is_supported_archive, temporary_zip_path, write_zip,
 };
 use crate::{
-    ComponentKind, ComponentSummary, CopyComponentRequest, CoreError, CreateComponentRequest,
-    DiscoveryService, ExportComponentRequest, IdentityPolicy, ImportComponentRequest, LocalIndex,
-    MoveComponentRequest, OperationResult, Result, TemplateRequest, TemplateService,
+    BumpManifestVersionRequest, ComponentKind, ComponentSummary, CopyComponentRequest, CoreError,
+    CreateComponentRequest, DiscoveryService, ExportComponentRequest, IdentityPolicy,
+    ImportComponentRequest, LocalIndex, MoveComponentRequest, OperationResult, Result,
+    SetComponentTagsRequest, TemplateRequest, TemplateService, VersionPart,
 };
 
 #[derive(Debug, Clone)]
@@ -272,6 +274,62 @@ impl ComponentService {
             component: Some(component),
             actual_path: archive_path.clone(),
             modified_files: vec![archive_path],
+            warnings: Vec::new(),
+        })
+    }
+
+    pub fn set_component_tags(&self, request: &SetComponentTagsRequest) -> Result<OperationResult> {
+        let _guard = self.index.try_lock_mutations()?;
+        let component = self.find_component(&request.component_id)?;
+        let mut modified_files = Vec::new();
+        let work_config = component.path.join("work.mcscfg");
+        if component.mcs.is_some() && work_config.is_file() {
+            let mut document = read_json(&work_config)?;
+            document["CustomTags"] = Value::Array(
+                normalize_tags(&request.tags)
+                    .iter()
+                    .cloned()
+                    .map(Value::String)
+                    .collect(),
+            );
+            write_json(&work_config, &document)?;
+            modified_files.push(work_config);
+        }
+        self.index.set_tags(&component.path, &request.tags)?;
+        let updated = self.find_component(&request.component_id)?;
+        Ok(OperationResult {
+            component: Some(updated),
+            actual_path: component.path,
+            modified_files,
+            warnings: Vec::new(),
+        })
+    }
+
+    pub fn regenerate_manifest_uuids(&self, component_id: &str) -> Result<OperationResult> {
+        let _guard = self.index.try_lock_mutations()?;
+        let component = self.find_component(component_id)?;
+        let modified_files = regenerate_manifest_identifiers(&component.path)?;
+        let updated = self.find_component(component_id)?;
+        Ok(OperationResult {
+            component: Some(updated),
+            actual_path: component.path,
+            modified_files,
+            warnings: Vec::new(),
+        })
+    }
+
+    pub fn bump_manifest_version(
+        &self,
+        request: &BumpManifestVersionRequest,
+    ) -> Result<OperationResult> {
+        let _guard = self.index.try_lock_mutations()?;
+        let component = self.find_component(&request.component_id)?;
+        let modified_files = bump_manifest_versions(&component.path, request.part)?;
+        let updated = self.find_component(&request.component_id)?;
+        Ok(OperationResult {
+            component: Some(updated),
+            actual_path: component.path,
+            modified_files,
             warnings: Vec::new(),
         })
     }
@@ -666,21 +724,132 @@ fn regenerate_manifest_identifiers(root: &Path) -> Result<Vec<PathBuf>> {
     for (_, document) in &mut documents {
         rewrite_uuid_references(document, &header_map);
     }
-    let mut modified = Vec::new();
-    for (path, document) in documents {
-        write_json(&path, &document)?;
-        modified.push(path);
-    }
     for name in ["world_behavior_packs.json", "world_resource_packs.json"] {
         let path = root.join(name);
         if path.is_file() {
             let mut document = read_json(&path)?;
             rewrite_uuid_references(&mut document, &header_map);
-            write_json(&path, &document)?;
-            modified.push(path);
+            documents.push((path, document));
         }
     }
+    let mut modified = Vec::new();
+    for (path, document) in documents {
+        write_json(&path, &document)?;
+        modified.push(path);
+    }
     Ok(modified)
+}
+
+fn bump_manifest_versions(root: &Path, part: VersionPart) -> Result<Vec<PathBuf>> {
+    let manifests = manifest_files(root)?;
+    if manifests.is_empty() {
+        return Err(CoreError::InvalidComponent(root.to_path_buf()));
+    }
+    let mut documents = Vec::new();
+    let mut version_map = HashMap::new();
+    for path in manifests {
+        let mut document = read_json(&path)?;
+        let Some(header) = document.get_mut("header").and_then(Value::as_object_mut) else {
+            continue;
+        };
+        let Some(version) = header.get("version").and_then(version_array) else {
+            continue;
+        };
+        let new_version = bump_version(version, part)?;
+        if let Some(uuid) = header.get("uuid").and_then(Value::as_str) {
+            version_map.insert(uuid.to_ascii_lowercase(), new_version);
+        }
+        header.insert("version".into(), version_value(new_version));
+        if let Some(modules) = document.get_mut("modules").and_then(Value::as_array_mut) {
+            for module in modules {
+                if let Some(module) = module.as_object_mut() {
+                    module.insert("version".into(), version_value(new_version));
+                }
+            }
+        }
+        documents.push((path, document));
+    }
+    if documents.is_empty() {
+        return Err(CoreError::InvalidInput(
+            "组件中没有可提升的 manifest 版本".into(),
+        ));
+    }
+
+    for (_, document) in &mut documents {
+        rewrite_version_references(document, &version_map);
+    }
+    for name in ["world_behavior_packs.json", "world_resource_packs.json"] {
+        let path = root.join(name);
+        if path.is_file() {
+            let mut document = read_json(&path)?;
+            rewrite_version_references(&mut document, &version_map);
+            documents.push((path, document));
+        }
+    }
+
+    let mut modified = Vec::new();
+    for (path, document) in documents {
+        write_json(&path, &document)?;
+        modified.push(path);
+    }
+    Ok(modified)
+}
+
+fn bump_version(version: [u64; 3], part: VersionPart) -> Result<[u64; 3]> {
+    let overflow = || CoreError::InvalidInput("manifest 版本号已达到上限".into());
+    match part {
+        VersionPart::Major => Ok([version[0].checked_add(1).ok_or_else(overflow)?, 0, 0]),
+        VersionPart::Minor => Ok([
+            version[0],
+            version[1].checked_add(1).ok_or_else(overflow)?,
+            0,
+        ]),
+        VersionPart::Patch => Ok([
+            version[0],
+            version[1],
+            version[2].checked_add(1).ok_or_else(overflow)?,
+        ]),
+    }
+}
+
+fn rewrite_version_references(value: &mut Value, mapping: &HashMap<String, [u64; 3]>) {
+    match value {
+        Value::Array(values) => {
+            for value in values {
+                rewrite_version_references(value, mapping);
+            }
+        }
+        Value::Object(values) => {
+            let referenced_uuid = values
+                .get("uuid")
+                .or_else(|| values.get("pack_id"))
+                .and_then(Value::as_str)
+                .map(str::to_ascii_lowercase);
+            if let Some(version) = referenced_uuid.and_then(|uuid| mapping.get(&uuid)) {
+                values.insert("version".into(), version_value(*version));
+            }
+            for value in values.values_mut() {
+                rewrite_version_references(value, mapping);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn version_array(value: &Value) -> Option<[u64; 3]> {
+    let values = value.as_array()?;
+    if values.len() != 3 {
+        return None;
+    }
+    Some([
+        values[0].as_u64()?,
+        values[1].as_u64()?,
+        values[2].as_u64()?,
+    ])
+}
+
+fn version_value(version: [u64; 3]) -> Value {
+    Value::Array(version.into_iter().map(Value::from).collect())
 }
 
 fn rewrite_uuid_references(value: &mut Value, mapping: &HashMap<String, String>) {
@@ -731,7 +900,79 @@ fn write_json(path: &Path, document: &Value) -> Result<()> {
     let mut content =
         serde_json::to_string_pretty(document).map_err(|error| CoreError::json(path, error))?;
     content.push('\n');
-    fs::write(path, content).map_err(|error| CoreError::io(path, error))
+    atomic_write(path, content.as_bytes())
+}
+
+fn atomic_write(path: &Path, content: &[u8]) -> Result<()> {
+    let parent = path
+        .parent()
+        .ok_or_else(|| CoreError::InvalidInput("JSON 文件没有父目录".into()))?;
+    let temporary = parent.join(format!(".mcdh-json-{}.tmp", Uuid::new_v4().simple()));
+    let result = (|| {
+        let mut file = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temporary)
+            .map_err(|error| CoreError::io(&temporary, error))?;
+        file.write_all(content)
+            .map_err(|error| CoreError::io(&temporary, error))?;
+        file.sync_all()
+            .map_err(|error| CoreError::io(&temporary, error))?;
+        drop(file);
+        replace_file(&temporary, path).map_err(|error| CoreError::io(path, error))
+    })();
+    if result.is_err() {
+        let _ = fs::remove_file(&temporary);
+    }
+    result
+}
+
+#[cfg(windows)]
+fn replace_file(source: &Path, destination: &Path) -> std::io::Result<()> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::Storage::FileSystem::{
+        MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH, MoveFileExW,
+    };
+
+    let source = source
+        .as_os_str()
+        .encode_wide()
+        .chain(Some(0))
+        .collect::<Vec<_>>();
+    let destination = destination
+        .as_os_str()
+        .encode_wide()
+        .chain(Some(0))
+        .collect::<Vec<_>>();
+    let result = unsafe {
+        MoveFileExW(
+            source.as_ptr(),
+            destination.as_ptr(),
+            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
+        )
+    };
+    if result == 0 {
+        Err(std::io::Error::last_os_error())
+    } else {
+        Ok(())
+    }
+}
+
+#[cfg(not(windows))]
+fn replace_file(source: &Path, destination: &Path) -> std::io::Result<()> {
+    fs::rename(source, destination)
+}
+
+fn normalize_tags(tags: &[String]) -> Vec<String> {
+    let mut normalized = tags
+        .iter()
+        .map(|tag| tag.trim())
+        .filter(|tag| !tag.is_empty())
+        .map(ToOwned::to_owned)
+        .collect::<Vec<_>>();
+    normalized.sort_by_key(|tag| tag.to_lowercase());
+    normalized.dedup_by(|left, right| left.eq_ignore_ascii_case(right));
+    normalized
 }
 
 fn verify_copy(root: &Path, report: &CopyReport) -> Result<()> {
@@ -1208,5 +1449,153 @@ mod tests {
             .unwrap();
         let document = read_json(&imported.actual_path.join("manifest.json")).unwrap();
         assert_ne!(document["header"]["uuid"], duplicate_uuid.to_string());
+    }
+
+    #[test]
+    fn regenerates_manifest_ids_and_rewrites_internal_references() {
+        let temp = tempfile::tempdir().unwrap();
+        let index = LocalIndex::open(temp.path().join("state/mcdh.db")).unwrap();
+        let library = temp.path().join("library");
+        let map_root = library.join("依赖地图");
+        fs::create_dir_all(map_root.join("db")).unwrap();
+        let behavior_uuid = Uuid::new_v4();
+        let resource_uuid = Uuid::new_v4();
+        let mut behavior = manifest("Behavior", "data", behavior_uuid);
+        behavior["dependencies"] = serde_json::json!([{
+            "uuid": resource_uuid,
+            "version": [0, 0, 1]
+        }]);
+        write_json(&map_root.join("behavior_packs/bp/manifest.json"), behavior);
+        write_json(
+            &map_root.join("resource_packs/rp/manifest.json"),
+            manifest("Resources", "resources", resource_uuid),
+        );
+        write_json(
+            &map_root.join("world_behavior_packs.json"),
+            serde_json::json!([{"pack_id": behavior_uuid, "version": [0, 0, 1]}]),
+        );
+        write_json(
+            &map_root.join("world_resource_packs.json"),
+            serde_json::json!([{"pack_id": resource_uuid, "version": [0, 0, 1]}]),
+        );
+        index.add_source(SourceKind::Library, &library).unwrap();
+        let component = DiscoveryService::new(index.clone())
+            .refresh_with_mcs_work_roots(&[])
+            .unwrap()
+            .components
+            .remove(0);
+        let service = ComponentService::new(index).with_mcs_work_roots(Vec::new());
+
+        let result = service.regenerate_manifest_uuids(&component.id).unwrap();
+        assert_eq!(result.modified_files.len(), 4);
+        let behavior = read_json(&map_root.join("behavior_packs/bp/manifest.json")).unwrap();
+        let resources = read_json(&map_root.join("resource_packs/rp/manifest.json")).unwrap();
+        let behavior_new = behavior["header"]["uuid"].as_str().unwrap();
+        let resource_new = resources["header"]["uuid"].as_str().unwrap();
+        assert_ne!(behavior_new, behavior_uuid.to_string());
+        assert_ne!(resource_new, resource_uuid.to_string());
+        assert_eq!(behavior["dependencies"][0]["uuid"], resource_new);
+        assert_eq!(
+            read_json(&map_root.join("world_behavior_packs.json")).unwrap()[0]["pack_id"],
+            behavior_new
+        );
+        assert_eq!(
+            read_json(&map_root.join("world_resource_packs.json")).unwrap()[0]["pack_id"],
+            resource_new
+        );
+    }
+
+    #[test]
+    fn bumps_header_module_dependency_and_world_versions() {
+        let temp = tempfile::tempdir().unwrap();
+        let index = LocalIndex::open(temp.path().join("state/mcdh.db")).unwrap();
+        let library = temp.path().join("library");
+        let map_root = library.join("版本地图");
+        fs::create_dir_all(map_root.join("db")).unwrap();
+        let behavior_uuid = Uuid::new_v4();
+        let resource_uuid = Uuid::new_v4();
+        let mut behavior = manifest("Behavior", "data", behavior_uuid);
+        behavior["header"]["version"] = serde_json::json!([1, 2, 3]);
+        behavior["modules"][0]["version"] = serde_json::json!([1, 2, 3]);
+        behavior["dependencies"] = serde_json::json!([{
+            "uuid": resource_uuid,
+            "version": [2, 0, 0]
+        }]);
+        let mut resources = manifest("Resources", "resources", resource_uuid);
+        resources["header"]["version"] = serde_json::json!([2, 0, 0]);
+        resources["modules"][0]["version"] = serde_json::json!([2, 0, 0]);
+        write_json(&map_root.join("behavior_packs/bp/manifest.json"), behavior);
+        write_json(&map_root.join("resource_packs/rp/manifest.json"), resources);
+        write_json(
+            &map_root.join("world_resource_packs.json"),
+            serde_json::json!([{"pack_id": resource_uuid, "version": [2, 0, 0]}]),
+        );
+        index.add_source(SourceKind::Library, &library).unwrap();
+        let component = DiscoveryService::new(index.clone())
+            .refresh_with_mcs_work_roots(&[])
+            .unwrap()
+            .components
+            .remove(0);
+        let service = ComponentService::new(index).with_mcs_work_roots(Vec::new());
+
+        service
+            .bump_manifest_version(&BumpManifestVersionRequest {
+                component_id: component.id,
+                part: VersionPart::Patch,
+            })
+            .unwrap();
+        let behavior = read_json(&map_root.join("behavior_packs/bp/manifest.json")).unwrap();
+        assert_eq!(behavior["header"]["version"], serde_json::json!([1, 2, 4]));
+        assert_eq!(
+            behavior["modules"][0]["version"],
+            serde_json::json!([1, 2, 4])
+        );
+        assert_eq!(
+            behavior["dependencies"][0]["version"],
+            serde_json::json!([2, 0, 1])
+        );
+        assert_eq!(
+            read_json(&map_root.join("world_resource_packs.json")).unwrap()[0]["version"],
+            serde_json::json!([2, 0, 1])
+        );
+    }
+
+    #[test]
+    fn stores_normalized_tags_and_syncs_mcs_custom_tags() {
+        let temp = tempfile::tempdir().unwrap();
+        let index = LocalIndex::open(temp.path().join("state/mcdh.db")).unwrap();
+        let work = temp.path().join("work");
+        let addon = work.join("account/Cpp/AddOn/addon-id");
+        write_json(
+            &addon.join("work.mcscfg"),
+            serde_json::json!({
+                "UID": "addon-id",
+                "Type": 7,
+                "Name": "标签模组",
+                "CustomTags": []
+            }),
+        );
+        write_json(
+            &addon.join("behavior/manifest.json"),
+            manifest("Behavior", "data", Uuid::new_v4()),
+        );
+        let component = DiscoveryService::new(index.clone())
+            .refresh_with_mcs_work_roots(std::slice::from_ref(&work))
+            .unwrap()
+            .components
+            .remove(0);
+        let service = ComponentService::new(index).with_mcs_work_roots(vec![work]);
+
+        let result = service
+            .set_component_tags(&SetComponentTagsRequest {
+                component_id: component.id,
+                tags: vec![" 开发 ".into(), "测试".into(), "开发".into()],
+            })
+            .unwrap();
+        assert_eq!(result.component.unwrap().tags, vec!["开发", "测试"]);
+        assert_eq!(
+            read_json(&addon.join("work.mcscfg")).unwrap()["CustomTags"],
+            serde_json::json!(["开发", "测试"])
+        );
     }
 }

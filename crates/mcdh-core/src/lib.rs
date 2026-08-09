@@ -11,10 +11,11 @@ mod template;
 pub use error::{CoreError, ErrorPayload, Result};
 pub use index::{LocalIndex, MutationGuard};
 pub use model::{
-    ComponentKind, ComponentOrigin, ComponentSummary, CopyComponentRequest, CreateComponentRequest,
-    DiscoveryResult, DiscoveryWarning, ExportComponentRequest, IdentityPolicy,
-    ImportComponentRequest, ManifestSummary, McsInfo, MoveComponentRequest, OperationResult,
-    SourceKind, SourceRecord, VersionPart,
+    BumpManifestVersionRequest, ComponentKind, ComponentOrigin, ComponentSummary,
+    CopyComponentRequest, CreateComponentRequest, DiscoveryResult, DiscoveryWarning,
+    ExportComponentRequest, IdentityPolicy, ImportComponentRequest, ManifestSummary, McsInfo,
+    MoveComponentRequest, OperationResult, SetComponentTagsRequest, SourceKind, SourceRecord,
+    VersionPart,
 };
 pub use operations::ComponentService;
 pub use template::{RenderedFile, RenderedTemplate, TemplateRequest, TemplateService};

@@ -128,6 +128,18 @@ pub struct ExportComponentRequest {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SetComponentTagsRequest {
+    pub component_id: String,
+    pub tags: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BumpManifestVersionRequest {
+    pub component_id: String,
+    pub part: VersionPart,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DiscoveryWarning {
     pub path: PathBuf,
     pub message: String,
