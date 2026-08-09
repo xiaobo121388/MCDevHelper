@@ -16,6 +16,10 @@ pub enum CoreError {
     InvalidComponent(PathBuf),
     #[error("组件修改正被另一个 MCDH 进程占用")]
     Busy,
+    #[error("组件标识冲突：{0}")]
+    Conflict(String),
+    #[error("压缩包处理失败：{path}: {message}")]
+    Archive { path: PathBuf, message: String },
     #[error("文件操作失败：{path}: {source}")]
     Io {
         path: PathBuf,
@@ -53,6 +57,8 @@ impl CoreError {
             Self::InvalidInput(_) => "invalid_input",
             Self::InvalidComponent(_) => "invalid_component",
             Self::Busy => "busy",
+            Self::Conflict(_) => "conflict",
+            Self::Archive { .. } => "archive_error",
             Self::Io { .. } => "io_error",
             Self::Json { .. } => "json_error",
             Self::Database(_) => "database_error",
@@ -65,6 +71,7 @@ impl CoreError {
             | Self::InvalidComponent(path)
             | Self::Io { path, .. }
             | Self::Json { path, .. } => Some(path),
+            Self::Archive { path, .. } => Some(path),
             _ => None,
         }
     }

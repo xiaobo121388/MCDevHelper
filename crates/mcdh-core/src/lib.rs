@@ -1,5 +1,6 @@
 //! Shared domain services for MCDevHelper.
 
+mod archive;
 mod discovery;
 mod error;
 mod index;
@@ -11,8 +12,9 @@ pub use error::{CoreError, ErrorPayload, Result};
 pub use index::{LocalIndex, MutationGuard};
 pub use model::{
     ComponentKind, ComponentOrigin, ComponentSummary, CopyComponentRequest, CreateComponentRequest,
-    DiscoveryResult, DiscoveryWarning, IdentityPolicy, ManifestSummary, McsInfo,
-    MoveComponentRequest, OperationResult, SourceKind, SourceRecord, VersionPart,
+    DiscoveryResult, DiscoveryWarning, ExportComponentRequest, IdentityPolicy,
+    ImportComponentRequest, ManifestSummary, McsInfo, MoveComponentRequest, OperationResult,
+    SourceKind, SourceRecord, VersionPart,
 };
 pub use operations::ComponentService;
 pub use template::{RenderedFile, RenderedTemplate, TemplateRequest, TemplateService};

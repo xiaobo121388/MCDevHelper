@@ -7,10 +7,13 @@ use serde_json::Value;
 use uuid::Uuid;
 use walkdir::{DirEntry, WalkDir};
 
+use crate::archive::{
+    expand_nested_mcpacks, extract_archive, is_supported_archive, temporary_zip_path, write_zip,
+};
 use crate::{
     ComponentKind, ComponentSummary, CopyComponentRequest, CoreError, CreateComponentRequest,
-    DiscoveryService, IdentityPolicy, LocalIndex, MoveComponentRequest, OperationResult, Result,
-    TemplateRequest, TemplateService,
+    DiscoveryService, ExportComponentRequest, IdentityPolicy, ImportComponentRequest, LocalIndex,
+    MoveComponentRequest, OperationResult, Result, TemplateRequest, TemplateService,
 };
 
 #[derive(Debug, Clone)]
@@ -181,17 +184,112 @@ impl ComponentService {
         })
     }
 
+    pub fn import_component(&self, request: &ImportComponentRequest) -> Result<OperationResult> {
+        let _guard = self.index.try_lock_mutations()?;
+        let source = fs::canonicalize(&request.source)
+            .map_err(|error| CoreError::io(&request.source, error))?;
+        let destination = existing_directory(&request.destination)?;
+        if source.is_dir() {
+            ensure_not_inside(&source, &destination)?;
+        } else if !source.is_file() || !is_supported_archive(&source) {
+            return Err(CoreError::InvalidInput(
+                "仅支持组件文件夹、ZIP、mcpack 或 mcaddon".into(),
+            ));
+        }
+
+        let extraction = if source.is_file() {
+            let temp = tempfile::Builder::new()
+                .prefix("mcdh-import-")
+                .tempdir()
+                .map_err(|error| CoreError::io(&source, error))?;
+            extract_archive(&source, temp.path())?;
+            expand_nested_mcpacks(temp.path())?;
+            Some(temp)
+        } else {
+            None
+        };
+        let unpacked = extraction
+            .as_ref()
+            .map_or(source.as_path(), tempfile::TempDir::path);
+        let import_root = unwrap_single_directory(unpacked)?;
+        let (kind, name) = inspect_import(&import_root, &source)?;
+        let duplicate_uuids = duplicate_manifest_uuids(&import_root, &self.current_components()?)?;
+        if !duplicate_uuids.is_empty() && request.identity_policy == IdentityPolicy::Error {
+            return Err(CoreError::Conflict(format!(
+                "导入包与现有组件重复 UUID：{}",
+                duplicate_uuids.join(", ")
+            )));
+        }
+
+        let target_uid = request
+            .mcs_compatible
+            .then(|| Uuid::new_v4().simple().to_string());
+        let target = match &target_uid {
+            Some(uid) => destination.join(uid),
+            None => unique_child(&destination, &sanitize_file_name(&name)),
+        };
+        let mut staging = StagingDirectory::new(&destination)?;
+        let report = copy_clean_content(&import_root, staging.path(), kind)?;
+        verify_copy(staging.path(), &report)?;
+        if request.identity_policy == IdentityPolicy::Regenerate {
+            regenerate_manifest_identifiers(staging.path())?;
+        }
+        if let Some(uid) = &target_uid {
+            write_mcs_configuration(staging.path(), &destination, uid, &name, kind)?;
+        }
+        let actual_path = staging.publish(&target)?;
+        self.index.component_id(&actual_path)?;
+        Ok(OperationResult {
+            component: None,
+            modified_files: collect_files(&actual_path)?,
+            actual_path,
+            warnings: Vec::new(),
+        })
+    }
+
+    pub fn export_component(&self, request: &ExportComponentRequest) -> Result<OperationResult> {
+        let _guard = self.index.try_lock_mutations()?;
+        let component = self.find_component(&request.component_id)?;
+        let destination = existing_directory(&request.destination)?;
+        let archive_path = unique_archive_path(&destination, &sanitize_file_name(&component.name));
+        let staging = tempfile::Builder::new()
+            .prefix(".mcdh-export-")
+            .tempdir_in(&destination)
+            .map_err(|error| CoreError::io(&destination, error))?;
+        let report = copy_clean_content(&component.path, staging.path(), component.kind)?;
+        verify_copy(staging.path(), &report)?;
+
+        let temporary = temporary_zip_path(&destination);
+        if let Err(error) = write_zip(staging.path(), &temporary) {
+            let _ = fs::remove_file(&temporary);
+            return Err(error);
+        }
+        if let Err(error) = fs::rename(&temporary, &archive_path) {
+            let _ = fs::remove_file(&temporary);
+            return Err(CoreError::io(&archive_path, error));
+        }
+        Ok(OperationResult {
+            component: Some(component),
+            actual_path: archive_path.clone(),
+            modified_files: vec![archive_path],
+            warnings: Vec::new(),
+        })
+    }
+
     fn find_component(&self, id: &str) -> Result<ComponentSummary> {
+        self.current_components()?
+            .into_iter()
+            .find(|component| component.id == id)
+            .ok_or_else(|| CoreError::InvalidInput(format!("找不到组件 ID：{id}")))
+    }
+
+    fn current_components(&self) -> Result<Vec<ComponentSummary>> {
         let result = if let Some(roots) = &self.mcs_work_roots {
             self.discovery.refresh_with_mcs_work_roots(roots)?
         } else {
             self.discovery.refresh()?
         };
-        result
-            .components
-            .into_iter()
-            .find(|component| component.id == id)
-            .ok_or_else(|| CoreError::InvalidInput(format!("找不到组件 ID：{id}")))
+        Ok(result.components)
     }
 }
 
@@ -228,51 +326,63 @@ fn copy_component_content(
                 exclude_dot: false,
             },
         ),
-        CopyMode::Clean if component.kind == ComponentKind::Addon => {
-            let mut report = CopyReport::default();
-            let pack_directories = direct_pack_directories(&component.path)?;
-            if pack_directories.is_empty() && component.path.join("manifest.json").is_file() {
-                return copy_tree(
-                    &component.path,
-                    destination,
-                    CopyFilter {
-                        exclude_mcs: true,
-                        exclude_dot: false,
-                    },
-                );
-            }
-            for pack in pack_directories {
-                let target = destination.join(
-                    pack.file_name()
-                        .ok_or_else(|| CoreError::InvalidComponent(component.path.clone()))?,
-                );
-                let child_report = copy_tree(
-                    &pack,
-                    &target,
-                    CopyFilter {
-                        exclude_mcs: false,
-                        exclude_dot: false,
-                    },
-                )?;
-                let prefix = PathBuf::from(pack.file_name().unwrap());
-                report.files.extend(
-                    child_report
-                        .files
-                        .into_iter()
-                        .map(|(path, size)| (prefix.join(path), size)),
-                );
-            }
-            Ok(report)
-        }
-        CopyMode::Clean => copy_tree(
-            &component.path,
+        CopyMode::Clean => copy_clean_content(&component.path, destination, component.kind),
+    }
+}
+
+fn copy_clean_content(
+    source: &Path,
+    destination: &Path,
+    kind: ComponentKind,
+) -> Result<CopyReport> {
+    if kind != ComponentKind::Addon {
+        return copy_tree(
+            source,
             destination,
             CopyFilter {
                 exclude_mcs: true,
                 exclude_dot: true,
             },
-        ),
+        );
     }
+
+    let mut report = CopyReport::default();
+    let pack_directories = direct_pack_directories(source)?;
+    if pack_directories.is_empty() && source.join("manifest.json").is_file() {
+        return copy_tree(
+            source,
+            destination,
+            CopyFilter {
+                exclude_mcs: true,
+                exclude_dot: false,
+            },
+        );
+    }
+    for pack in pack_directories {
+        let file_name = pack
+            .file_name()
+            .ok_or_else(|| CoreError::InvalidComponent(source.to_path_buf()))?;
+        let target = destination.join(file_name);
+        let child_report = copy_tree(
+            &pack,
+            &target,
+            CopyFilter {
+                exclude_mcs: false,
+                exclude_dot: false,
+            },
+        )?;
+        let prefix = PathBuf::from(file_name);
+        report.files.extend(
+            child_report
+                .files
+                .into_iter()
+                .map(|(path, size)| (prefix.join(path), size)),
+        );
+    }
+    if report.files.is_empty() {
+        return Err(CoreError::InvalidComponent(source.to_path_buf()));
+    }
+    Ok(report)
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -364,6 +474,145 @@ fn direct_pack_directories(root: &Path) -> Result<Vec<PathBuf>> {
         .collect::<Vec<_>>();
     paths.sort();
     Ok(paths)
+}
+
+fn unwrap_single_directory(root: &Path) -> Result<PathBuf> {
+    let mut current = root.to_path_buf();
+    for _ in 0..4 {
+        let mut entries = fs::read_dir(&current)
+            .map_err(|error| CoreError::io(&current, error))?
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(|error| CoreError::io(&current, error))?;
+        entries.retain(|entry| entry.file_name() != OsStr::new("__MACOSX"));
+        if entries.len() != 1 {
+            break;
+        }
+        let entry = &entries[0];
+        let file_type = entry
+            .file_type()
+            .map_err(|error| CoreError::io(entry.path(), error))?;
+        if !file_type.is_dir() || file_type.is_symlink() {
+            break;
+        }
+        current = entry.path();
+    }
+    Ok(current)
+}
+
+fn inspect_import(root: &Path, source: &Path) -> Result<(ComponentKind, String)> {
+    let fallback_name = source
+        .file_stem()
+        .or_else(|| source.file_name())
+        .map(|name| name.to_string_lossy().into_owned())
+        .filter(|name| !name.trim().is_empty())
+        .unwrap_or_else(|| "导入组件".into());
+    let work_config = root.join("work.mcscfg");
+    if work_config.is_file() {
+        let document = read_json(&work_config)?;
+        let component_type = document
+            .get("Type")
+            .and_then(Value::as_i64)
+            .ok_or_else(|| CoreError::InvalidComponent(root.to_path_buf()))?;
+        let kind = match component_type {
+            1 => ComponentKind::Map,
+            3 | 4 => ComponentKind::Material,
+            7 => ComponentKind::Addon,
+            _ => return Err(CoreError::InvalidComponent(root.to_path_buf())),
+        };
+        let name = document
+            .get("Name")
+            .and_then(Value::as_str)
+            .filter(|name| !name.trim().is_empty())
+            .unwrap_or(&fallback_name)
+            .to_owned();
+        return Ok((kind, name));
+    }
+
+    if root.join("db").is_dir()
+        || root.join("level.dat").is_file()
+        || root.join("behavior_packs").is_dir()
+        || root.join("resource_packs").is_dir()
+    {
+        return Ok((ComponentKind::Map, fallback_name));
+    }
+
+    let root_manifest = root.join("manifest.json");
+    if root_manifest.is_file() {
+        let document = read_json(&root_manifest)?;
+        let module_types = document
+            .get("modules")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(|module| module.get("type").and_then(Value::as_str))
+            .collect::<Vec<_>>();
+        let kind = if module_types
+            .iter()
+            .any(|module_type| matches!(*module_type, "data" | "script"))
+        {
+            ComponentKind::Addon
+        } else if module_types.contains(&"resources") {
+            ComponentKind::Material
+        } else {
+            return Err(CoreError::InvalidComponent(root.to_path_buf()));
+        };
+        let name = document
+            .get("header")
+            .and_then(|header| header.get("name"))
+            .and_then(Value::as_str)
+            .filter(|name| !name.trim().is_empty())
+            .unwrap_or(&fallback_name)
+            .to_owned();
+        return Ok((kind, name));
+    }
+
+    if !direct_pack_directories(root)?.is_empty() {
+        return Ok((ComponentKind::Addon, fallback_name));
+    }
+    Err(CoreError::InvalidComponent(root.to_path_buf()))
+}
+
+fn duplicate_manifest_uuids(
+    imported_root: &Path,
+    existing_components: &[ComponentSummary],
+) -> Result<Vec<String>> {
+    let existing = existing_components
+        .iter()
+        .flat_map(|component| &component.manifests)
+        .filter_map(|manifest| manifest.header_uuid.as_deref())
+        .map(str::to_ascii_lowercase)
+        .collect::<std::collections::HashSet<_>>();
+    let mut duplicates = Vec::new();
+    for path in manifest_files(imported_root)? {
+        let document = read_json(&path)?;
+        let Some(uuid) = document
+            .get("header")
+            .and_then(|header| header.get("uuid"))
+            .and_then(Value::as_str)
+        else {
+            continue;
+        };
+        if existing.contains(&uuid.to_ascii_lowercase()) {
+            duplicates.push(uuid.to_owned());
+        }
+    }
+    duplicates.sort();
+    duplicates.dedup_by(|left, right| left.eq_ignore_ascii_case(right));
+    Ok(duplicates)
+}
+
+fn unique_archive_path(parent: &Path, base_name: &str) -> PathBuf {
+    let first = parent.join(format!("{base_name}.zip"));
+    if !first.exists() {
+        return first;
+    }
+    for suffix in 2.. {
+        let candidate = parent.join(format!("{base_name} ({suffix}).zip"));
+        if !candidate.exists() {
+            return candidate;
+        }
+    }
+    unreachable!()
 }
 
 fn write_mcs_configuration(
@@ -668,6 +917,9 @@ impl Drop for StagingDirectory {
 mod tests {
     use super::*;
     use crate::SourceKind;
+    use std::io::{Cursor, Read, Write};
+    use zip::write::SimpleFileOptions;
+    use zip::{ZipArchive, ZipWriter};
 
     fn write_json(path: &Path, value: Value) {
         fs::create_dir_all(path.parent().unwrap()).unwrap();
@@ -680,6 +932,21 @@ mod tests {
             "header": {"name": name, "uuid": header_uuid, "version": [0, 0, 1]},
             "modules": [{"type": module_type, "uuid": Uuid::new_v4(), "version": [0, 0, 1]}]
         })
+    }
+
+    fn archive_bytes(entries: &[(&str, Vec<u8>)]) -> Vec<u8> {
+        let mut writer = ZipWriter::new(Cursor::new(Vec::new()));
+        for (name, content) in entries {
+            writer
+                .start_file(*name, SimpleFileOptions::default())
+                .unwrap();
+            writer.write_all(content).unwrap();
+        }
+        writer.finish().unwrap().into_inner()
+    }
+
+    fn write_archive(path: &Path, entries: &[(&str, Vec<u8>)]) {
+        fs::write(path, archive_bytes(entries)).unwrap();
     }
 
     #[test]
@@ -818,5 +1085,128 @@ mod tests {
         assert!(!copied.actual_path.join("studio.json").exists());
         assert!(!copied.actual_path.join("notes.txt").exists());
         assert!(!copied.actual_path.join(".mcs").exists());
+    }
+
+    #[test]
+    fn imports_nested_mcaddon_and_exports_a_clean_numbered_zip() {
+        let temp = tempfile::tempdir().unwrap();
+        let index = LocalIndex::open(temp.path().join("state/mcdh.db")).unwrap();
+        let library = temp.path().join("组件库");
+        let exports = temp.path().join("导出");
+        fs::create_dir_all(&library).unwrap();
+        fs::create_dir_all(&exports).unwrap();
+        index.add_source(SourceKind::Library, &library).unwrap();
+
+        let behavior_manifest =
+            serde_json::to_vec(&manifest("Behavior", "data", Uuid::new_v4())).unwrap();
+        let resource_manifest =
+            serde_json::to_vec(&manifest("Resources", "resources", Uuid::new_v4())).unwrap();
+        let behavior = archive_bytes(&[("manifest.json", behavior_manifest)]);
+        let resources = archive_bytes(&[("manifest.json", resource_manifest)]);
+        let package = temp.path().join("组合包.mcaddon");
+        write_archive(
+            &package,
+            &[
+                ("behavior.mcpack", behavior),
+                ("resources.mcpack", resources),
+                ("studio.json", b"private metadata".to_vec()),
+            ],
+        );
+
+        let service = ComponentService::new(index.clone()).with_mcs_work_roots(Vec::new());
+        let imported = service
+            .import_component(&ImportComponentRequest {
+                source: package,
+                destination: library.clone(),
+                mcs_compatible: false,
+                identity_policy: IdentityPolicy::Preserve,
+            })
+            .unwrap();
+        assert!(
+            imported
+                .actual_path
+                .join("behavior/manifest.json")
+                .is_file()
+        );
+        assert!(
+            imported
+                .actual_path
+                .join("resources/manifest.json")
+                .is_file()
+        );
+        assert!(!imported.actual_path.join("studio.json").exists());
+
+        let component = DiscoveryService::new(index)
+            .refresh_with_mcs_work_roots(&[])
+            .unwrap()
+            .components
+            .remove(0);
+        fs::write(exports.join("Behavior.zip"), b"existing").unwrap();
+        let exported = service
+            .export_component(&ExportComponentRequest {
+                component_id: component.id,
+                destination: exports,
+            })
+            .unwrap();
+        assert!(exported.actual_path.ends_with("Behavior (2).zip"));
+
+        let file = fs::File::open(exported.actual_path).unwrap();
+        let mut archive = ZipArchive::new(file).unwrap();
+        let mut names = Vec::new();
+        for index in 0..archive.len() {
+            let mut entry = archive.by_index(index).unwrap();
+            let mut content = Vec::new();
+            entry.read_to_end(&mut content).unwrap();
+            names.push(entry.name().to_owned());
+        }
+        assert!(names.contains(&"behavior/manifest.json".into()));
+        assert!(names.contains(&"resources/manifest.json".into()));
+        assert!(!names.iter().any(|name| name.ends_with("studio.json")));
+    }
+
+    #[test]
+    fn applies_duplicate_uuid_policy_during_import() {
+        let temp = tempfile::tempdir().unwrap();
+        let index = LocalIndex::open(temp.path().join("state/mcdh.db")).unwrap();
+        let library = temp.path().join("library");
+        let imports = temp.path().join("imports");
+        fs::create_dir_all(&library).unwrap();
+        fs::create_dir_all(&imports).unwrap();
+        let duplicate_uuid = Uuid::new_v4();
+        write_json(
+            &library.join("existing/manifest.json"),
+            manifest("Existing", "resources", duplicate_uuid),
+        );
+        index.add_source(SourceKind::Library, &library).unwrap();
+        let package = temp.path().join("duplicate.mcpack");
+        write_archive(
+            &package,
+            &[(
+                "manifest.json",
+                serde_json::to_vec(&manifest("Duplicate", "resources", duplicate_uuid)).unwrap(),
+            )],
+        );
+        let service = ComponentService::new(index).with_mcs_work_roots(Vec::new());
+
+        let error = service
+            .import_component(&ImportComponentRequest {
+                source: package.clone(),
+                destination: imports.clone(),
+                mcs_compatible: false,
+                identity_policy: IdentityPolicy::Error,
+            })
+            .unwrap_err();
+        assert_eq!(error.code(), "conflict");
+
+        let imported = service
+            .import_component(&ImportComponentRequest {
+                source: package,
+                destination: imports,
+                mcs_compatible: false,
+                identity_policy: IdentityPolicy::Regenerate,
+            })
+            .unwrap();
+        let document = read_json(&imported.actual_path.join("manifest.json")).unwrap();
+        assert_ne!(document["header"]["uuid"], duplicate_uuid.to_string());
     }
 }

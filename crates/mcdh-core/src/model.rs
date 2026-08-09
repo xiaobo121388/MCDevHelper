@@ -114,6 +114,20 @@ pub struct MoveComponentRequest {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ImportComponentRequest {
+    pub source: PathBuf,
+    pub destination: PathBuf,
+    pub mcs_compatible: bool,
+    pub identity_policy: IdentityPolicy,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ExportComponentRequest {
+    pub component_id: String,
+    pub destination: PathBuf,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DiscoveryWarning {
     pub path: PathBuf,
     pub message: String,
