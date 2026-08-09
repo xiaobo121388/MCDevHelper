@@ -89,3 +89,16 @@ pub struct OperationResult {
     pub modified_files: Vec<PathBuf>,
     pub warnings: Vec<String>,
 }
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DiscoveryWarning {
+    pub path: PathBuf,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DiscoveryResult {
+    pub components: Vec<ComponentSummary>,
+    pub sources: Vec<SourceRecord>,
+    pub warnings: Vec<DiscoveryWarning>,
+}
