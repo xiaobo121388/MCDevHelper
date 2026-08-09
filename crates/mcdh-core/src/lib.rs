@@ -15,7 +15,7 @@ pub use model::{
     CopyComponentRequest, CreateComponentRequest, DiscoveryResult, DiscoveryWarning,
     ExportComponentRequest, IdentityPolicy, ImportComponentRequest, ManifestSummary, McsInfo,
     MoveComponentRequest, OperationResult, SetComponentTagsRequest, SourceKind, SourceRecord,
-    VersionPart,
+    VersionPart, VsCodeStatus,
 };
 pub use operations::ComponentService;
 pub use template::{RenderedFile, RenderedTemplate, TemplateRequest, TemplateService};

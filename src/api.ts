@@ -54,6 +54,7 @@ export const api = {
   vscodeStatus: () =>
     invoke<{ available: boolean; path?: string; custom: boolean }>("vscode_status"),
   setVsCodePath: (path?: string) => invoke<void>("set_vscode_path", { path: path ?? null }),
+  mcpClientConfig: () => invoke<string>("mcp_client_config"),
   component: (componentId: string) =>
     invoke<ComponentSummary>("get_component", { componentId }),
 };

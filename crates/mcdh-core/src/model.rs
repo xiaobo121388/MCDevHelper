@@ -140,6 +140,13 @@ pub struct BumpManifestVersionRequest {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct VsCodeStatus {
+    pub available: bool,
+    pub path: Option<PathBuf>,
+    pub custom: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DiscoveryWarning {
     pub path: PathBuf,
     pub message: String,

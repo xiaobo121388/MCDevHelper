@@ -3,6 +3,7 @@ use std::ffi::OsStr;
 use std::fs;
 use std::io::Write;
 use std::path::{Component, Path, PathBuf};
+use std::process::Command;
 
 use serde_json::Value;
 use uuid::Uuid;
@@ -15,7 +16,7 @@ use crate::{
     BumpManifestVersionRequest, ComponentKind, ComponentSummary, CopyComponentRequest, CoreError,
     CreateComponentRequest, DiscoveryService, ExportComponentRequest, IdentityPolicy,
     ImportComponentRequest, LocalIndex, MoveComponentRequest, OperationResult, Result,
-    SetComponentTagsRequest, TemplateRequest, TemplateService, VersionPart,
+    SetComponentTagsRequest, TemplateRequest, TemplateService, VersionPart, VsCodeStatus,
 };
 
 #[derive(Debug, Clone)]
@@ -334,6 +335,70 @@ impl ComponentService {
         })
     }
 
+    pub fn get_component(&self, component_id: &str) -> Result<ComponentSummary> {
+        self.find_component(component_id)
+    }
+
+    pub fn open_component_directory(&self, component_id: &str) -> Result<()> {
+        let component = self.find_component(component_id)?;
+        Command::new("explorer.exe")
+            .arg(&component.path)
+            .spawn()
+            .map_err(|error| CoreError::io(&component.path, error))?;
+        Ok(())
+    }
+
+    pub fn vscode_status(&self) -> Result<VsCodeStatus> {
+        let custom = self
+            .index
+            .setting("vscode_path")?
+            .filter(|path| !path.is_empty())
+            .map(PathBuf::from);
+        let detected = custom
+            .as_ref()
+            .filter(|path| path.is_file())
+            .cloned()
+            .or_else(detect_vscode);
+        Ok(VsCodeStatus {
+            available: detected.is_some(),
+            path: detected,
+            custom: custom.is_some(),
+        })
+    }
+
+    pub fn set_vscode_path(&self, path: Option<&Path>) -> Result<()> {
+        let value = match path {
+            Some(path) => {
+                if !path.is_file() {
+                    return Err(CoreError::NotFound(path.to_path_buf()));
+                }
+                path.to_string_lossy().into_owned()
+            }
+            None => String::new(),
+        };
+        self.index.set_setting("vscode_path", &value)
+    }
+
+    pub fn open_component_in_vscode(&self, component_id: &str) -> Result<()> {
+        let component = self.find_component(component_id)?;
+        let configured = self
+            .index
+            .setting("vscode_path")?
+            .filter(|path| !path.is_empty())
+            .map(PathBuf::from);
+        let executable = configured
+            .filter(|path| path.is_file())
+            .or_else(detect_vscode)
+            .ok_or_else(|| CoreError::NotFound(PathBuf::from("Visual Studio Code")))?;
+        let target = preferred_workspace(&component.path)
+            .map_err(|error| CoreError::io(&component.path, error))?;
+        Command::new(&executable)
+            .arg(&target)
+            .spawn()
+            .map_err(|error| CoreError::io(&executable, error))?;
+        Ok(())
+    }
+
     fn find_component(&self, id: &str) -> Result<ComponentSummary> {
         self.current_components()?
             .into_iter()
@@ -349,6 +414,38 @@ impl ComponentService {
         };
         Ok(result.components)
     }
+}
+
+fn preferred_workspace(root: &Path) -> std::io::Result<PathBuf> {
+    let workspaces = fs::read_dir(root)?
+        .filter_map(std::result::Result::ok)
+        .map(|entry| entry.path())
+        .filter(|path| {
+            path.is_file()
+                && path
+                    .extension()
+                    .and_then(|extension| extension.to_str())
+                    .is_some_and(|extension| extension.eq_ignore_ascii_case("code-workspace"))
+        })
+        .collect::<Vec<_>>();
+    Ok(if workspaces.len() == 1 {
+        workspaces[0].clone()
+    } else {
+        root.to_path_buf()
+    })
+}
+
+fn detect_vscode() -> Option<PathBuf> {
+    let mut candidates = Vec::new();
+    if let Some(local) = std::env::var_os("LOCALAPPDATA") {
+        candidates.push(PathBuf::from(local).join("Programs/Microsoft VS Code/Code.exe"));
+    }
+    for variable in ["ProgramFiles", "ProgramFiles(x86)"] {
+        if let Some(program_files) = std::env::var_os(variable) {
+            candidates.push(PathBuf::from(program_files).join("Microsoft VS Code/Code.exe"));
+        }
+    }
+    candidates.into_iter().find(|path| path.is_file())
 }
 
 #[derive(Debug, Clone, Copy)]
