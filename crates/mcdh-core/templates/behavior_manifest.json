@@ -1,0 +1,17 @@
+{
+  "format_version": 2,
+  "header": {
+    "description": "",
+    "min_engine_version": [1, 18, 0],
+    "name": "{{behavior_name}}",
+    "uuid": "{{behavior_header_uuid}}",
+    "version": [0, 0, 1]
+  },
+  "modules": [
+    {
+      "type": "data",
+      "uuid": "{{behavior_module_uuid}}",
+      "version": [0, 0, 1]
+    }
+  ]
+}

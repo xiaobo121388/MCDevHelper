@@ -1,0 +1,17 @@
+{
+  "format_version": 2,
+  "header": {
+    "description": "",
+    "min_engine_version": [1, 18, 0],
+    "name": "{{resource_name}}",
+    "uuid": "{{resource_header_uuid}}",
+    "version": [0, 0, 1]
+  },
+  "modules": [
+    {
+      "type": "resources",
+      "uuid": "{{resource_module_uuid}}",
+      "version": [0, 0, 1]
+    }
+  ]
+}
