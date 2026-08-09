@@ -193,4 +193,16 @@ mod tests {
         assert_eq!(error.code(), "archive_error");
         assert!(!temp.path().join("escaped.txt").exists());
     }
+
+    #[test]
+    fn rejects_a_corrupted_archive_without_leaving_output_files() {
+        let temp = tempfile::tempdir().unwrap();
+        let archive_path = temp.path().join("broken.mcpack");
+        fs::write(&archive_path, b"this is not a zip archive").unwrap();
+        let destination = temp.path().join("extract");
+
+        let error = extract_archive(&archive_path, &destination).unwrap_err();
+        assert_eq!(error.code(), "archive_error");
+        assert!(!destination.exists());
+    }
 }

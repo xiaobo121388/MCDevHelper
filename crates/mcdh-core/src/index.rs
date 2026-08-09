@@ -39,6 +39,9 @@ pub struct LocalIndex {
 
 impl LocalIndex {
     pub fn open_default() -> Result<Self> {
+        if let Some(directory) = std::env::var_os("MCDH_DATA_DIR") {
+            return Self::open(PathBuf::from(directory).join("mcdh.db"));
+        }
         let base = BaseDirs::new()
             .ok_or_else(|| CoreError::InvalidInput("无法定位本机应用数据目录".into()))?;
         Self::open(base.data_local_dir().join("MCDH").join("mcdh.db"))

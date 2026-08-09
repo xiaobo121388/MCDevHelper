@@ -477,6 +477,9 @@ fn warning_from_error(error: CoreError) -> DiscoveryWarning {
 fn automatic_mcs_work_roots() -> Vec<PathBuf> {
     use windows_sys::Win32::Storage::FileSystem::GetLogicalDrives;
 
+    if std::env::var_os("MCDH_DISABLE_MCS_SCAN").is_some() {
+        return Vec::new();
+    }
     let mask = unsafe { GetLogicalDrives() };
     (0..26)
         .filter(|index| mask & (1 << index) != 0)
@@ -595,5 +598,68 @@ mod tests {
         assert_eq!(result.components.len(), 1);
         assert_eq!(result.components[0].kind, ComponentKind::Map);
         assert_eq!(result.components[0].name, "空白地图");
+    }
+
+    #[test]
+    fn recognizes_all_supported_mcs_and_generic_kinds_and_reports_bad_json() {
+        let temp = tempfile::tempdir().unwrap();
+        let index = LocalIndex::open(temp.path().join("mcdh.db")).unwrap();
+        let work = temp.path().join("work");
+        for (category, uid, component_type) in [
+            ("Map", "map-id", 1),
+            ("Material", "material-id", 3),
+            ("Light", "light-id", 4),
+            ("AddOn", "addon-id", 7),
+        ] {
+            write_json(
+                &work.join(format!("account/Cpp/{category}/{uid}/work.mcscfg")),
+                serde_json::json!({"UID": uid, "Type": component_type, "Name": category}),
+            );
+        }
+
+        let library = temp.path().join("中文组件库");
+        write_json(
+            &library.join("普通模组/behavior/manifest.json"),
+            manifest("普通模组", "data"),
+        );
+        write_json(
+            &library.join("普通材质/manifest.json"),
+            manifest("普通材质", "resources"),
+        );
+        fs::create_dir_all(library.join("普通地图/db")).unwrap();
+        fs::create_dir_all(library.join("损坏组件")).unwrap();
+        fs::write(library.join("损坏组件/manifest.json"), b"{broken json").unwrap();
+        index.add_source(SourceKind::Library, &library).unwrap();
+
+        let result = DiscoveryService::new(index)
+            .refresh_with_mcs_work_roots(&[work])
+            .unwrap();
+        assert_eq!(result.components.len(), 7);
+        assert_eq!(
+            result
+                .components
+                .iter()
+                .filter(|component| component.kind == ComponentKind::Addon)
+                .count(),
+            2
+        );
+        assert_eq!(
+            result
+                .components
+                .iter()
+                .filter(|component| component.kind == ComponentKind::Material)
+                .count(),
+            3
+        );
+        assert_eq!(
+            result
+                .components
+                .iter()
+                .filter(|component| component.kind == ComponentKind::Map)
+                .count(),
+            2
+        );
+        assert_eq!(result.warnings.len(), 1);
+        assert!(result.warnings[0].message.contains("JSON"));
     }
 }

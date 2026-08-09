@@ -19,6 +19,11 @@ use crate::{
     SetComponentTagsRequest, TemplateRequest, TemplateService, VersionPart, VsCodeStatus,
 };
 
+#[cfg(test)]
+thread_local! {
+    static FAIL_NEXT_MOVE_AFTER_COPY: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
 #[derive(Debug, Clone)]
 pub struct ComponentService {
     index: LocalIndex,
@@ -171,6 +176,9 @@ impl ComponentService {
                     &component.name,
                     component.kind,
                 )?;
+            }
+            if fail_move_after_copy() {
+                return Err(CoreError::InvalidInput("测试注入的移动发布失败".into()));
             }
             let published = staging.publish(&target)?;
             fs::remove_dir_all(&component.path)
@@ -414,6 +422,15 @@ impl ComponentService {
         };
         Ok(result.components)
     }
+}
+
+fn fail_move_after_copy() -> bool {
+    #[cfg(test)]
+    {
+        FAIL_NEXT_MOVE_AFTER_COPY.with(|flag| flag.replace(false))
+    }
+    #[cfg(not(test))]
+    false
 }
 
 fn preferred_workspace(root: &Path) -> std::io::Result<PathBuf> {
@@ -1694,5 +1711,109 @@ mod tests {
             read_json(&addon.join("work.mcscfg")).unwrap()["CustomTags"],
             serde_json::json!(["开发", "测试"])
         );
+    }
+
+    #[test]
+    fn exports_maps_and_materials_with_clean_content_rules() {
+        let temp = tempfile::tempdir().unwrap();
+        let index = LocalIndex::open(temp.path().join("state/mcdh.db")).unwrap();
+        let library = temp.path().join("library");
+        let output = temp.path().join("exports");
+        fs::create_dir_all(&output).unwrap();
+
+        let map = library.join("地图白名单");
+        fs::create_dir_all(map.join("db")).unwrap();
+        fs::write(map.join("db/chunk.bin"), b"world").unwrap();
+        fs::write(map.join("level.dat"), b"level").unwrap();
+        fs::write(map.join(".secret"), b"hidden").unwrap();
+        write_json(
+            &map.join("studio.json"),
+            serde_json::json!({"private": true}),
+        );
+        write_json(&map.join("work.mcscfg"), serde_json::json!({"Type": 1}));
+
+        let material = library.join("材质白名单");
+        write_json(
+            &material.join("manifest.json"),
+            manifest("Material", "resources", Uuid::new_v4()),
+        );
+        fs::create_dir_all(material.join("textures")).unwrap();
+        fs::write(material.join("textures/terrain.png"), b"png").unwrap();
+        fs::create_dir_all(material.join(".cache")).unwrap();
+        fs::write(material.join(".cache/private.bin"), b"hidden").unwrap();
+        write_json(
+            &material.join("work.mcscfg"),
+            serde_json::json!({"Type": 3}),
+        );
+        index.add_source(SourceKind::Library, &library).unwrap();
+        let components = DiscoveryService::new(index.clone())
+            .refresh_with_mcs_work_roots(&[])
+            .unwrap()
+            .components;
+        let service = ComponentService::new(index).with_mcs_work_roots(Vec::new());
+
+        for component in components {
+            let result = service
+                .export_component(&ExportComponentRequest {
+                    component_id: component.id,
+                    destination: output.clone(),
+                })
+                .unwrap();
+            let file = fs::File::open(result.actual_path).unwrap();
+            let mut archive = ZipArchive::new(file).unwrap();
+            let names = (0..archive.len())
+                .map(|index| archive.by_index(index).unwrap().name().to_owned())
+                .collect::<Vec<_>>();
+            assert!(!names.iter().any(|name| {
+                name.split('/').any(|part| part.starts_with('.'))
+                    || name.ends_with("studio.json")
+                    || name.ends_with("work.mcscfg")
+            }));
+            match component.kind {
+                ComponentKind::Map => {
+                    assert!(names.contains(&"db/chunk.bin".into()));
+                    assert!(names.contains(&"level.dat".into()));
+                }
+                ComponentKind::Material => {
+                    assert!(names.contains(&"manifest.json".into()));
+                    assert!(names.contains(&"textures/terrain.png".into()));
+                }
+                ComponentKind::Addon => unreachable!(),
+            }
+        }
+    }
+
+    #[test]
+    fn rolls_back_relocation_staging_when_publish_fails_after_copy() {
+        let temp = tempfile::tempdir().unwrap();
+        let index = LocalIndex::open(temp.path().join("state/mcdh.db")).unwrap();
+        let library = temp.path().join("library");
+        let destination = temp.path().join("mcs-target");
+        fs::create_dir_all(&library).unwrap();
+        fs::create_dir_all(&destination).unwrap();
+        let source = library.join("rollback-addon");
+        write_json(
+            &source.join("behavior/manifest.json"),
+            manifest("Rollback", "data", Uuid::new_v4()),
+        );
+        index.add_source(SourceKind::Library, &library).unwrap();
+        let component = DiscoveryService::new(index.clone())
+            .refresh_with_mcs_work_roots(&[])
+            .unwrap()
+            .components
+            .remove(0);
+        let service = ComponentService::new(index).with_mcs_work_roots(Vec::new());
+        FAIL_NEXT_MOVE_AFTER_COPY.with(|flag| flag.set(true));
+
+        let error = service
+            .move_component(&MoveComponentRequest {
+                component_id: component.id,
+                destination: destination.clone(),
+                mcs_compatible: true,
+            })
+            .unwrap_err();
+        assert_eq!(error.code(), "invalid_input");
+        assert!(source.join("behavior/manifest.json").is_file());
+        assert_eq!(fs::read_dir(destination).unwrap().count(), 0);
     }
 }
