@@ -1,0 +1,11 @@
+[package]
+name = "mcdh-mcp"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+mcdh-core = { path = "../mcdh-core" }
+tokio.workspace = true
+

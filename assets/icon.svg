@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="MCDH">
+  <rect width="512" height="512" rx="112" fill="#171b24"/>
+  <path d="M256 88 408 176v160L256 424 104 336V176z" fill="#f4f6f8"/>
+  <path d="m256 112 128 74-128 74-128-74z" fill="#d8dde5"/>
+  <path d="M128 208 244 275v122L128 330z" fill="#aeb7c4"/>
+  <path d="m268 275 116-67v122l-116 67z" fill="#7f8b9b"/>
+  <path d="M185 205h142v42H185z" fill="#171b24" opacity=".9"/>
+</svg>
