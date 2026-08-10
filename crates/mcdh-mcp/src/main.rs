@@ -89,6 +89,7 @@ impl McdhServer {
             kind: params.kind.into(),
             destination: params.destination,
             mcs_compatible: params.mcs_compatible,
+            namespace: params.namespace,
         }))
     }
 
@@ -236,6 +237,8 @@ struct CreateParams {
     destination: PathBuf,
     #[serde(default)]
     mcs_compatible: bool,
+    #[serde(default)]
+    namespace: Option<String>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]

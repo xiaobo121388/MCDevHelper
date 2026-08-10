@@ -9,12 +9,12 @@ use rusqlite::{Connection, OptionalExtension, params};
 use uuid::Uuid;
 
 use crate::path_utils::canonicalize;
-use crate::{CoreError, Result, SourceKind, SourceRecord};
+use crate::{AppSettings, CoreError, Result, SourceKind, SourceRecord};
 
 const SCHEMA: &str = r#"
 CREATE TABLE IF NOT EXISTS sources (
     id TEXT PRIMARY KEY NOT NULL,
-    kind TEXT NOT NULL CHECK(kind IN ('single', 'library')),
+    kind TEXT NOT NULL CHECK(kind IN ('mcs_auto', 'single', 'library')),
     path TEXT NOT NULL UNIQUE
 );
 
@@ -57,6 +57,7 @@ impl LocalIndex {
         let lock_path = parent.join("mutation.lock");
         let index = Self { db_path, lock_path };
         index.connection()?.execute_batch(SCHEMA)?;
+        index.migrate_sources_schema()?;
         Ok(index)
     }
 
@@ -107,11 +108,6 @@ impl LocalIndex {
     }
 
     pub fn add_source(&self, kind: SourceKind, path: impl AsRef<Path>) -> Result<SourceRecord> {
-        if matches!(kind, SourceKind::McsAuto) {
-            return Err(CoreError::InvalidInput(
-                "MCS 自动来源不能写入本地来源表".into(),
-            ));
-        }
         let path = normalize_existing_path(path.as_ref())?;
         let path_text = path.to_string_lossy().into_owned();
         let kind_text = source_kind_text(kind);
@@ -142,6 +138,14 @@ impl LocalIndex {
             .query_map([], source_from_row)?
             .collect::<rusqlite::Result<Vec<_>>>()?;
         Ok(sources)
+    }
+
+    pub fn list_sources_by_kind(&self, kind: SourceKind) -> Result<Vec<SourceRecord>> {
+        Ok(self
+            .list_sources()?
+            .into_iter()
+            .filter(|source| source.kind == kind)
+            .collect())
     }
 
     pub fn remove_source(&self, id: &str) -> Result<bool> {
@@ -232,6 +236,71 @@ impl LocalIndex {
              ON CONFLICT(key) DO UPDATE SET value = excluded.value",
             params![key, value],
         )?;
+        Ok(())
+    }
+
+    pub fn app_settings(&self) -> Result<AppSettings> {
+        let Some(value) = self.setting("app_settings")? else {
+            return Ok(AppSettings::default());
+        };
+        serde_json::from_str(&value).map_err(|error| CoreError::json("app_settings", error))
+    }
+
+    pub fn set_app_settings(&self, settings: &AppSettings) -> Result<AppSettings> {
+        let mut normalized = settings.clone();
+        normalized.developer_nickname = normalized.developer_nickname.trim().to_owned();
+        normalized.developer_account = normalized.developer_account.trim().to_owned();
+        normalized.developer_user_id = normalized.developer_user_id.trim().to_owned();
+        if normalized.developer_nickname.is_empty() {
+            normalized.developer_nickname = "MCDH".into();
+        }
+        if normalized.developer_account.is_empty() {
+            normalized.developer_account = "mcdh@local.invalid".into();
+        }
+        if normalized.developer_user_id.is_empty() {
+            normalized.developer_user_id = "0".into();
+        }
+        if let Some(destination) = &normalized.default_destination {
+            let destination = normalize_existing_path(destination)?;
+            if !destination.is_dir() {
+                return Err(CoreError::InvalidInput("默认生成位置必须是一个目录".into()));
+            }
+            normalized.default_destination = Some(destination);
+        }
+        let value = serde_json::to_string(&normalized)
+            .map_err(|error| CoreError::json("app_settings", error))?;
+        self.set_setting("app_settings", &value)?;
+        Ok(normalized)
+    }
+
+    fn migrate_sources_schema(&self) -> Result<()> {
+        let mut connection = self.connection()?;
+        let schema: Option<String> = connection
+            .query_row(
+                "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'sources'",
+                [],
+                |row| row.get(0),
+            )
+            .optional()?;
+        if schema
+            .as_deref()
+            .is_some_and(|sql| sql.contains("mcs_auto"))
+        {
+            return Ok(());
+        }
+        let transaction = connection.transaction()?;
+        transaction.execute_batch(
+            "ALTER TABLE sources RENAME TO sources_legacy;
+             CREATE TABLE sources (
+                 id TEXT PRIMARY KEY NOT NULL,
+                 kind TEXT NOT NULL CHECK(kind IN ('mcs_auto', 'single', 'library')),
+                 path TEXT NOT NULL UNIQUE
+             );
+             INSERT INTO sources (id, kind, path)
+                 SELECT id, kind, path FROM sources_legacy;
+             DROP TABLE sources_legacy;",
+        )?;
+        transaction.commit()?;
         Ok(())
     }
 }
@@ -343,5 +412,66 @@ mod tests {
         assert!(matches!(second.try_lock_mutations(), Err(CoreError::Busy)));
         drop(guard);
         second.try_lock_mutations().unwrap();
+    }
+
+    #[test]
+    fn stores_mcs_sources_and_application_settings() {
+        let temp = tempfile::tempdir().unwrap();
+        let mcs_category = temp.path().join("work/account/Cpp/AddOn");
+        let default_destination = temp.path().join("library");
+        fs::create_dir_all(&mcs_category).unwrap();
+        fs::create_dir_all(&default_destination).unwrap();
+        let index = LocalIndex::open(temp.path().join("state/mcdh.db")).unwrap();
+
+        let source = index
+            .add_source(SourceKind::McsAuto, &mcs_category)
+            .unwrap();
+        assert_eq!(source.kind, SourceKind::McsAuto);
+        assert_eq!(
+            index.list_sources_by_kind(SourceKind::McsAuto).unwrap(),
+            vec![source]
+        );
+
+        let saved = index
+            .set_app_settings(&AppSettings {
+                developer_nickname: " 开发者 ".into(),
+                developer_account: " dev@example.invalid ".into(),
+                developer_user_id: " 42 ".into(),
+                default_destination: Some(default_destination.clone()),
+                theme: crate::ThemePreference::Dark,
+            })
+            .unwrap();
+        assert_eq!(saved.developer_nickname, "开发者");
+        assert_eq!(
+            saved.default_destination.as_deref(),
+            Some(default_destination.as_path())
+        );
+        assert_eq!(index.app_settings().unwrap(), saved);
+    }
+
+    #[test]
+    fn migrates_the_original_source_constraint() {
+        let temp = tempfile::tempdir().unwrap();
+        let database = temp.path().join("state/mcdh.db");
+        fs::create_dir_all(database.parent().unwrap()).unwrap();
+        let connection = Connection::open(&database).unwrap();
+        connection
+            .execute_batch(
+                "CREATE TABLE sources (
+                    id TEXT PRIMARY KEY NOT NULL,
+                    kind TEXT NOT NULL CHECK(kind IN ('single', 'library')),
+                    path TEXT NOT NULL UNIQUE
+                );",
+            )
+            .unwrap();
+        drop(connection);
+
+        let mcs = temp.path().join("work/account/Cpp/AddOn");
+        fs::create_dir_all(&mcs).unwrap();
+        let index = LocalIndex::open(database).unwrap();
+        assert_eq!(
+            index.add_source(SourceKind::McsAuto, mcs).unwrap().kind,
+            SourceKind::McsAuto
+        );
     }
 }

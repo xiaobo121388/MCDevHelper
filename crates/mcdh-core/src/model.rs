@@ -35,6 +35,57 @@ pub enum VersionPart {
     Patch,
 }
 
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ThemePreference {
+    Light,
+    Dark,
+    #[default]
+    System,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct AppSettings {
+    pub developer_nickname: String,
+    pub developer_account: String,
+    pub developer_user_id: String,
+    pub default_destination: Option<PathBuf>,
+    pub theme: ThemePreference,
+}
+
+impl Default for AppSettings {
+    fn default() -> Self {
+        Self {
+            developer_nickname: "MCDH".into(),
+            developer_account: "mcdh@local.invalid".into(),
+            developer_user_id: "0".into(),
+            default_destination: None,
+            theme: ThemePreference::System,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct McsTemplateIdentity {
+    pub developer_nickname: String,
+    pub developer_account: String,
+    pub developer_user_id: String,
+    pub namespace: String,
+}
+
+impl Default for McsTemplateIdentity {
+    fn default() -> Self {
+        let settings = AppSettings::default();
+        Self {
+            developer_nickname: settings.developer_nickname,
+            developer_account: settings.developer_account,
+            developer_user_id: settings.developer_user_id,
+            namespace: "mcdh".into(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SourceRecord {
     pub id: String,
@@ -79,7 +130,10 @@ pub struct ComponentSummary {
     pub version: Option<[u64; 3]>,
     pub tags: Vec<String>,
     pub icon_path: Option<PathBuf>,
+    pub updated_at: Option<DateTime<Utc>>,
     pub modified_at: Option<DateTime<Utc>>,
+    pub created_at: Option<DateTime<Utc>>,
+    pub size_bytes: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -96,6 +150,8 @@ pub struct CreateComponentRequest {
     pub kind: ComponentKind,
     pub destination: PathBuf,
     pub mcs_compatible: bool,
+    #[serde(default)]
+    pub namespace: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

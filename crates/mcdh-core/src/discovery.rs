@@ -2,9 +2,10 @@ use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Local, NaiveDateTime, TimeZone, Utc};
 use serde_json::Value;
 use uuid::Uuid;
+use walkdir::WalkDir;
 
 use crate::path_utils::canonicalize;
 use crate::{
@@ -30,22 +31,66 @@ impl DiscoveryService {
     }
 
     pub fn refresh(&self) -> Result<DiscoveryResult> {
-        self.refresh_with_mcs_work_roots(&automatic_mcs_work_roots())
+        self.ensure_initial_mcs_sources()?;
+        self.refresh_internal(None)
     }
 
     pub fn refresh_with_mcs_work_roots(&self, work_roots: &[PathBuf]) -> Result<DiscoveryResult> {
+        self.refresh_internal(Some(work_roots))
+    }
+
+    pub fn rescan_mcs_sources(&self) -> Result<Vec<SourceRecord>> {
+        if std::env::var_os("MCDH_DISABLE_MCS_SCAN").is_none() {
+            for path in discover_mcs_category_paths(&automatic_mcs_work_roots()) {
+                self.index.add_source(SourceKind::McsAuto, path)?;
+            }
+        }
+        self.index.set_setting("mcs_initial_scan_done", "true")?;
+        self.index.list_sources_by_kind(SourceKind::McsAuto)
+    }
+
+    pub fn add_mcs_source_path(&self, path: &Path) -> Result<Vec<SourceRecord>> {
+        let categories = expand_mcs_source_path(path)?;
+        for category in categories {
+            self.index.add_source(SourceKind::McsAuto, category)?;
+        }
+        self.index.set_setting("mcs_initial_scan_done", "true")?;
+        self.index.list_sources_by_kind(SourceKind::McsAuto)
+    }
+
+    fn ensure_initial_mcs_sources(&self) -> Result<()> {
+        if std::env::var_os("MCDH_DISABLE_MCS_SCAN").is_some()
+            || self.index.setting("mcs_initial_scan_done")?.is_some()
+        {
+            return Ok(());
+        }
+        if self
+            .index
+            .list_sources_by_kind(SourceKind::McsAuto)?
+            .is_empty()
+        {
+            self.rescan_mcs_sources()?;
+        } else {
+            self.index.set_setting("mcs_initial_scan_done", "true")?;
+        }
+        Ok(())
+    }
+
+    fn refresh_internal(&self, work_roots: Option<&[PathBuf]>) -> Result<DiscoveryResult> {
         let mut components = Vec::new();
         let mut sources = Vec::new();
         let mut warnings = Vec::new();
         let mut visited = HashSet::new();
 
-        self.scan_mcs(
-            work_roots,
-            &mut components,
-            &mut sources,
-            &mut warnings,
-            &mut visited,
-        );
+        if let Some(work_roots) = work_roots {
+            self.scan_mcs(
+                work_roots,
+                &mut components,
+                &mut sources,
+                &mut warnings,
+                &mut visited,
+            );
+        }
 
         for source in self.index.list_sources()? {
             sources.push(source.clone());
@@ -77,7 +122,16 @@ impl DiscoveryService {
                     }
                     Err(error) => warnings.push(warning_from_error(error)),
                 },
-                SourceKind::McsAuto => {}
+                SourceKind::McsAuto => {
+                    if work_roots.is_none() && std::env::var_os("MCDH_DISABLE_MCS_SCAN").is_none() {
+                        self.scan_mcs_category(
+                            &source.path,
+                            &mut components,
+                            &mut warnings,
+                            &mut visited,
+                        );
+                    }
+                }
             }
         }
 
@@ -164,6 +218,41 @@ impl DiscoveryService {
                     }
                 }
             }
+        }
+    }
+
+    fn scan_mcs_category(
+        &self,
+        category_path: &Path,
+        components: &mut Vec<ComponentSummary>,
+        warnings: &mut Vec<DiscoveryWarning>,
+        visited: &mut HashSet<String>,
+    ) {
+        let Some(context) = mcs_context_for_category(category_path) else {
+            warnings.push(DiscoveryWarning {
+                path: category_path.to_path_buf(),
+                message: "MCS 来源必须指向 AddOn、Map、Material 或 Light 分类目录".into(),
+            });
+            return;
+        };
+        let children = match child_directories(category_path) {
+            Ok(children) => children,
+            Err(error) => {
+                warnings.push(warning_from_error(error));
+                return;
+            }
+        };
+        for child in children {
+            self.inspect_and_push(
+                &child,
+                ComponentOrigin::Mcs {
+                    source_path: category_path.to_path_buf(),
+                },
+                Some(context.clone()),
+                components,
+                warnings,
+                visited,
+            );
         }
     }
 
@@ -256,10 +345,16 @@ impl DiscoveryService {
             .unwrap_or_else(|| file_name(path));
         let version = manifests.iter().find_map(|manifest| manifest.version);
         let icon_path = find_icon(path, &manifests);
-        let modified_at = fs::metadata(path)
-            .and_then(|metadata| metadata.modified())
-            .ok()
-            .map(DateTime::<Utc>::from);
+        let metadata = fs::metadata(path).map_err(|error| CoreError::io(path, error))?;
+        let modified_at = metadata.modified().ok().map(DateTime::<Utc>::from);
+        let created_at = metadata.created().ok().map(DateTime::<Utc>::from);
+        let updated_at = work_config
+            .as_ref()
+            .and_then(|config| config.get("UpdateTime"))
+            .and_then(Value::as_str)
+            .and_then(parse_mcs_time)
+            .or(modified_at);
+        let size_bytes = directory_size(path);
         let id = self.index.component_id(path)?;
         let tags = self.index.tags(path)?;
 
@@ -274,7 +369,10 @@ impl DiscoveryService {
             version,
             tags,
             icon_path,
+            updated_at,
             modified_at,
+            created_at,
+            size_bytes,
         })
     }
 }
@@ -285,6 +383,84 @@ struct McsContext {
     category: String,
     default_kind: ComponentKind,
     default_type: i64,
+}
+
+fn mcs_context_for_category(path: &Path) -> Option<McsContext> {
+    let category = path.file_name()?.to_string_lossy();
+    let (default_kind, default_type) = MCS_CATEGORIES
+        .iter()
+        .find(|(name, _, _)| name.eq_ignore_ascii_case(&category))
+        .map(|(_, kind, component_type)| (*kind, *component_type))?;
+    let account = path
+        .parent()
+        .filter(|parent| {
+            parent
+                .file_name()
+                .is_some_and(|name| name.eq_ignore_ascii_case("Cpp"))
+        })
+        .and_then(Path::parent)
+        .and_then(Path::file_name)
+        .map(|name| name.to_string_lossy().into_owned());
+    Some(McsContext {
+        account,
+        category: category.into_owned(),
+        default_kind,
+        default_type,
+    })
+}
+
+fn discover_mcs_category_paths(work_roots: &[PathBuf]) -> Vec<PathBuf> {
+    let mut categories = Vec::new();
+    for work_root in work_roots {
+        let Ok(accounts) = child_directories(work_root) else {
+            continue;
+        };
+        for account in accounts {
+            push_mcs_categories(&account.join("Cpp"), &mut categories);
+        }
+    }
+    categories.sort_by_key(|path| path_key(path));
+    categories.dedup_by(|left, right| path_key(left) == path_key(right));
+    categories
+}
+
+fn expand_mcs_source_path(path: &Path) -> Result<Vec<PathBuf>> {
+    let path = canonicalize(path)?;
+    let mut categories = Vec::new();
+    if mcs_context_for_category(&path).is_some() {
+        categories.push(path.clone());
+    }
+    if path
+        .file_name()
+        .is_some_and(|name| name.eq_ignore_ascii_case("Cpp"))
+    {
+        push_mcs_categories(&path, &mut categories);
+    }
+    push_mcs_categories(&path.join("Cpp"), &mut categories);
+    categories.extend(discover_mcs_category_paths(std::slice::from_ref(&path)));
+    for work in [
+        path.join("work"),
+        path.join("MCStudioDownload").join("work"),
+    ] {
+        categories.extend(discover_mcs_category_paths(&[work]));
+    }
+    categories.sort_by_key(|category| path_key(category));
+    categories.dedup_by(|left, right| path_key(left) == path_key(right));
+    if categories.is_empty() {
+        return Err(CoreError::InvalidInput(
+            "所选目录下没有找到 MCS 的 AddOn、Map、Material 或 Light 分类".into(),
+        ));
+    }
+    Ok(categories)
+}
+
+fn push_mcs_categories(cpp_root: &Path, categories: &mut Vec<PathBuf>) {
+    for (category, _, _) in MCS_CATEGORIES {
+        let path = cpp_root.join(category);
+        if path.is_dir() {
+            categories.push(path);
+        }
+    }
 }
 
 fn child_directories(path: &Path) -> Result<Vec<PathBuf>> {
@@ -304,6 +480,30 @@ fn child_directories(path: &Path) -> Result<Vec<PathBuf>> {
         .collect::<Vec<_>>();
     children.sort_by_key(|child| path_key(child));
     Ok(children)
+}
+
+fn parse_mcs_time(value: &str) -> Option<DateTime<Utc>> {
+    if let Ok(value) = DateTime::parse_from_rfc3339(value) {
+        return Some(value.with_timezone(&Utc));
+    }
+    for format in ["%Y-%m-%d %H:%M:%S", "%Y/%m/%d %H:%M:%S"] {
+        if let Ok(value) = NaiveDateTime::parse_from_str(value, format)
+            && let Some(value) = Local.from_local_datetime(&value).single()
+        {
+            return Some(value.with_timezone(&Utc));
+        }
+    }
+    None
+}
+
+fn directory_size(root: &Path) -> u64 {
+    WalkDir::new(root)
+        .follow_links(false)
+        .into_iter()
+        .filter_map(std::result::Result::ok)
+        .filter(|entry| entry.file_type().is_file() && !entry.file_type().is_symlink())
+        .filter_map(|entry| entry.metadata().ok().map(|metadata| metadata.len()))
+        .sum()
 }
 
 fn read_optional_json(path: &Path) -> Result<Option<Value>> {
@@ -662,5 +862,40 @@ mod tests {
         );
         assert_eq!(result.warnings.len(), 1);
         assert!(result.warnings[0].message.contains("JSON"));
+    }
+
+    #[test]
+    fn persists_custom_mcs_paths_and_reports_sort_metadata() {
+        let temp = tempfile::tempdir().unwrap();
+        let index = LocalIndex::open(temp.path().join("state/mcdh.db")).unwrap();
+        let work = temp.path().join("custom-work");
+        let addon = work.join("account/Cpp/AddOn/addon-id");
+        write_json(
+            &addon.join("work.mcscfg"),
+            serde_json::json!({
+                "UID": "addon-id",
+                "Type": 7,
+                "Name": "持久化来源",
+                "UpdateTime": "2026-08-09 10:30:00"
+            }),
+        );
+        write_json(
+            &addon.join("behavior/manifest.json"),
+            manifest("持久化来源", "data"),
+        );
+
+        let discovery = DiscoveryService::new(index.clone());
+        let sources = discovery.add_mcs_source_path(&work).unwrap();
+        assert_eq!(sources.len(), 1);
+        assert_eq!(sources[0].kind, SourceKind::McsAuto);
+
+        let result = discovery.refresh().unwrap();
+        assert_eq!(result.components.len(), 1);
+        let component = &result.components[0];
+        assert_eq!(component.name, "持久化来源");
+        assert!(component.updated_at.is_some());
+        assert!(component.modified_at.is_some());
+        assert!(component.created_at.is_some());
+        assert!(component.size_bytes > 0);
     }
 }

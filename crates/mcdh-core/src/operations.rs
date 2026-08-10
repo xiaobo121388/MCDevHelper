@@ -16,8 +16,8 @@ use crate::path_utils::canonicalize;
 use crate::{
     BumpManifestVersionRequest, ComponentKind, ComponentSummary, CopyComponentRequest, CoreError,
     CreateComponentRequest, DiscoveryService, ExportComponentRequest, IdentityPolicy,
-    ImportComponentRequest, LocalIndex, MoveComponentRequest, OperationResult, Result,
-    SetComponentTagsRequest, TemplateRequest, TemplateService, VersionPart, VsCodeStatus,
+    ImportComponentRequest, LocalIndex, McsTemplateIdentity, MoveComponentRequest, OperationResult,
+    Result, SetComponentTagsRequest, TemplateRequest, TemplateService, VersionPart, VsCodeStatus,
 };
 
 #[cfg(test)]
@@ -52,12 +52,14 @@ impl ComponentService {
     pub fn create_component(&self, request: &CreateComponentRequest) -> Result<OperationResult> {
         let _guard = self.index.try_lock_mutations()?;
         let destination = existing_directory(&request.destination)?;
+        let mcs_identity = self.mcs_identity(request.namespace.as_deref())?;
         let rendered = self.template.render(&TemplateRequest {
             name: request.name.clone(),
             kind: request.kind,
             destination: destination.clone(),
             mcs_compatible: request.mcs_compatible,
             component_uid: None,
+            mcs_identity,
         })?;
         let target = if request.mcs_compatible {
             destination.join(&rendered.component_uid)
@@ -126,6 +128,7 @@ impl ComponentService {
                 uid,
                 &component.name,
                 component.kind,
+                &self.mcs_identity(None)?,
             )?;
         }
         let actual_path = staging.publish(&target)?;
@@ -176,6 +179,7 @@ impl ComponentService {
                     uid,
                     &component.name,
                     component.kind,
+                    &self.mcs_identity(None)?,
                 )?;
             }
             if fail_move_after_copy() {
@@ -246,7 +250,14 @@ impl ComponentService {
             regenerate_manifest_identifiers(staging.path())?;
         }
         if let Some(uid) = &target_uid {
-            write_mcs_configuration(staging.path(), &destination, uid, &name, kind)?;
+            write_mcs_configuration(
+                staging.path(),
+                &destination,
+                uid,
+                &name,
+                kind,
+                &self.mcs_identity(None)?,
+            )?;
         }
         let actual_path = staging.publish(&target)?;
         self.index.component_id(&actual_path)?;
@@ -345,6 +356,16 @@ impl ComponentService {
 
     pub fn get_component(&self, component_id: &str) -> Result<ComponentSummary> {
         self.find_component(component_id)
+    }
+
+    fn mcs_identity(&self, namespace: Option<&str>) -> Result<McsTemplateIdentity> {
+        let settings = self.index.app_settings()?;
+        Ok(McsTemplateIdentity {
+            developer_nickname: settings.developer_nickname,
+            developer_account: settings.developer_account,
+            developer_user_id: settings.developer_user_id,
+            namespace: namespace.unwrap_or("mcdh").trim().to_owned(),
+        })
     }
 
     pub fn open_component_directory(&self, component_id: &str) -> Result<()> {
@@ -793,6 +814,7 @@ fn write_mcs_configuration(
     uid: &str,
     name: &str,
     kind: ComponentKind,
+    mcs_identity: &McsTemplateIdentity,
 ) -> Result<()> {
     let rendered = TemplateService.render(&TemplateRequest {
         name: name.to_owned(),
@@ -800,6 +822,7 @@ fn write_mcs_configuration(
         destination: destination.to_path_buf(),
         mcs_compatible: true,
         component_uid: Some(uid.to_owned()),
+        mcs_identity: mcs_identity.clone(),
     })?;
     for file in rendered.files.into_iter().filter(|file| {
         matches!(
@@ -1320,6 +1343,7 @@ mod tests {
                 kind: ComponentKind::Addon,
                 destination: generic_root,
                 mcs_compatible: false,
+                namespace: None,
             })
             .unwrap();
         assert!(generic.actual_path.ends_with("示例_模组"));
@@ -1332,6 +1356,7 @@ mod tests {
                 kind: ComponentKind::Map,
                 destination: mcs_root,
                 mcs_compatible: true,
+                namespace: Some("mcdh".into()),
             })
             .unwrap();
         let studio = read_json(&mcs.actual_path.join("studio.json")).unwrap();

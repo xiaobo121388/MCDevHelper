@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use uuid::Uuid;
 
-use crate::{ComponentKind, CoreError, Result};
+use crate::{ComponentKind, CoreError, McsTemplateIdentity, Result};
 
 const BEHAVIOR_MANIFEST: &str = include_str!("../templates/behavior_manifest.json");
 const RESOURCE_MANIFEST: &str = include_str!("../templates/resource_manifest.json");
@@ -20,6 +20,7 @@ pub struct TemplateRequest {
     pub destination: PathBuf,
     pub mcs_compatible: bool,
     pub component_uid: Option<String>,
+    pub mcs_identity: McsTemplateIdentity,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -122,6 +123,7 @@ impl TemplateService {
             };
 
         if request.mcs_compatible {
+            validate_namespace(&request.mcs_identity.namespace)?;
             let target = request.destination.join(&component_uid);
             let (mcs_type, edit_type, is_map, is_pc) = match request.kind {
                 ComponentKind::Map => (1, 1, true, true),
@@ -131,6 +133,22 @@ impl TemplateService {
             let mut replacements = HashMap::new();
             replacements.insert("{{mcs_uid}}", Value::String(component_uid.clone()));
             replacements.insert("{{component_name}}", Value::String(name.to_owned()));
+            replacements.insert(
+                "{{developer_account}}",
+                Value::String(request.mcs_identity.developer_account.clone()),
+            );
+            replacements.insert(
+                "{{developer_nickname}}",
+                Value::String(request.mcs_identity.developer_nickname.clone()),
+            );
+            replacements.insert(
+                "{{developer_user_id}}",
+                Value::String(request.mcs_identity.developer_user_id.clone()),
+            );
+            replacements.insert(
+                "{{namespace}}",
+                Value::String(request.mcs_identity.namespace.clone()),
+            );
             replacements.insert("{{mcs_type}}", Value::from(mcs_type));
             replacements.insert("{{edit_type}}", Value::from(edit_type));
             replacements.insert("{{is_map}}", Value::from(is_map));
@@ -171,6 +189,25 @@ impl TemplateService {
             directories,
             files,
         })
+    }
+}
+
+fn validate_namespace(namespace: &str) -> Result<()> {
+    let valid = !namespace.is_empty()
+        && namespace.len() <= 64
+        && namespace.chars().all(|character| {
+            character.is_ascii_lowercase() || character.is_ascii_digit() || character == '_'
+        })
+        && namespace
+            .chars()
+            .next()
+            .is_some_and(|character| character.is_ascii_lowercase());
+    if valid {
+        Ok(())
+    } else {
+        Err(CoreError::InvalidInput(
+            "命名空间必须以小写字母开头，且只能包含小写字母、数字和下划线（最多 64 个字符）".into(),
+        ))
     }
 }
 
@@ -292,6 +329,7 @@ mod tests {
                     destination: destination.clone(),
                     mcs_compatible: true,
                     component_uid: None,
+                    mcs_identity: McsTemplateIdentity::default(),
                 })
                 .unwrap();
             assert!(component_uids.insert(rendered.component_uid.clone()));
@@ -328,9 +366,39 @@ mod tests {
                 destination: PathBuf::from(r"D:\Projects"),
                 mcs_compatible: false,
                 component_uid: None,
+                mcs_identity: McsTemplateIdentity::default(),
             })
             .unwrap();
         assert_eq!(rendered.files.len(), 1);
         assert_eq!(rendered.files[0].relative_path, Path::new("manifest.json"));
+    }
+
+    #[test]
+    fn renders_configured_developer_identity_and_namespace() {
+        let rendered = TemplateService
+            .render(&TemplateRequest {
+                name: "身份测试".into(),
+                kind: ComponentKind::Addon,
+                destination: PathBuf::from(r"D:\MCS\AddOn"),
+                mcs_compatible: true,
+                component_uid: Some("testuid".into()),
+                mcs_identity: McsTemplateIdentity {
+                    developer_nickname: "本地开发者".into(),
+                    developer_account: "local@example.invalid".into(),
+                    developer_user_id: "123".into(),
+                    namespace: "local_dev".into(),
+                },
+            })
+            .unwrap();
+        let studio = rendered
+            .files
+            .iter()
+            .find(|file| file.relative_path == Path::new("studio.json"))
+            .unwrap();
+        let studio: Value = serde_json::from_str(&studio.content).unwrap();
+        assert_eq!(studio["Account"], "local@example.invalid");
+        assert_eq!(studio["UserName"], "本地开发者");
+        assert_eq!(studio["UserId"], "123");
+        assert_eq!(studio["NameSpace"], "local_dev");
     }
 }
