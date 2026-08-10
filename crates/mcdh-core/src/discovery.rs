@@ -7,6 +7,7 @@ use serde_json::Value;
 use uuid::Uuid;
 use walkdir::WalkDir;
 
+use crate::json::parse_jsonc;
 use crate::path_utils::canonicalize;
 use crate::{
     ComponentKind, ComponentOrigin, ComponentSummary, CoreError, DiscoveryResult, DiscoveryWarning,
@@ -515,8 +516,7 @@ fn read_optional_json(path: &Path) -> Result<Option<Value>> {
 
 fn read_json(path: &Path) -> Result<Value> {
     let text = fs::read_to_string(path).map_err(|error| CoreError::io(path, error))?;
-    serde_json::from_str(text.trim_start_matches('\u{feff}'))
-        .map_err(|error| CoreError::json(path, error))
+    parse_jsonc(&text, path)
 }
 
 fn find_manifest_paths(root: &Path) -> Result<Vec<PathBuf>> {

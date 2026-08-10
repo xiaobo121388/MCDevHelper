@@ -122,6 +122,7 @@ Generation command: `pnpm license-report`
 | jiff-core | 0.1.0 | Unlicense OR MIT |
 | jiff-tzdb | 0.1.8 | Unlicense OR MIT |
 | jiff-tzdb-platform | 0.1.3 | Unlicense OR MIT |
+| jsonc-parser | 0.33.1 | MIT |
 | json-patch | 3.0.1 | MIT/Apache-2.0 |
 | jsonptr | 0.6.3 | MIT OR Apache-2.0 |
 | keyboard-types | 0.7.0 | MIT OR Apache-2.0 |

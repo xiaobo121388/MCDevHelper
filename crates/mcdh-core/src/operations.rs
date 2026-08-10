@@ -12,6 +12,7 @@ use walkdir::{DirEntry, WalkDir};
 use crate::archive::{
     expand_nested_mcpacks, extract_archive, is_supported_archive, temporary_zip_path, write_zip,
 };
+use crate::json::parse_jsonc;
 use crate::path_utils::canonicalize;
 use crate::{
     BumpManifestVersionRequest, ComponentKind, ComponentOrigin, ComponentSummary,
@@ -1052,8 +1053,7 @@ fn manifest_files(root: &Path) -> Result<Vec<PathBuf>> {
 
 fn read_json(path: &Path) -> Result<Value> {
     let text = fs::read_to_string(path).map_err(|error| CoreError::io(path, error))?;
-    serde_json::from_str(text.trim_start_matches('\u{feff}'))
-        .map_err(|error| CoreError::json(path, error))
+    parse_jsonc(&text, path)
 }
 
 fn write_json(path: &Path, document: &Value) -> Result<()> {
@@ -1740,6 +1740,69 @@ mod tests {
         assert_eq!(
             read_json(&map_root.join("world_resource_packs.json")).unwrap()[0]["version"],
             serde_json::json!([2, 0, 1])
+        );
+    }
+
+    #[test]
+    fn discovers_and_updates_jsonc_component_files() {
+        let temp = tempfile::tempdir().unwrap();
+        let index = LocalIndex::open(temp.path().join("state/mcdh.db")).unwrap();
+        let library = temp.path().join("library");
+        let component_root = library.join("JSONC 模组");
+        fs::create_dir_all(&component_root).unwrap();
+        let header_uuid = Uuid::new_v4();
+        let module_uuid = Uuid::new_v4();
+        fs::write(
+            component_root.join("manifest.json"),
+            format!(
+                r#"{{
+                    // manifest may contain line comments
+                    "format_version": 2,
+                    "header": {{
+                        "name": "JSONC 模组",
+                        "uuid": "{header_uuid}",
+                        "version": [1, 0, 0],
+                    }},
+                    /* block comments are supported too */
+                    "modules": [{{
+                        "type": "data",
+                        "uuid": "{module_uuid}",
+                        "version": [1, 0, 0],
+                    }}],
+                }}"#
+            ),
+        )
+        .unwrap();
+        fs::write(
+            component_root.join("work.mcscfg"),
+            r#"{
+                // MCS configuration is JSONC as well
+                "Type": 7,
+                "Name": "JSONC 模组",
+            }"#,
+        )
+        .unwrap();
+        index.add_source(SourceKind::Library, &library).unwrap();
+        let component = DiscoveryService::new(index.clone())
+            .refresh_with_mcs_work_roots(&[])
+            .unwrap()
+            .components
+            .remove(0);
+        assert_eq!(component.name, "JSONC 模组");
+
+        ComponentService::new(index)
+            .with_mcs_work_roots(Vec::new())
+            .bump_manifest_version(&BumpManifestVersionRequest {
+                component_id: component.id,
+                part: VersionPart::Patch,
+            })
+            .unwrap();
+        let written = fs::read_to_string(component_root.join("manifest.json")).unwrap();
+        let written: Value = serde_json::from_str(&written).unwrap();
+        assert_eq!(written["header"]["version"], serde_json::json!([1, 0, 1]));
+        assert_eq!(
+            written["modules"][0]["version"],
+            serde_json::json!([1, 0, 1])
         );
     }
 

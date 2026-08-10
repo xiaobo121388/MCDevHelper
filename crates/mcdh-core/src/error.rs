@@ -26,12 +26,8 @@ pub enum CoreError {
         #[source]
         source: std::io::Error,
     },
-    #[error("JSON 解析失败：{path}: {source}")]
-    Json {
-        path: PathBuf,
-        #[source]
-        source: serde_json::Error,
-    },
+    #[error("JSON 解析失败：{path}: {message}")]
+    Json { path: PathBuf, message: String },
     #[error("本地索引失败：{0}")]
     Database(#[from] rusqlite::Error),
 }
@@ -44,10 +40,10 @@ impl CoreError {
         }
     }
 
-    pub fn json(path: impl AsRef<Path>, source: serde_json::Error) -> Self {
+    pub fn json(path: impl AsRef<Path>, error: impl std::fmt::Display) -> Self {
         Self::Json {
             path: path.as_ref().to_path_buf(),
-            source,
+            message: error.to_string(),
         }
     }
 

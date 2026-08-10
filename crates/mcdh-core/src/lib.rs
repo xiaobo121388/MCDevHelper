@@ -4,6 +4,7 @@ mod archive;
 mod discovery;
 mod error;
 mod index;
+mod json;
 mod model;
 mod operations;
 mod path_utils;

@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use uuid::Uuid;
 
+use crate::json::parse_jsonc;
 use crate::{ComponentKind, CoreError, McsTemplateIdentity, Result};
 
 const BEHAVIOR_MANIFEST: &str = include_str!("../templates/behavior_manifest.json");
@@ -244,8 +245,7 @@ fn render_manifest(template: &str, component_name: &str, behavior: bool) -> Resu
 }
 
 fn render_json(template: &str, replacements: &HashMap<&str, Value>) -> Result<String> {
-    let mut document: Value = serde_json::from_str(template)
-        .map_err(|error| CoreError::json(Path::new("embedded-template"), error))?;
+    let mut document: Value = parse_jsonc(template, "embedded-template")?;
     replace_value(&mut document, replacements);
     serde_json::to_string_pretty(&document)
         .map(|mut text| {

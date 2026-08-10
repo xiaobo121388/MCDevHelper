@@ -8,6 +8,7 @@ use fs2::FileExt;
 use rusqlite::{Connection, OptionalExtension, params};
 use uuid::Uuid;
 
+use crate::json::parse_jsonc;
 use crate::path_utils::canonicalize;
 use crate::{AppSettings, CoreError, Result, SourceKind, SourceRecord};
 
@@ -189,9 +190,7 @@ impl LocalIndex {
             )
             .optional()?;
         tags_json
-            .map(|value| {
-                serde_json::from_str(&value).map_err(|error| CoreError::json(&path, error))
-            })
+            .map(|value| parse_jsonc(&value, &path))
             .unwrap_or_else(|| Ok(Vec::new()))
     }
 
@@ -252,7 +251,7 @@ impl LocalIndex {
         let Some(value) = self.setting("app_settings")? else {
             return Ok(AppSettings::default());
         };
-        serde_json::from_str(&value).map_err(|error| CoreError::json("app_settings", error))
+        parse_jsonc(&value, "app_settings")
     }
 
     pub fn set_app_settings(&self, settings: &AppSettings) -> Result<AppSettings> {
@@ -456,6 +455,20 @@ mod tests {
             Some(default_destination.as_path())
         );
         assert_eq!(index.app_settings().unwrap(), saved);
+
+        index
+            .set_setting(
+                "app_settings",
+                r#"{
+                    // typed settings use the shared JSONC parser
+                    "developer_nickname": "JSONC 开发者",
+                    "theme": "light",
+                }"#,
+            )
+            .unwrap();
+        let jsonc_settings = index.app_settings().unwrap();
+        assert_eq!(jsonc_settings.developer_nickname, "JSONC 开发者");
+        assert_eq!(jsonc_settings.theme, crate::ThemePreference::Light);
     }
 
     #[test]
