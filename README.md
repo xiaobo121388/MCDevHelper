@@ -99,4 +99,4 @@ pnpm release:windows
 
 架构使用 Tauri 2、React、TypeScript、Vite、Tailwind CSS、rusqlite、zip-rs、uuid-rs 与官方 Rust MCP SDK。组件识别思路参考 MCDevTool 和 BDSAddonManager 的公开设计，但未复制其源码。
 
-第三方包及声明许可见 [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md)。本仓库自身当前标记为 `UNLICENSED`；除第三方组件各自许可授予的权利外，未另行授予 MCDH 源代码使用许可。
+MCDH 源代码采用 [MIT License](LICENSE) 开源。第三方包仍分别遵循其自身许可证，完整声明见 [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md)。
