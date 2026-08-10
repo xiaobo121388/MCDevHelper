@@ -42,7 +42,7 @@ MCDH 是面向网易《我的世界》中国版 PE 创作者的 Windows 离线�
 
 复制组件时可选择保留或重生 manifest UUID；复制到 MCS 时总会生成新的 MCS UID。移动默认保留 manifest UUID。重要作品建议先自行备份。
 
-UUID 重生、版本提升和标签同步等修改操作会把受影响的 JSONC 文件原子写回为标准 JSON，因此该文件原有的注释会被移除。MCP 的 JSON-RPC 消息仍须使用标准 JSON。
+UUID 重生、版本提升和标签同步会在原 JSONC 文本中定点更新并原子写回，保留已有注释、缩进、尾随逗号和 UTF-8 BOM。UUID 与版本快捷操作通过本地索引直接定位单个组件，不会额外扫描全部来源；MCP 的 JSON-RPC 消息仍须使用标准 JSON。
 
 ## MCP 配置
 
