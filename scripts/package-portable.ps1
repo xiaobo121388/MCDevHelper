@@ -20,6 +20,7 @@ New-Item -ItemType Directory -Path $stagingFull | Out-Null
 
 Copy-Item -LiteralPath (Join-Path $repoRoot "target\release\mcdh-desktop.exe") -Destination (Join-Path $stagingFull "MCDH.exe")
 Copy-Item -LiteralPath (Join-Path $repoRoot "target\release\mcdh-mcp.exe") -Destination (Join-Path $stagingFull "mcdh-mcp.exe")
+Copy-Item -LiteralPath (Join-Path $repoRoot "LICENSE") -Destination $stagingFull
 Copy-Item -LiteralPath (Join-Path $repoRoot "README.md") -Destination $stagingFull
 Copy-Item -LiteralPath (Join-Path $repoRoot "THIRD_PARTY_LICENSES.md") -Destination $stagingFull
 

@@ -33,6 +33,7 @@
     "shortDescription": "离线管理网易中国版 Minecraft PE 创作组件",
     "externalBin": ["binaries/mcdh-mcp"],
     "resources": [
+      "release-resources/LICENSE",
       "release-resources/README.md",
       "release-resources/THIRD_PARTY_LICENSES.md"
     ],
