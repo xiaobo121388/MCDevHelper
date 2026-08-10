@@ -135,11 +135,12 @@ fn move_component(
 }
 
 #[tauri::command]
-fn export_component(
+async fn export_component(
     state: State<'_, AppState>,
     request: ExportComponentRequest,
 ) -> CommandResult<OperationResult> {
-    core_result(state.service().export_component(&request))
+    let index = state.index.clone();
+    background(move || ComponentService::new(index).export_component(&request)).await
 }
 
 #[tauri::command]

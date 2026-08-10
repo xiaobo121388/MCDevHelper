@@ -226,11 +226,13 @@ export function App() {
       {selected && <ComponentDialog component={selected} onClose={() => setSelected(null)} onDone={(message, operation, refreshAfter) => {
         setSelected(null);
         const updated = operation.component;
-        if (!refreshAfter && updated) {
-          setResult((current) => ({
-            ...current,
-            components: current.components.map((component) => component.id === updated.id ? updated : component),
-          }));
+        if (!refreshAfter) {
+          if (updated) {
+            setResult((current) => ({
+              ...current,
+              components: current.components.map((component) => component.id === updated.id ? updated : component),
+            }));
+          }
           setNotice(message);
         } else {
           void done(message);
@@ -518,7 +520,7 @@ function ComponentDialog({ component, onClose, onDone, onNotice }: { component: 
           <h3>复制、移动、导出与删除</h3>
           <PathField label="目标目录" value={destination} onChange={setDestination} />
           <div className="transfer-options"><label>复制 UUID <select value={identity} onChange={(event) => setIdentity(event.target.value as "preserve" | "regenerate")}><option value="regenerate">生成新的</option><option value="preserve">保留</option></select></label><CheckRow checked={mcs} onChange={setMcs} label="目标为 MCS 分类目录" /></div>
-          <div className="transfer-buttons"><button className="button secondary" disabled={!!busy} onClick={() => needDestination() && void run("copy", () => api.copy({ component_id: component.id, destination, mcs_compatible: mcs, identity_policy: identity }), "组件已复制")}><Copy size={16} />复制</button><button className="button secondary" disabled={!!busy} onClick={() => needDestination() && window.confirm("移动完成后原目录将被移除，是否继续？") && void run("move", () => api.move({ component_id: component.id, destination, mcs_compatible: mcs }), "组件已移动")}><FolderCog size={16} />移动</button><button className="button secondary" disabled={!!busy} onClick={() => needDestination() && void run("export", () => api.export({ component_id: component.id, destination }), "ZIP 已导出")}><Archive size={16} />导出 ZIP</button><button className="button danger" disabled={!!busy} onClick={remove}><Trash2 size={16} />删除</button></div>
+          <div className="transfer-buttons"><button className="button secondary" disabled={!!busy} onClick={() => needDestination() && void run("copy", () => api.copy({ component_id: component.id, destination, mcs_compatible: mcs, identity_policy: identity }), "组件已复制")}><Copy size={16} />复制</button><button className="button secondary" disabled={!!busy} onClick={() => needDestination() && window.confirm("移动完成后原目录将被移除，是否继续？") && void run("move", () => api.move({ component_id: component.id, destination, mcs_compatible: mcs }), "组件已移动")}><FolderCog size={16} />移动</button><button className="button secondary" disabled={!!busy} onClick={() => needDestination() && void run("export", () => api.export({ component_id: component.id, destination }), "ZIP 已导出", false)}><Archive size={16} />{busy === "export" ? "导出中…" : "导出 ZIP"}</button><button className="button danger" disabled={!!busy} onClick={remove}><Trash2 size={16} />删除</button></div>
         </section>
       </div>
     </Modal>

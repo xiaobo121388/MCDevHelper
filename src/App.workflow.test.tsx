@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   settings: vi.fn(),
   setSettings: vi.fn(),
   delete: vi.fn(),
+  export: vi.fn(),
   regenerateUuids: vi.fn(),
   bumpVersion: vi.fn(),
   openWarningDirectory: vi.fn(),
@@ -19,6 +20,7 @@ vi.mock("./api", () => ({
     settings: mocks.settings,
     setSettings: mocks.setSettings,
     delete: mocks.delete,
+    export: mocks.export,
     regenerateUuids: mocks.regenerateUuids,
     bumpVersion: mocks.bumpVersion,
     openWarningDirectory: mocks.openWarningDirectory,
@@ -43,6 +45,7 @@ describe("component workspace filters", () => {
     });
     mocks.setSettings.mockReset();
     mocks.delete.mockReset().mockResolvedValue({ actual_path: "", modified_files: [], warnings: [] });
+    mocks.export.mockReset();
     mocks.regenerateUuids.mockReset();
     mocks.bumpVersion.mockReset();
     mocks.openWarningDirectory.mockReset().mockResolvedValue(undefined);
@@ -210,6 +213,43 @@ describe("component workspace filters", () => {
     expect(mocks.refresh).toHaveBeenCalledTimes(1);
     expect(screen.getByText("v1.0.1")).toBeInTheDocument();
     confirm.mockRestore();
+  });
+
+  it("keeps the UI responsive and skips rescanning while exporting", async () => {
+    const component = {
+      id: "large-addon",
+      name: "大型模组",
+      kind: "addon" as const,
+      path: "D:\\大型模组",
+      origin: { kind: "library" as const, source_id: "library" },
+      manifests: [],
+      tags: [],
+      size_bytes: 32_000_000,
+    };
+    mocks.refresh.mockResolvedValue({ components: [component], sources: [], warnings: [] });
+    let finishExport: (value: unknown) => void = () => undefined;
+    mocks.export.mockReturnValue(new Promise((resolve) => { finishExport = resolve; }));
+    render(<App />);
+    await waitFor(() => expect(screen.getByText("大型模组")).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole("button", { name: "配置 大型模组" }));
+    fireEvent.change(screen.getByPlaceholderText("选择一个可写目录"), {
+      target: { value: "D:\\导出" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "导出 ZIP" }));
+    await waitFor(() => expect(mocks.export).toHaveBeenCalledWith({
+      component_id: component.id,
+      destination: "D:\\导出",
+    }));
+    expect(screen.getByRole("button", { name: "导出中…" })).toBeDisabled();
+
+    finishExport({
+      actual_path: "D:\\导出\\大型模组.zip",
+      modified_files: ["D:\\导出\\大型模组.zip"],
+      warnings: [],
+    });
+    await waitFor(() => expect(screen.getByText("ZIP 已导出")).toBeInTheDocument());
+    expect(mocks.refresh).toHaveBeenCalledTimes(1);
   });
 
   it("opens scan problem details and supports opening, ignoring, and removing a source", async () => {

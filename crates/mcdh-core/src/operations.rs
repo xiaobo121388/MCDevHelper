@@ -12,6 +12,7 @@ use walkdir::{DirEntry, WalkDir};
 
 use crate::archive::{
     expand_nested_mcpacks, extract_archive, is_supported_archive, temporary_zip_path, write_zip,
+    write_zip_roots,
 };
 use crate::json::{parse_jsonc, parse_options};
 use crate::path_utils::canonicalize;
@@ -274,18 +275,14 @@ impl ComponentService {
 
     pub fn export_component(&self, request: &ExportComponentRequest) -> Result<OperationResult> {
         let _guard = self.index.try_lock_mutations()?;
-        let component = self.find_component(&request.component_id)?;
+        let component_path = self.indexed_component_path(&request.component_id)?;
+        let (component_kind, component_name) = inspect_export(&component_path)?;
         let destination = existing_directory(&request.destination)?;
-        let archive_path = unique_archive_path(&destination, &sanitize_file_name(&component.name));
-        let staging = tempfile::Builder::new()
-            .prefix(".mcdh-export-")
-            .tempdir_in(&destination)
-            .map_err(|error| CoreError::io(&destination, error))?;
-        let report = copy_clean_content(&component.path, staging.path(), component.kind)?;
-        verify_copy(staging.path(), &report)?;
-
+        let archive_path = unique_archive_path(&destination, &sanitize_file_name(&component_name));
         let temporary = temporary_zip_path(&destination);
-        if let Err(error) = write_zip(staging.path(), &temporary) {
+        if let Err(error) =
+            write_clean_component_zip(&component_path, component_kind, &destination, &temporary)
+        {
             let _ = fs::remove_file(&temporary);
             return Err(error);
         }
@@ -294,7 +291,7 @@ impl ComponentService {
             return Err(CoreError::io(&archive_path, error));
         }
         Ok(OperationResult {
-            component: Some(component),
+            component: None,
             actual_path: archive_path.clone(),
             modified_files: vec![archive_path],
             warnings: Vec::new(),
@@ -610,6 +607,28 @@ fn copy_clean_content(
     Ok(report)
 }
 
+fn write_clean_component_zip(
+    source: &Path,
+    kind: ComponentKind,
+    staging_parent: &Path,
+    destination: &Path,
+) -> Result<()> {
+    if kind == ComponentKind::Addon {
+        let pack_directories = direct_pack_directories(source)?;
+        if !pack_directories.is_empty() {
+            return write_zip_roots(&pack_directories, destination);
+        }
+    }
+
+    let staging = tempfile::Builder::new()
+        .prefix(".mcdh-export-")
+        .tempdir_in(staging_parent)
+        .map_err(|error| CoreError::io(staging_parent, error))?;
+    let report = copy_clean_content(source, staging.path(), kind)?;
+    verify_copy(staging.path(), &report)?;
+    write_zip(staging.path(), destination)
+}
+
 #[derive(Debug, Clone, Copy)]
 struct CopyFilter {
     exclude_mcs: bool,
@@ -795,6 +814,28 @@ fn inspect_import(root: &Path, source: &Path) -> Result<(ComponentKind, String)>
         return Ok((ComponentKind::Addon, fallback_name));
     }
     Err(CoreError::InvalidComponent(root.to_path_buf()))
+}
+
+fn inspect_export(root: &Path) -> Result<(ComponentKind, String)> {
+    let (kind, mut name) = inspect_import(root, root)?;
+    if kind == ComponentKind::Addon
+        && !root.join("work.mcscfg").is_file()
+        && !root.join("manifest.json").is_file()
+    {
+        for pack in direct_pack_directories(root)? {
+            let manifest = read_json(&pack.join("manifest.json"))?;
+            if let Some(manifest_name) = manifest
+                .get("header")
+                .and_then(|header| header.get("name"))
+                .and_then(Value::as_str)
+                .filter(|name| !name.trim().is_empty())
+            {
+                name = manifest_name.to_owned();
+                break;
+            }
+        }
+    }
+    Ok((kind, name))
 }
 
 fn duplicate_manifest_uuids(
@@ -1683,6 +1724,64 @@ mod tests {
         assert!(names.contains(&"behavior/manifest.json".into()));
         assert!(names.contains(&"resources/manifest.json".into()));
         assert!(!names.iter().any(|name| name.ends_with("studio.json")));
+    }
+
+    #[test]
+    fn exports_indexed_mcs_addon_without_rescanning_development_directories() {
+        let temp = tempfile::tempdir().unwrap();
+        let index = LocalIndex::open(temp.path().join("state/mcdh.db")).unwrap();
+        let library = temp.path().join("library");
+        let output = temp.path().join("exports");
+        let addon = library.join("9c7e890e089f4d339af868e08d4bcd7f");
+        fs::create_dir_all(addon.join(".venv/Lib/site-packages/noise")).unwrap();
+        fs::create_dir_all(&output).unwrap();
+        fs::write(
+            addon.join(".venv/Lib/site-packages/noise/manifest.json"),
+            b"development-only",
+        )
+        .unwrap();
+        write_json(
+            &addon.join("work.mcscfg"),
+            serde_json::json!({
+                "UID": "9c7e890e089f4d339af868e08d4bcd7f",
+                "Type": 7,
+                "Name": "空中厕所2"
+            }),
+        );
+        write_json(
+            &addon.join("behavior_pack_Z6mMrsGM/manifest.json"),
+            manifest("Behavior", "data", Uuid::new_v4()),
+        );
+        write_json(
+            &addon.join("resource_pack_p69M2JA2/manifest.json"),
+            manifest("Resources", "resources", Uuid::new_v4()),
+        );
+        let source = index.add_source(SourceKind::Library, &library).unwrap();
+        let component = DiscoveryService::new(index.clone())
+            .refresh_with_mcs_work_roots(&[])
+            .unwrap()
+            .components
+            .remove(0);
+
+        index.remove_source(&source.id).unwrap();
+        let exported = ComponentService::new(index)
+            .with_mcs_work_roots(Vec::new())
+            .export_component(&ExportComponentRequest {
+                component_id: component.id,
+                destination: output,
+            })
+            .unwrap();
+        assert!(exported.component.is_none());
+        assert!(exported.actual_path.ends_with("空中厕所2.zip"));
+
+        let mut archive = ZipArchive::new(fs::File::open(exported.actual_path).unwrap()).unwrap();
+        let names = (0..archive.len())
+            .map(|index| archive.by_index(index).unwrap().name().to_owned())
+            .collect::<Vec<_>>();
+        assert!(names.contains(&"behavior_pack_Z6mMrsGM/manifest.json".into()));
+        assert!(names.contains(&"resource_pack_p69M2JA2/manifest.json".into()));
+        assert!(!names.iter().any(|name| name.contains(".venv")));
+        assert!(!names.iter().any(|name| name.ends_with("work.mcscfg")));
     }
 
     #[test]
