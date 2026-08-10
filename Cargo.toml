@@ -12,7 +12,7 @@ anyhow = "1"
 chrono = { version = "0.4", features = ["serde"] }
 directories = "6"
 fs2 = "0.4"
-jsonc-parser = { version = "0.33.1", features = ["serde"] }
+jsonc-parser = { version = "0.33.1", features = ["cst", "serde"] }
 rusqlite = { version = "0.40", features = ["bundled"] }
 rmcp = { version = "3.1.2", features = ["transport-io"] }
 schemars = "1"

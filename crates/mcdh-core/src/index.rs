@@ -178,6 +178,18 @@ impl LocalIndex {
         Ok(id)
     }
 
+    pub fn component_path(&self, id: &str) -> Result<Option<PathBuf>> {
+        Ok(self
+            .connection()?
+            .query_row(
+                "SELECT path FROM component_metadata WHERE id = ?1",
+                [id],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()?
+            .map(PathBuf::from))
+    }
+
     pub fn tags(&self, path: impl AsRef<Path>) -> Result<Vec<String>> {
         let path = normalize_path(path.as_ref())?;
         let path_text = path.to_string_lossy().into_owned();
@@ -404,6 +416,10 @@ mod tests {
         let first_id = index.component_id(&component).unwrap();
         let second_id = index.component_id(&component).unwrap();
         assert_eq!(first_id, second_id);
+        assert_eq!(
+            index.component_path(&first_id).unwrap().as_deref(),
+            Some(normalize_path(&component).unwrap().as_path())
+        );
 
         index
             .set_tags(&component, &[" 开发 ".into(), "测试".into(), "开发".into()])

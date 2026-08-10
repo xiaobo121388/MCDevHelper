@@ -5,6 +5,7 @@ use std::io::Write;
 use std::path::{Component, Path, PathBuf};
 use std::process::Command;
 
+use jsonc_parser::cst::{CstInputValue, CstNode, CstObject, CstRootNode};
 use serde_json::Value;
 use uuid::Uuid;
 use walkdir::{DirEntry, WalkDir};
@@ -12,7 +13,7 @@ use walkdir::{DirEntry, WalkDir};
 use crate::archive::{
     expand_nested_mcpacks, extract_archive, is_supported_archive, temporary_zip_path, write_zip,
 };
-use crate::json::parse_jsonc;
+use crate::json::{parse_jsonc, parse_options};
 use crate::path_utils::canonicalize;
 use crate::{
     BumpManifestVersionRequest, ComponentKind, ComponentOrigin, ComponentSummary,
@@ -328,15 +329,11 @@ impl ComponentService {
         let mut modified_files = Vec::new();
         let work_config = component.path.join("work.mcscfg");
         if component.mcs.is_some() && work_config.is_file() {
-            let mut document = read_json(&work_config)?;
-            document["CustomTags"] = Value::Array(
-                normalize_tags(&request.tags)
-                    .iter()
-                    .cloned()
-                    .map(Value::String)
-                    .collect(),
-            );
-            write_json(&work_config, &document)?;
+            let tags = normalize_tags(&request.tags)
+                .into_iter()
+                .map(CstInputValue::from)
+                .collect();
+            update_jsonc_property(&work_config, "CustomTags", CstInputValue::Array(tags))?;
             modified_files.push(work_config);
         }
         self.index.set_tags(&component.path, &request.tags)?;
@@ -351,12 +348,12 @@ impl ComponentService {
 
     pub fn regenerate_manifest_uuids(&self, component_id: &str) -> Result<OperationResult> {
         let _guard = self.index.try_lock_mutations()?;
-        let component = self.find_component(component_id)?;
-        let modified_files = regenerate_manifest_identifiers(&component.path)?;
-        let updated = self.find_component(component_id)?;
+        let path = self.indexed_component_path(component_id)?;
+        let modified_files = regenerate_manifest_identifiers(&path)?;
+        let updated = self.discovery.get_indexed(component_id)?;
         Ok(OperationResult {
             component: Some(updated),
-            actual_path: component.path,
+            actual_path: path,
             modified_files,
             warnings: Vec::new(),
         })
@@ -367,12 +364,12 @@ impl ComponentService {
         request: &BumpManifestVersionRequest,
     ) -> Result<OperationResult> {
         let _guard = self.index.try_lock_mutations()?;
-        let component = self.find_component(&request.component_id)?;
-        let modified_files = bump_manifest_versions(&component.path, request.part)?;
-        let updated = self.find_component(&request.component_id)?;
+        let path = self.indexed_component_path(&request.component_id)?;
+        let modified_files = bump_manifest_versions(&path, request.part)?;
+        let updated = self.discovery.get_indexed(&request.component_id)?;
         Ok(OperationResult {
             component: Some(updated),
-            actual_path: component.path,
+            actual_path: path,
             modified_files,
             warnings: Vec::new(),
         })
@@ -457,6 +454,17 @@ impl ComponentService {
             .into_iter()
             .find(|component| component.id == id)
             .ok_or_else(|| CoreError::InvalidInput(format!("找不到组件 ID：{id}")))
+    }
+
+    fn indexed_component_path(&self, id: &str) -> Result<PathBuf> {
+        let path = self
+            .index
+            .component_path(id)?
+            .ok_or_else(|| CoreError::InvalidInput(format!("找不到组件 ID：{id}")))?;
+        if !path.is_dir() {
+            return Err(CoreError::NotFound(path));
+        }
+        Ok(path)
     }
 
     fn current_components(&self) -> Result<Vec<ComponentSummary>> {
@@ -865,37 +873,43 @@ fn regenerate_manifest_identifiers(root: &Path) -> Result<Vec<PathBuf>> {
     let mut documents = Vec::new();
     let mut header_map = HashMap::new();
     for path in manifests {
-        let mut document = read_json(&path)?;
-        if let Some(header) = document.get_mut("header").and_then(Value::as_object_mut)
-            && let Some(old_uuid) = header.get("uuid").and_then(Value::as_str)
-        {
-            let new_uuid = Uuid::new_v4().to_string();
-            header_map.insert(old_uuid.to_owned(), new_uuid.clone());
-            header.insert("uuid".into(), Value::String(new_uuid));
-        }
-        if let Some(modules) = document.get_mut("modules").and_then(Value::as_array_mut) {
-            for module in modules {
-                if let Some(module) = module.as_object_mut() {
-                    module.insert("uuid".into(), Value::String(Uuid::new_v4().to_string()));
+        let document = EditableJsonc::read(&path)?;
+        if let Some(root_object) = document.root.object_value() {
+            if let Some(header) = root_object.object_value("header")
+                && let Some(old_uuid) = object_string(&header, "uuid")
+            {
+                let new_uuid = Uuid::new_v4().to_string();
+                header_map.insert(old_uuid.to_ascii_lowercase(), new_uuid.clone());
+                set_string_property(&header, "uuid", new_uuid);
+            }
+            if let Some(modules) = root_object.array_value("modules") {
+                for module in modules.elements() {
+                    if let Some(module) = module.as_object() {
+                        set_string_property(&module, "uuid", Uuid::new_v4().to_string());
+                    }
                 }
             }
         }
         documents.push((path, document));
     }
     for (_, document) in &mut documents {
-        rewrite_uuid_references(document, &header_map);
+        if let Some(value) = document.root.value() {
+            rewrite_uuid_references(&value, &header_map);
+        }
     }
     for name in ["world_behavior_packs.json", "world_resource_packs.json"] {
         let path = root.join(name);
         if path.is_file() {
-            let mut document = read_json(&path)?;
-            rewrite_uuid_references(&mut document, &header_map);
+            let document = EditableJsonc::read(&path)?;
+            if let Some(value) = document.root.value() {
+                rewrite_uuid_references(&value, &header_map);
+            }
             documents.push((path, document));
         }
     }
     let mut modified = Vec::new();
     for (path, document) in documents {
-        write_json(&path, &document)?;
+        document.write(&path)?;
         modified.push(path);
     }
     Ok(modified)
@@ -909,22 +923,25 @@ fn bump_manifest_versions(root: &Path, part: VersionPart) -> Result<Vec<PathBuf>
     let mut documents = Vec::new();
     let mut version_map = HashMap::new();
     for path in manifests {
-        let mut document = read_json(&path)?;
-        let Some(header) = document.get_mut("header").and_then(Value::as_object_mut) else {
+        let document = EditableJsonc::read(&path)?;
+        let Some(root_object) = document.root.object_value() else {
             continue;
         };
-        let Some(version) = header.get("version").and_then(version_array) else {
+        let Some(header) = root_object.object_value("header") else {
+            continue;
+        };
+        let Some(version) = object_version(&header, "version") else {
             continue;
         };
         let new_version = bump_version(version, part)?;
-        if let Some(uuid) = header.get("uuid").and_then(Value::as_str) {
+        if let Some(uuid) = object_string(&header, "uuid") {
             version_map.insert(uuid.to_ascii_lowercase(), new_version);
         }
-        header.insert("version".into(), version_value(new_version));
-        if let Some(modules) = document.get_mut("modules").and_then(Value::as_array_mut) {
-            for module in modules {
-                if let Some(module) = module.as_object_mut() {
-                    module.insert("version".into(), version_value(new_version));
+        set_version_property(&header, "version", new_version);
+        if let Some(modules) = root_object.array_value("modules") {
+            for module in modules.elements() {
+                if let Some(module) = module.as_object() {
+                    set_version_property(&module, "version", new_version);
                 }
             }
         }
@@ -937,20 +954,24 @@ fn bump_manifest_versions(root: &Path, part: VersionPart) -> Result<Vec<PathBuf>
     }
 
     for (_, document) in &mut documents {
-        rewrite_version_references(document, &version_map);
+        if let Some(value) = document.root.value() {
+            rewrite_version_references(&value, &version_map);
+        }
     }
     for name in ["world_behavior_packs.json", "world_resource_packs.json"] {
         let path = root.join(name);
         if path.is_file() {
-            let mut document = read_json(&path)?;
-            rewrite_version_references(&mut document, &version_map);
+            let document = EditableJsonc::read(&path)?;
+            if let Some(value) = document.root.value() {
+                rewrite_version_references(&value, &version_map);
+            }
             documents.push((path, document));
         }
     }
 
     let mut modified = Vec::new();
     for (path, document) in documents {
-        write_json(&path, &document)?;
+        document.write(&path)?;
         modified.push(path);
     }
     Ok(modified)
@@ -973,64 +994,106 @@ fn bump_version(version: [u64; 3], part: VersionPart) -> Result<[u64; 3]> {
     }
 }
 
-fn rewrite_version_references(value: &mut Value, mapping: &HashMap<String, [u64; 3]>) {
-    match value {
-        Value::Array(values) => {
-            for value in values {
-                rewrite_version_references(value, mapping);
+fn rewrite_version_references(node: &CstNode, mapping: &HashMap<String, [u64; 3]>) {
+    if let Some(object) = node.as_object() {
+        let referenced_uuid = object_string(&object, "uuid")
+            .or_else(|| object_string(&object, "pack_id"))
+            .map(|uuid| uuid.to_ascii_lowercase());
+        if let Some(version) = referenced_uuid.and_then(|uuid| mapping.get(&uuid)) {
+            set_version_property(&object, "version", *version);
+        }
+        for property in object.properties() {
+            if let Some(value) = property.value() {
+                rewrite_version_references(&value, mapping);
             }
         }
-        Value::Object(values) => {
-            let referenced_uuid = values
-                .get("uuid")
-                .or_else(|| values.get("pack_id"))
-                .and_then(Value::as_str)
-                .map(str::to_ascii_lowercase);
-            if let Some(version) = referenced_uuid.and_then(|uuid| mapping.get(&uuid)) {
-                values.insert("version".into(), version_value(*version));
-            }
-            for value in values.values_mut() {
-                rewrite_version_references(value, mapping);
-            }
+    } else if let Some(array) = node.as_array() {
+        for element in array.elements() {
+            rewrite_version_references(&element, mapping);
         }
-        _ => {}
     }
 }
 
-fn version_array(value: &Value) -> Option<[u64; 3]> {
-    let values = value.as_array()?;
+fn object_version(object: &CstObject, name: &str) -> Option<[u64; 3]> {
+    let values = object.array_value(name)?.elements();
     if values.len() != 3 {
         return None;
     }
     Some([
-        values[0].as_u64()?,
-        values[1].as_u64()?,
-        values[2].as_u64()?,
+        values[0].as_number_lit()?.to_string().parse().ok()?,
+        values[1].as_number_lit()?.to_string().parse().ok()?,
+        values[2].as_number_lit()?.to_string().parse().ok()?,
     ])
 }
 
-fn version_value(version: [u64; 3]) -> Value {
-    Value::Array(version.into_iter().map(Value::from).collect())
+fn set_version_property(object: &CstObject, name: &str, version: [u64; 3]) {
+    if let Some(array) = object.array_value(name) {
+        let elements = array.elements();
+        if elements.len() == 3
+            && elements
+                .iter()
+                .all(|element| element.as_number_lit().is_some())
+        {
+            for (element, value) in elements.into_iter().zip(version) {
+                element
+                    .as_number_lit()
+                    .expect("version element was checked as a number")
+                    .set_raw_value(value.to_string());
+            }
+            return;
+        }
+    }
+
+    let value = version_input(version);
+    if let Some(property) = object.get(name) {
+        property.set_value(value);
+    } else {
+        object.append(name, value);
+    }
 }
 
-fn rewrite_uuid_references(value: &mut Value, mapping: &HashMap<String, String>) {
-    match value {
-        Value::String(text) => {
-            if let Some(replacement) = mapping.get(text) {
-                *text = replacement.clone();
+fn version_input(version: [u64; 3]) -> CstInputValue {
+    CstInputValue::Array(version.into_iter().map(CstInputValue::from).collect())
+}
+
+fn object_string(object: &CstObject, name: &str) -> Option<String> {
+    object
+        .get(name)?
+        .value()?
+        .as_string_lit()?
+        .decoded_value()
+        .ok()
+}
+
+fn set_string_property(object: &CstObject, name: &str, value: String) {
+    if let Some(property) = object.get(name) {
+        if let Some(string) = property.value().and_then(|value| value.as_string_lit()) {
+            string.set_raw_value(format!("\"{value}\""));
+        } else {
+            property.set_value(CstInputValue::String(value));
+        }
+    } else {
+        object.append(name, CstInputValue::String(value));
+    }
+}
+
+fn rewrite_uuid_references(node: &CstNode, mapping: &HashMap<String, String>) {
+    if let Some(string) = node.as_string_lit() {
+        if let Ok(value) = string.decoded_value()
+            && let Some(replacement) = mapping.get(&value.to_ascii_lowercase())
+        {
+            string.set_raw_value(format!("\"{replacement}\""));
+        }
+    } else if let Some(array) = node.as_array() {
+        for element in array.elements() {
+            rewrite_uuid_references(&element, mapping);
+        }
+    } else if let Some(object) = node.as_object() {
+        for property in object.properties() {
+            if let Some(value) = property.value() {
+                rewrite_uuid_references(&value, mapping);
             }
         }
-        Value::Array(values) => {
-            for value in values {
-                rewrite_uuid_references(value, mapping);
-            }
-        }
-        Value::Object(values) => {
-            for value in values.values_mut() {
-                rewrite_uuid_references(value, mapping);
-            }
-        }
-        _ => {}
     }
 }
 
@@ -1056,11 +1119,45 @@ fn read_json(path: &Path) -> Result<Value> {
     parse_jsonc(&text, path)
 }
 
-fn write_json(path: &Path, document: &Value) -> Result<()> {
-    let mut content =
-        serde_json::to_string_pretty(document).map_err(|error| CoreError::json(path, error))?;
-    content.push('\n');
-    atomic_write(path, content.as_bytes())
+struct EditableJsonc {
+    root: CstRootNode,
+    has_bom: bool,
+}
+
+impl EditableJsonc {
+    fn read(path: &Path) -> Result<Self> {
+        let text = fs::read_to_string(path).map_err(|error| CoreError::io(path, error))?;
+        let has_bom = text.starts_with('\u{feff}');
+        let text = text.trim_start_matches('\u{feff}');
+        let root = CstRootNode::parse(text, &parse_options())
+            .map_err(|error| CoreError::json(path, error))?;
+        Ok(Self { root, has_bom })
+    }
+
+    fn write(self, path: &Path) -> Result<()> {
+        let content = self.root.to_string();
+        if self.has_bom {
+            let mut bytes = Vec::with_capacity(3 + content.len());
+            bytes.extend_from_slice(&[0xef, 0xbb, 0xbf]);
+            bytes.extend_from_slice(content.as_bytes());
+            atomic_write(path, &bytes)
+        } else {
+            atomic_write(path, content.as_bytes())
+        }
+    }
+}
+
+fn update_jsonc_property(path: &Path, name: &str, value: CstInputValue) -> Result<()> {
+    let document = EditableJsonc::read(path)?;
+    let object = document.root.object_value().ok_or_else(|| {
+        CoreError::InvalidInput(format!("JSON 根节点不是对象：{}", path.display()))
+    })?;
+    if let Some(property) = object.get(name) {
+        property.set_value(value);
+    } else {
+        object.append(name, value);
+    }
+    document.write(path)
 }
 
 fn atomic_write(path: &Path, content: &[u8]) -> Result<()> {
@@ -1760,16 +1857,38 @@ mod tests {
                     "format_version": 2,
                     "header": {{
                         "name": "JSONC 模组",
+                        // header UUID comment must survive
                         "uuid": "{header_uuid}",
-                        "version": [1, 0, 0],
+                        "version": [
+                            // major version comment must survive
+                            1, 0, 0,
+                        ],
                     }},
                     /* block comments are supported too */
                     "modules": [{{
                         "type": "data",
                         "uuid": "{module_uuid}",
-                        "version": [1, 0, 0],
+                        "version": [1, 0, 0,], /* module version comment must survive */
+                    }}],
+                    "dependencies": [{{
+                        // dependency reference comment must survive
+                        "uuid": "{header_uuid}",
+                        "version": [1, 0, 0,],
                     }}],
                 }}"#
+            ),
+        )
+        .unwrap();
+        fs::write(
+            component_root.join("world_behavior_packs.json"),
+            format!(
+                r#"[
+                    {{
+                        // world pack comment must survive
+                        "pack_id": "{header_uuid}",
+                        "version": [1, 0, 0,],
+                    }},
+                ]"#
             ),
         )
         .unwrap();
@@ -1790,20 +1909,51 @@ mod tests {
             .remove(0);
         assert_eq!(component.name, "JSONC 模组");
 
-        ComponentService::new(index)
-            .with_mcs_work_roots(Vec::new())
+        let service = ComponentService::new(index).with_mcs_work_roots(Vec::new());
+        let regenerated = service.regenerate_manifest_uuids(&component.id).unwrap();
+        assert!(regenerated.component.is_some());
+        let after_uuid = fs::read_to_string(component_root.join("manifest.json")).unwrap();
+        assert!(after_uuid.contains("// manifest may contain line comments"));
+        assert!(after_uuid.contains("// header UUID comment must survive"));
+        assert!(after_uuid.contains("// major version comment must survive"));
+        assert!(after_uuid.contains("// dependency reference comment must survive"));
+        assert!(after_uuid.contains("/* block comments are supported too */"));
+        assert!(after_uuid.contains("/* module version comment must survive */"));
+        assert!(!after_uuid.contains(&header_uuid.to_string()));
+        assert!(!after_uuid.contains(&module_uuid.to_string()));
+        let world_after_uuid =
+            fs::read_to_string(component_root.join("world_behavior_packs.json")).unwrap();
+        assert!(world_after_uuid.contains("// world pack comment must survive"));
+        assert!(!world_after_uuid.contains(&header_uuid.to_string()));
+
+        service
             .bump_manifest_version(&BumpManifestVersionRequest {
                 component_id: component.id,
                 part: VersionPart::Patch,
             })
             .unwrap();
         let written = fs::read_to_string(component_root.join("manifest.json")).unwrap();
-        let written: Value = serde_json::from_str(&written).unwrap();
+        assert!(written.contains("// manifest may contain line comments"));
+        assert!(written.contains("// header UUID comment must survive"));
+        assert!(written.contains("// major version comment must survive"));
+        assert!(written.contains("// dependency reference comment must survive"));
+        assert!(written.contains("/* block comments are supported too */"));
+        assert!(written.contains("/* module version comment must survive */"));
+        let written: Value = parse_jsonc(&written, "written-jsonc").unwrap();
         assert_eq!(written["header"]["version"], serde_json::json!([1, 0, 1]));
         assert_eq!(
             written["modules"][0]["version"],
             serde_json::json!([1, 0, 1])
         );
+        assert_eq!(
+            written["dependencies"][0]["version"],
+            serde_json::json!([1, 0, 1])
+        );
+        let world_written =
+            fs::read_to_string(component_root.join("world_behavior_packs.json")).unwrap();
+        assert!(world_written.contains("// world pack comment must survive"));
+        let world_written: Value = parse_jsonc(&world_written, "written-world-jsonc").unwrap();
+        assert_eq!(world_written[0]["version"], serde_json::json!([1, 0, 1]));
     }
 
     #[test]
@@ -1812,15 +1962,18 @@ mod tests {
         let index = LocalIndex::open(temp.path().join("state/mcdh.db")).unwrap();
         let work = temp.path().join("work");
         let addon = work.join("account/Cpp/AddOn/addon-id");
-        write_json(
-            &addon.join("work.mcscfg"),
-            serde_json::json!({
+        fs::create_dir_all(&addon).unwrap();
+        fs::write(
+            addon.join("work.mcscfg"),
+            r#"{
+                // custom MCS comment must survive tag updates
                 "UID": "addon-id",
                 "Type": 7,
                 "Name": "标签模组",
-                "CustomTags": []
-            }),
-        );
+                "CustomTags": [],
+            }"#,
+        )
+        .unwrap();
         write_json(
             &addon.join("behavior/manifest.json"),
             manifest("Behavior", "data", Uuid::new_v4()),
@@ -1839,6 +1992,11 @@ mod tests {
             })
             .unwrap();
         assert_eq!(result.component.unwrap().tags, vec!["开发", "测试"]);
+        assert!(
+            fs::read_to_string(addon.join("work.mcscfg"))
+                .unwrap()
+                .contains("// custom MCS comment must survive tag updates")
+        );
         assert_eq!(
             read_json(&addon.join("work.mcscfg")).unwrap()["CustomTags"],
             serde_json::json!(["开发", "测试"])

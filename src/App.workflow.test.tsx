@@ -6,6 +6,8 @@ const mocks = vi.hoisted(() => ({
   settings: vi.fn(),
   setSettings: vi.fn(),
   delete: vi.fn(),
+  regenerateUuids: vi.fn(),
+  bumpVersion: vi.fn(),
   openWarningDirectory: vi.fn(),
   removeSource: vi.fn(),
 }));
@@ -17,6 +19,8 @@ vi.mock("./api", () => ({
     settings: mocks.settings,
     setSettings: mocks.setSettings,
     delete: mocks.delete,
+    regenerateUuids: mocks.regenerateUuids,
+    bumpVersion: mocks.bumpVersion,
     openWarningDirectory: mocks.openWarningDirectory,
     removeSource: mocks.removeSource,
   },
@@ -39,6 +43,8 @@ describe("component workspace filters", () => {
     });
     mocks.setSettings.mockReset();
     mocks.delete.mockReset().mockResolvedValue({ actual_path: "", modified_files: [], warnings: [] });
+    mocks.regenerateUuids.mockReset();
+    mocks.bumpVersion.mockReset();
     mocks.openWarningDirectory.mockReset().mockResolvedValue(undefined);
     mocks.removeSource.mockReset().mockResolvedValue(true);
   });
@@ -160,6 +166,49 @@ describe("component workspace filters", () => {
     fireEvent.click(screen.getByRole("button", { name: "删除" }));
     await waitFor(() => expect(mocks.delete).toHaveBeenCalledWith("delete-me"));
     expect(confirm).toHaveBeenCalledTimes(2);
+    confirm.mockRestore();
+  });
+
+  it("updates UUID and version results without rescanning every source", async () => {
+    const component = {
+      id: "fast-update",
+      name: "快速配置模组",
+      kind: "addon" as const,
+      path: "D:\\快速配置",
+      origin: { kind: "library" as const, source_id: "library" },
+      manifests: [],
+      version: [1, 0, 0] as [number, number, number],
+      tags: [],
+      size_bytes: 16,
+    };
+    mocks.refresh.mockResolvedValue({ components: [component], sources: [], warnings: [] });
+    mocks.regenerateUuids.mockResolvedValue({
+      component,
+      actual_path: component.path,
+      modified_files: [component.path + "\\manifest.json"],
+      warnings: [],
+    });
+    const bumped = { ...component, version: [1, 0, 1] as [number, number, number] };
+    mocks.bumpVersion.mockResolvedValue({
+      component: bumped,
+      actual_path: component.path,
+      modified_files: [component.path + "\\manifest.json"],
+      warnings: [],
+    });
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
+    render(<App />);
+    await waitFor(() => expect(screen.getByText("快速配置模组")).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole("button", { name: "配置 快速配置模组" }));
+    fireEvent.click(screen.getByRole("button", { name: "随机重生" }));
+    await waitFor(() => expect(mocks.regenerateUuids).toHaveBeenCalledWith(component.id));
+    expect(mocks.refresh).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByRole("button", { name: "配置 快速配置模组" }));
+    fireEvent.click(screen.getByRole("button", { name: "提升版本" }));
+    await waitFor(() => expect(mocks.bumpVersion).toHaveBeenCalledWith(component.id, "patch"));
+    expect(mocks.refresh).toHaveBeenCalledTimes(1);
+    expect(screen.getByText("v1.0.1")).toBeInTheDocument();
     confirm.mockRestore();
   });
 

@@ -40,6 +40,7 @@ import type {
   DiscoveryResult,
   DiscoveryWarning,
   IdentityPolicy,
+  OperationResult,
   SourceRecord,
   VersionPart,
 } from "./types";
@@ -222,7 +223,19 @@ export function App() {
       {modal === "import" && <ImportDialog onClose={() => setModal(null)} onDone={(message) => { setModal(null); void done(message); }} />}
       {modal === "settings" && <SettingsDialog settings={settings} onSettings={setSettings} onClose={() => setModal(null)} onChanged={() => void refresh()} onNotice={setNotice} />}
       {modal === "warnings" && <WarningsDialog warnings={result.warnings} sources={result.sources} ignoredKeys={ignoredWarningKeys} onIgnore={setWarningIgnored} onRemoveSource={removeWarningSource} onClose={() => setModal(null)} onNotice={setNotice} />}
-      {selected && <ComponentDialog component={selected} onClose={() => setSelected(null)} onDone={(message) => { setSelected(null); void done(message); }} onNotice={setNotice} />}
+      {selected && <ComponentDialog component={selected} onClose={() => setSelected(null)} onDone={(message, operation, refreshAfter) => {
+        setSelected(null);
+        const updated = operation.component;
+        if (!refreshAfter && updated) {
+          setResult((current) => ({
+            ...current,
+            components: current.components.map((component) => component.id === updated.id ? updated : component),
+          }));
+          setNotice(message);
+        } else {
+          void done(message);
+        }
+      }} onNotice={setNotice} />}
       {notice && <div className="toast" role="status">{notice}</div>}
     </div>
   );
@@ -478,14 +491,14 @@ function SettingsDialog({ settings: initialSettings, onSettings, onClose, onChan
   );
 }
 
-function ComponentDialog({ component, onClose, onDone, onNotice }: { component: ComponentSummary; onClose: () => void; onDone: (message: string) => void; onNotice: (message: string) => void }) {
+function ComponentDialog({ component, onClose, onDone, onNotice }: { component: ComponentSummary; onClose: () => void; onDone: (message: string, operation: OperationResult, refreshAfter: boolean) => void; onNotice: (message: string) => void }) {
   const [tags, setTags] = useState(component.tags.join(", "));
   const [destination, setDestination] = useState("");
   const [mcs, setMcs] = useState(false);
   const [identity, setIdentity] = useState<"preserve" | "regenerate">("regenerate");
   const [part, setPart] = useState<VersionPart>("patch");
   const [busy, setBusy] = useState("");
-  const run = async (label: string, action: () => Promise<unknown>, message: string) => { setBusy(label); try { await action(); onDone(message); } catch (error) { onNotice(errorMessage(error)); } finally { setBusy(""); } };
+  const run = async (label: string, action: () => Promise<OperationResult>, message: string, refreshAfter = true) => { setBusy(label); try { onDone(message, await action(), refreshAfter); } catch (error) { onNotice(errorMessage(error)); } finally { setBusy(""); } };
   const needDestination = () => { if (destination) return true; onNotice("请先选择目标目录。" ); return false; };
   const remove = () => {
     if (!window.confirm(`确定删除“${component.name}”吗？`)) return;
@@ -498,8 +511,8 @@ function ComponentDialog({ component, onClose, onDone, onNotice }: { component: 
         <section>
           <h3>快捷配置</h3>
           <Field label="标签（使用逗号分隔）"><div className="inline-action"><input value={tags} onChange={(event) => setTags(event.target.value)} placeholder="开发, 测试" /><button disabled={!!busy} onClick={() => void run("tags", () => api.tags(component.id, tags.split(/[,，]/)), "标签已保存")}>保存</button></div></Field>
-          <div className="config-row"><div><strong>Manifest UUID</strong><p>重生 header、module，并同步内部依赖和地图清单。</p></div><button disabled={!!busy} onClick={() => { if (window.confirm("确定重生所有已识别 manifest UUID？")) void run("uuid", () => api.regenerateUuids(component.id), "UUID 已重新生成"); }}>随机重生</button></div>
-          <div className="config-row"><div><strong>包版本</strong><p>同步 header、module、依赖和地图包清单。</p></div><select value={part} onChange={(event) => setPart(event.target.value as VersionPart)}><option value="patch">Patch</option><option value="minor">Minor</option><option value="major">Major</option></select><button disabled={!!busy} onClick={() => void run("version", () => api.bumpVersion(component.id, part), "版本已提升")}>提升版本</button></div>
+          <div className="config-row"><div><strong>Manifest UUID</strong><p>重生 header、module，并同步内部依赖和地图清单；保留 JSONC 注释。</p></div><button disabled={!!busy} onClick={() => { if (window.confirm("确定重生所有已识别 manifest UUID？")) void run("uuid", () => api.regenerateUuids(component.id), "UUID 已重新生成", false); }}>随机重生</button></div>
+          <div className="config-row"><div><strong>包版本</strong><p>同步 header、module、依赖和地图包清单；保留 JSONC 注释。</p></div><select value={part} onChange={(event) => setPart(event.target.value as VersionPart)}><option value="patch">Patch</option><option value="minor">Minor</option><option value="major">Major</option></select><button disabled={!!busy} onClick={() => void run("version", () => api.bumpVersion(component.id, part), "版本已提升", false)}>提升版本</button></div>
         </section>
         <section>
           <h3>复制、移动、导出与删除</h3>

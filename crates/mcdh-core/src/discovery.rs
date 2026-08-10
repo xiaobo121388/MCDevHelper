@@ -159,6 +159,65 @@ impl DiscoveryService {
             .ok_or_else(|| CoreError::InvalidInput(format!("找不到组件 ID：{id}")))
     }
 
+    pub(crate) fn get_indexed(&self, id: &str) -> Result<ComponentSummary> {
+        let path = self
+            .index
+            .component_path(id)?
+            .ok_or_else(|| CoreError::InvalidInput(format!("找不到组件 ID：{id}")))?;
+        let path = canonicalize(&path)?;
+        let target_key = path_key(&path);
+
+        for source in self.index.list_sources()? {
+            let source_key = path_key(&source.path);
+            let direct_child = path
+                .parent()
+                .is_some_and(|parent| path_key(parent) == source_key);
+            let (matches, origin, context) = match source.kind {
+                SourceKind::Single => (
+                    target_key == source_key,
+                    ComponentOrigin::Single {
+                        source_id: source.id,
+                    },
+                    None,
+                ),
+                SourceKind::Library => (
+                    direct_child,
+                    ComponentOrigin::Library {
+                        source_id: source.id,
+                    },
+                    None,
+                ),
+                SourceKind::McsAuto => (
+                    direct_child,
+                    ComponentOrigin::Mcs {
+                        source_path: source.path.clone(),
+                    },
+                    mcs_context_for_category(&source.path),
+                ),
+            };
+            if matches {
+                return self.inspect(&path, origin, context);
+            }
+        }
+
+        if let Some(category_path) = path.parent()
+            && let Some(context) = mcs_context_for_category(category_path)
+        {
+            return self.inspect(
+                &path,
+                ComponentOrigin::Mcs {
+                    source_path: category_path.to_path_buf(),
+                },
+                Some(context),
+            );
+        }
+
+        Err(CoreError::InvalidInput(format!(
+            "组件已不在已配置的来源目录中：{}",
+            path.display()
+        )))
+    }
+
     fn scan_mcs(
         &self,
         work_roots: &[PathBuf],

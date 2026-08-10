@@ -6,7 +6,12 @@ use serde::de::DeserializeOwned;
 use crate::{CoreError, Result};
 
 pub(crate) fn parse_jsonc<T: DeserializeOwned>(text: &str, path: impl AsRef<Path>) -> Result<T> {
-    let options = ParseOptions {
+    parse_to_serde_value(text.trim_start_matches('\u{feff}'), &parse_options())
+        .map_err(|error| CoreError::json(path, error))
+}
+
+pub(crate) fn parse_options() -> ParseOptions {
+    ParseOptions {
         allow_comments: true,
         allow_loose_object_property_names: false,
         allow_trailing_commas: true,
@@ -14,9 +19,7 @@ pub(crate) fn parse_jsonc<T: DeserializeOwned>(text: &str, path: impl AsRef<Path
         allow_single_quoted_strings: false,
         allow_hexadecimal_numbers: false,
         allow_unary_plus_numbers: false,
-    };
-    parse_to_serde_value(text.trim_start_matches('\u{feff}'), &options)
-        .map_err(|error| CoreError::json(path, error))
+    }
 }
 
 #[cfg(test)]
