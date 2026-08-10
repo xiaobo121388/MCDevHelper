@@ -564,8 +564,8 @@ function SettingsDialog({ settings: initialSettings, onSettings, onClose, onChan
               {updateResult && <div className={`update-result ${updateResult.update_available ? "available" : "current"}`}>
                 <Info size={17} />
                 <div>
-                  <strong>{updateResult.no_release ? "尚无正式 Release" : updateResult.update_available ? `发现新版本 ${updateResult.latest_version}` : "当前已是最新版本"}</strong>
-                  <p>{updateResult.no_release ? "官方仓库目前没有可供检查的正式 Release。" : `${updateResult.release_name || updateResult.latest_version}${updateResult.published_at ? ` · ${formatDate(updateResult.published_at)}` : ""}`}</p>
+                  <strong>{updateResult.no_release ? "未找到公开 Release" : updateResult.update_available ? `发现新版本 ${updateResult.latest_version}` : "当前已是最新版本"}</strong>
+                  <p>{updateResult.no_release ? "仓库可能尚未发布正式版本，或当前未公开。" : `${updateResult.release_name || updateResult.latest_version}${updateResult.published_at ? ` · ${formatDate(updateResult.published_at)}` : ""}`}</p>
                 </div>
                 {updateResult.release_url && <button className="button secondary" onClick={() => void openGitHub(updateResult.release_url!)}>查看 Release<ExternalLink size={14} /></button>}
               </div>}

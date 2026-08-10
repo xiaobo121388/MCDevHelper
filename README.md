@@ -46,7 +46,7 @@ UUID 重生、版本提升和标签同步会在原 JSONC 文本中定点更新�
 
 ## 检查更新与反馈
 
-打开“设置 > 关于”可以查看当前版本。MCDH 不会在启动或后台自动检查；只有点击“检查更新”后，才会向 GitHub 官方 [`GET /repos/xiaobo121388/MCDevHelper/releases/latest`](https://docs.github.com/en/rest/releases/releases?apiVersion=2026-03-10#get-the-latest-release) 接口发起一次未认证请求，并展示最新正式 Release，不会自动下载或安装。
+打开“设置 > 关于”可以查看当前版本。MCDH 不会在启动或后台自动检查；只有点击“检查更新”后，才会向 GitHub 官方 [`GET /repos/xiaobo121388/MCDevHelper/releases/latest`](https://docs.github.com/en/rest/releases/releases?apiVersion=2026-03-10#get-the-latest-release) 接口发起一次未认证请求，并展示最新正式 Release，不会自动下载或安装。未认证请求只能读取公开资源；仓库未公开或尚无正式 Release 时会显示“未找到公开 Release”。
 
 “反馈问题”会使用系统默认浏览器打开仓库的 GitHub 新建 Issue 页面，MCDH 不会代替用户填写或提交内容。
 
