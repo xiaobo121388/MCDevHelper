@@ -1,10 +1,10 @@
 use std::path::PathBuf;
 
 use mcdh_core::{
-    BumpManifestVersionRequest, ComponentKind, ComponentService, CopyComponentRequest,
+    AppSettings, BumpManifestVersionRequest, ComponentKind, ComponentService, CopyComponentRequest,
     CreateComponentRequest, DiscoveryService, ExportComponentRequest, IdentityPolicy,
     ImportComponentRequest, LocalIndex, MoveComponentRequest, SetComponentTagsRequest, SourceKind,
-    VersionPart,
+    ThemePreference, VersionPart,
 };
 use rmcp::{
     Json, ServerHandler, ServiceExt,
@@ -57,12 +57,12 @@ impl McdhServer {
         json_result(self.service().get_component(&params.component_id))
     }
 
-    #[tool(description = "重新扫描 MCS 和所有自定义来源，并返回组件、来源及扫描警告")]
+    #[tool(description = "重新扫描已保存的 MCS 和自定义来源，并返回组件、来源及扫描警告")]
     fn refresh_components(&self, Parameters(_): Parameters<EmptyParams>) -> ToolResult {
         json_result(DiscoveryService::new(self.index.clone()).refresh())
     }
 
-    #[tool(description = "列出用户添加的单组件路径和组件库路径；MCS 自动来源不写入此列表")]
+    #[tool(description = "列出已保存的 MCS 分类目录、单组件路径和组件库路径")]
     fn list_sources(&self, Parameters(_): Parameters<EmptyParams>) -> ToolResult {
         json_result(self.index.list_sources())
     }
@@ -77,9 +77,37 @@ impl McdhServer {
         json_result(self.index.add_source(SourceKind::Library, params.path))
     }
 
+    #[tool(
+        description = "保存一个 MCStudio 分类目录或其上级目录；自动展开有效的 AddOn、Map、Material、Light 目录"
+    )]
+    fn add_mcs_path(&self, Parameters(params): Parameters<PathParams>) -> ToolResult {
+        json_result(DiscoveryService::new(self.index.clone()).add_mcs_source_path(&params.path))
+    }
+
+    #[tool(description = "重新枚举 Windows 逻辑磁盘并保存当前找到的 MCStudio 作品分类目录")]
+    fn rescan_mcs_paths(&self, Parameters(_): Parameters<EmptyParams>) -> ToolResult {
+        json_result(DiscoveryService::new(self.index.clone()).rescan_mcs_sources())
+    }
+
     #[tool(description = "移除一个自定义来源登记；不会删除来源目录或其中组件")]
     fn remove_source(&self, Parameters(params): Parameters<SourceIdParams>) -> ToolResult {
         json_result(self.index.remove_source(&params.source_id))
+    }
+
+    #[tool(description = "读取本地开发者身份、默认新建目录和界面主题设置")]
+    fn get_settings(&self, Parameters(_): Parameters<EmptyParams>) -> ToolResult {
+        json_result(self.index.app_settings())
+    }
+
+    #[tool(description = "保存本地开发者身份、默认新建目录和界面主题设置")]
+    fn set_settings(&self, Parameters(params): Parameters<SettingsParams>) -> ToolResult {
+        json_result(self.index.set_app_settings(&AppSettings {
+            developer_nickname: params.developer_nickname,
+            developer_account: params.developer_account,
+            developer_user_id: params.developer_user_id,
+            default_destination: params.default_destination,
+            theme: params.theme.into(),
+        }))
     }
 
     #[tool(description = "从内置模板新建模组、材质或地图；MCS 模式会生成兼容配置和新 UID")]
@@ -231,6 +259,20 @@ struct PathParams {
 
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
+struct SettingsParams {
+    #[schemars(description = "写入 MCS 配置的本地开发者昵称")]
+    developer_nickname: String,
+    #[schemars(description = "写入 MCS 配置的本地开发者账号")]
+    developer_account: String,
+    #[schemars(description = "写入 MCS 配置的本地用户 ID")]
+    developer_user_id: String,
+    #[schemars(description = "新建组件默认目录；传 null 可清除默认值")]
+    default_destination: Option<PathBuf>,
+    theme: McpThemePreference,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 struct CreateParams {
     name: String,
     kind: McpComponentKind,
@@ -355,6 +397,24 @@ enum McpVersionPart {
     Minor,
     #[default]
     Patch,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+enum McpThemePreference {
+    Light,
+    Dark,
+    System,
+}
+
+impl From<McpThemePreference> for ThemePreference {
+    fn from(value: McpThemePreference) -> Self {
+        match value {
+            McpThemePreference::Light => Self::Light,
+            McpThemePreference::Dark => Self::Dark,
+            McpThemePreference::System => Self::System,
+        }
+    }
 }
 
 impl From<McpVersionPart> for VersionPart {

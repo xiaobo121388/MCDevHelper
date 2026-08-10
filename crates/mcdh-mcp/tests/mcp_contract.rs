@@ -100,7 +100,8 @@ fn initializes_lists_strict_schemas_and_calls_every_tool() {
     let moved = temp.path().join("移动");
     let imports = temp.path().join("导入");
     let exports = temp.path().join("导出");
-    for directory in [&library, &copies, &moved, &imports, &exports] {
+    let mcs_addon = temp.path().join("MCStudioDownload/work/account/Cpp/AddOn");
+    for directory in [&library, &copies, &moved, &imports, &exports, &mcs_addon] {
         std::fs::create_dir_all(directory).unwrap();
     }
     let path_text = |path: &Path| path.to_string_lossy().into_owned();
@@ -130,7 +131,11 @@ fn initializes_lists_strict_schemas_and_calls_every_tool() {
         "list_sources",
         "add_single_component",
         "add_library",
+        "add_mcs_path",
+        "rescan_mcs_paths",
         "remove_source",
+        "get_settings",
+        "set_settings",
         "create_component",
         "import_component",
         "copy_component",
@@ -151,6 +156,23 @@ fn initializes_lists_strict_schemas_and_calls_every_tool() {
 
     let library_source = client.call("add_library", json!({"path": path_text(&library)}));
     let library_source_id = library_source["id"].as_str().unwrap().to_owned();
+    let mcs_sources = client.call("add_mcs_path", json!({"path": path_text(&mcs_addon)}));
+    let mcs_source_id = mcs_sources[0]["id"].as_str().unwrap().to_owned();
+    client.call("rescan_mcs_paths", json!({}));
+    let default_settings = client.call("get_settings", json!({}));
+    assert_eq!(default_settings["theme"], "system");
+    let saved_settings = client.call(
+        "set_settings",
+        json!({
+            "developer_nickname": "协议开发者",
+            "developer_account": "protocol@local.invalid",
+            "developer_user_id": "42",
+            "default_destination": path_text(&library),
+            "theme": "dark"
+        }),
+    );
+    assert_eq!(saved_settings["developer_nickname"], "协议开发者");
+    assert_eq!(saved_settings["theme"], "dark");
     let created = client.call(
         "create_component",
         json!({
@@ -226,7 +248,7 @@ fn initializes_lists_strict_schemas_and_calls_every_tool() {
         json!({"component_id": component_id, "destination": path_text(&moved)}),
     );
     let sources = client.call("list_sources", json!({}));
-    assert!(sources.as_array().unwrap().len() >= 2);
+    assert!(sources.as_array().unwrap().len() >= 3);
 
     client.call_error(
         "open_component_directory",
@@ -238,5 +260,6 @@ fn initializes_lists_strict_schemas_and_calls_every_tool() {
     );
     client.call("remove_source", json!({"source_id": single_source_id}));
     client.call("remove_source", json!({"source_id": library_source_id}));
+    client.call("remove_source", json!({"source_id": mcs_source_id}));
     client.finish();
 }
