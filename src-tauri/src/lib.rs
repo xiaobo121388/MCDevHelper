@@ -1,5 +1,6 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::time::Duration;
 
 use mcdh_core::{
     AppSettings, BumpManifestVersionRequest, ComponentService, ComponentSummary,
@@ -7,7 +8,12 @@ use mcdh_core::{
     ExportComponentRequest, ImportComponentRequest, LocalIndex, MoveComponentRequest,
     OperationResult, SetComponentTagsRequest, SourceKind, SourceRecord, VsCodeStatus,
 };
+use serde::{Deserialize, Serialize};
 use tauri::State;
+
+const LATEST_RELEASE_API: &str =
+    "https://api.github.com/repos/xiaobo121388/MCDevHelper/releases/latest";
+const GITHUB_API_VERSION: &str = "2026-03-10";
 
 type CommandResult<T> = std::result::Result<T, ErrorPayload>;
 
@@ -30,6 +36,101 @@ impl AppState {
 #[tauri::command]
 fn app_version() -> &'static str {
     mcdh_core::VERSION
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct GitHubRelease {
+    tag_name: String,
+    name: Option<String>,
+    html_url: String,
+    published_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct UpdateCheckResult {
+    current_version: String,
+    latest_version: Option<String>,
+    release_name: Option<String>,
+    release_url: Option<String>,
+    published_at: Option<String>,
+    update_available: bool,
+    no_release: bool,
+}
+
+impl UpdateCheckResult {
+    fn no_release() -> Self {
+        Self {
+            current_version: mcdh_core::VERSION.into(),
+            latest_version: None,
+            release_name: None,
+            release_url: None,
+            published_at: None,
+            update_available: false,
+            no_release: true,
+        }
+    }
+
+    fn from_release(release: GitHubRelease) -> Self {
+        Self {
+            current_version: mcdh_core::VERSION.into(),
+            update_available: release_is_newer(mcdh_core::VERSION, &release.tag_name),
+            latest_version: Some(release.tag_name),
+            release_name: release.name,
+            release_url: Some(release.html_url),
+            published_at: release.published_at,
+            no_release: false,
+        }
+    }
+}
+
+#[tauri::command]
+async fn check_for_updates() -> CommandResult<UpdateCheckResult> {
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(12))
+        .build()
+        .map_err(|error| update_error(format!("无法初始化更新检查：{error}")))?;
+    let response = client
+        .get(LATEST_RELEASE_API)
+        .header(reqwest::header::ACCEPT, "application/vnd.github+json")
+        .header("X-GitHub-Api-Version", GITHUB_API_VERSION)
+        .header(
+            reqwest::header::USER_AGENT,
+            format!("MCDH/{}", mcdh_core::VERSION),
+        )
+        .send()
+        .await
+        .map_err(|error| update_error(format!("无法连接 GitHub：{error}")))?;
+
+    if response.status() == reqwest::StatusCode::NOT_FOUND {
+        return Ok(UpdateCheckResult::no_release());
+    }
+    if !response.status().is_success() {
+        return Err(update_error(format!(
+            "GitHub 返回 HTTP {}，请稍后重试",
+            response.status().as_u16()
+        )));
+    }
+    let release = response
+        .json::<GitHubRelease>()
+        .await
+        .map_err(|error| update_error(format!("GitHub Release 数据无法读取：{error}")))?;
+    Ok(UpdateCheckResult::from_release(release))
+}
+
+fn release_is_newer(current: &str, candidate: &str) -> bool {
+    let current = current.trim().trim_start_matches(['v', 'V']);
+    let candidate = candidate.trim().trim_start_matches(['v', 'V']);
+    match (
+        semver::Version::parse(current),
+        semver::Version::parse(candidate),
+    ) {
+        (Ok(current), Ok(candidate)) => candidate > current,
+        _ => candidate != current,
+    }
+}
+
+fn update_error(message: String) -> ErrorPayload {
+    mcdh_core::CoreError::InvalidInput(message).payload()
 }
 
 #[tauri::command]
@@ -253,6 +354,7 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .invoke_handler(tauri::generate_handler![
             app_version,
+            check_for_updates,
             mcp_client_config,
             refresh_components,
             get_component,
@@ -285,7 +387,7 @@ pub fn run() {
 
 #[cfg(test)]
 mod tests {
-    use super::nearest_existing_directory;
+    use super::{GitHubRelease, UpdateCheckResult, nearest_existing_directory, release_is_newer};
 
     #[test]
     fn warning_paths_fall_back_to_the_nearest_existing_parent() {
@@ -294,6 +396,29 @@ mod tests {
         assert_eq!(
             nearest_existing_directory(&missing).as_deref(),
             Some(crate_directory)
+        );
+    }
+
+    #[test]
+    fn release_comparison_accepts_v_prefix_and_ignores_older_versions() {
+        assert!(release_is_newer("0.1.0", "v0.2.0"));
+        assert!(!release_is_newer("0.1.0", "v0.1.0"));
+        assert!(!release_is_newer("0.1.0", "v0.0.9"));
+    }
+
+    #[test]
+    fn release_payload_preserves_the_official_download_page() {
+        let result = UpdateCheckResult::from_release(GitHubRelease {
+            tag_name: "v0.2.0".into(),
+            name: Some("MCDH 0.2.0".into()),
+            html_url: "https://github.com/xiaobo121388/MCDevHelper/releases/tag/v0.2.0".into(),
+            published_at: Some("2026-08-10T12:00:00Z".into()),
+        });
+        assert!(result.update_available);
+        assert_eq!(result.latest_version.as_deref(), Some("v0.2.0"));
+        assert_eq!(
+            result.release_url.as_deref(),
+            Some("https://github.com/xiaobo121388/MCDevHelper/releases/tag/v0.2.0")
         );
     }
 }

@@ -13,6 +13,7 @@ Generation command: `pnpm license-report`
 | alloc-no-stdlib | 2.0.4 | BSD-3-Clause |
 | alloc-stdlib | 0.2.4 | BSD-3-Clause |
 | anyhow | 1.0.104 | MIT OR Apache-2.0 |
+| atomic-waker | 1.1.2 | Apache-2.0 OR MIT |
 | autocfg | 1.5.1 | Apache-2.0 OR MIT |
 | base64 | 0.22.1 | MIT OR Apache-2.0 |
 | base64 | 0.23.1 | MIT OR Apache-2.0 |
@@ -103,6 +104,12 @@ Generation command: `pnpm license-report`
 | hex | 0.4.3 | MIT OR Apache-2.0 |
 | html5ever | 0.38.0 | MIT OR Apache-2.0 |
 | http | 1.5.0 | MIT OR Apache-2.0 |
+| httparse | 1.10.1 | MIT OR Apache-2.0 |
+| http-body | 1.1.0 | MIT |
+| http-body-util | 0.1.4 | MIT |
+| hyper | 1.11.0 | MIT |
+| hyper-tls | 0.6.0 | MIT/Apache-2.0 |
+| hyper-util | 0.1.20 | MIT |
 | ico | 0.5.0 | MIT |
 | icu_collections | 2.2.0 | Unicode-3.0 |
 | icu_locale_core | 2.2.0 | Unicode-3.0 |
@@ -117,6 +124,7 @@ Generation command: `pnpm license-report`
 | indexmap | 1.9.3 | Apache-2.0 OR MIT |
 | indexmap | 2.14.0 | Apache-2.0 OR MIT |
 | infer | 0.19.0 | MIT |
+| ipnet | 2.12.1 | MIT OR Apache-2.0 |
 | itoa | 1.0.18 | MIT OR Apache-2.0 |
 | jiff | 0.2.35 | Unlicense OR MIT |
 | jiff-core | 0.1.0 | Unlicense OR MIT |
@@ -137,6 +145,7 @@ Generation command: `pnpm license-report`
 | miniz_oxide | 0.8.9 | MIT OR Zlib OR Apache-2.0 |
 | mio | 1.2.2 | MIT |
 | muda | 0.19.3 | Apache-2.0 OR MIT |
+| native-tls | 0.2.18 | MIT OR Apache-2.0 |
 | new_debug_unreachable | 1.0.6 | MIT |
 | num-conv | 0.2.2 | MIT OR Apache-2.0 |
 | num-traits | 0.2.19 | MIT OR Apache-2.0 |
@@ -169,13 +178,16 @@ Generation command: `pnpm license-report`
 | regex | 1.13.1 | MIT OR Apache-2.0 |
 | regex-automata | 0.4.18 | MIT OR Apache-2.0 |
 | regex-syntax | 0.8.11 | MIT OR Apache-2.0 |
+| reqwest | 0.13.4 | MIT OR Apache-2.0 |
 | rfd | 0.16.0 | MIT |
 | rmcp | 3.1.2 | Apache-2.0 |
 | rmcp-macros | 3.1.2 | Apache-2.0 |
 | rusqlite | 0.40.2 | MIT |
 | rustc_version | 0.4.1 | MIT OR Apache-2.0 |
 | rustc-hash | 2.1.3 | Apache-2.0 OR MIT |
+| rustls-pki-types | 1.15.1 | MIT OR Apache-2.0 |
 | same-file | 1.0.6 | Unlicense/MIT |
+| schannel | 0.1.29 | MIT |
 | schemars | 0.8.22 | MIT |
 | schemars | 0.9.0 | MIT |
 | schemars | 1.2.2 | MIT |
@@ -214,6 +226,7 @@ Generation command: `pnpm license-report`
 | strsim | 0.11.1 | MIT |
 | syn | 2.0.119 | MIT OR Apache-2.0 |
 | syn | 3.0.3 | MIT OR Apache-2.0 |
+| sync_wrapper | 1.0.2 | Apache-2.0 |
 | synstructure | 0.13.2 | MIT |
 | tao | 0.35.3 | Apache-2.0 |
 | tauri | 2.11.5 | Apache-2.0 OR MIT |
@@ -243,6 +256,7 @@ Generation command: `pnpm license-report`
 | tinyvec_macros | 0.1.1 | MIT OR Apache-2.0 OR Zlib |
 | tokio | 1.53.1 | MIT |
 | tokio-macros | 2.7.2 | MIT |
+| tokio-native-tls | 0.3.1 | MIT |
 | tokio-util | 0.7.19 | MIT |
 | toml | 0.9.12+spec-1.1.0 | MIT OR Apache-2.0 |
 | toml | 1.1.4+spec-1.1.0 | MIT OR Apache-2.0 |
@@ -250,10 +264,15 @@ Generation command: `pnpm license-report`
 | toml_datetime | 1.1.1+spec-1.1.0 | MIT OR Apache-2.0 |
 | toml_parser | 1.1.3+spec-1.1.0 | MIT OR Apache-2.0 |
 | toml_writer | 1.1.2+spec-1.1.0 | MIT OR Apache-2.0 |
+| tower | 0.5.3 | MIT |
+| tower-http | 0.6.11 | MIT |
+| tower-layer | 0.3.3 | MIT |
+| tower-service | 0.3.3 | MIT |
 | tracing | 0.1.44 | MIT |
 | tracing-attributes | 0.1.31 | MIT |
 | tracing-core | 0.1.36 | MIT |
 | tray-icon | 0.24.2 | MIT OR Apache-2.0 |
+| try-lock | 0.2.5 | MIT |
 | typed-path | 0.12.3 | MIT OR Apache-2.0 |
 | typeid | 1.0.3 | MIT OR Apache-2.0 |
 | typenum | 1.20.1 | MIT OR Apache-2.0 |
@@ -273,6 +292,7 @@ Generation command: `pnpm license-report`
 | vswhom | 0.1.0 | MIT |
 | vswhom-sys | 0.1.3 | MIT |
 | walkdir | 2.5.0 | Unlicense/MIT |
+| want | 0.3.1 | MIT |
 | web_atoms | 0.2.6 | MIT OR Apache-2.0 |
 | webview2-com | 0.38.2 | MIT |
 | webview2-com-macros | 0.8.1 | MIT |
@@ -309,6 +329,7 @@ Generation command: `pnpm license-report`
 | yoke-derive | 0.8.2 | Unicode-3.0 |
 | zerofrom | 0.1.8 | Unicode-3.0 |
 | zerofrom-derive | 0.1.7 | Unicode-3.0 |
+| zeroize | 1.9.0 | Apache-2.0 OR MIT |
 | zerotrie | 0.2.4 | Unicode-3.0 |
 | zerovec | 0.11.6 | Unicode-3.0 |
 | zerovec-derive | 0.11.3 | Unicode-3.0 |

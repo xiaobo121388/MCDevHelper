@@ -7,12 +7,15 @@ import type {
   IdentityPolicy,
   OperationResult,
   SourceRecord,
+  UpdateCheckResult,
   VersionPart,
 } from "./types";
 
 export const desktop = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
 export const api = {
+  version: () => invoke<string>("app_version"),
+  checkForUpdates: () => invoke<UpdateCheckResult>("check_for_updates"),
   refresh: () => invoke<DiscoveryResult>("refresh_components"),
   sources: () => invoke<SourceRecord[]>("list_sources"),
   addSingle: (path: string) => invoke<SourceRecord>("add_single_component", { path }),

@@ -1,4 +1,5 @@
 import { open } from "@tauri-apps/plugin-dialog";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import {
   Archive,
   ArrowDownUp,
@@ -9,12 +10,15 @@ import {
   Copy,
   Eye,
   EyeOff,
+  ExternalLink,
   Folder,
   FolderCog,
   FolderOpen,
   Hash,
   Import,
+  Info,
   Map,
+  MessageSquare,
   MoreHorizontal,
   PackagePlus,
   Palette,
@@ -42,6 +46,7 @@ import type {
   IdentityPolicy,
   OperationResult,
   SourceRecord,
+  UpdateCheckResult,
   VersionPart,
 } from "./types";
 
@@ -179,7 +184,7 @@ export function App() {
         <button className="sidebar-action" onClick={() => setModal("settings")}>
           <Settings size={18} /><span>设置</span><ChevronRight size={15} />
         </button>
-        <div className="offline-badge"><span /> 完全离线 · 本地数据</div>
+        <div className="offline-badge"><span /> 本地优先 · 无自动联网</div>
       </aside>
 
       <main className="workspace">
@@ -391,17 +396,28 @@ function ImportDialog({ onClose, onDone }: DialogProps) {
   return <Modal title="导入组件" subtitle="支持文件夹、ZIP、mcpack 和 mcaddon" onClose={onClose}><form onSubmit={submit} className="dialog-form"><Field label="导入来源"><div className="path-row"><input required value={source} onChange={(event) => setSource(event.target.value)} placeholder="选择组件包或文件夹" /><button type="button" onClick={() => void chooseSource(false)}>选文件</button><button type="button" onClick={() => void chooseSource(true)}>选文件夹</button></div></Field><PathField label="存放位置" value={destination} onChange={setDestination} /><Field label="遇到重复 UUID"><select value={policy} onChange={(event) => setPolicy(event.target.value as IdentityPolicy)}><option value="error">停止并提示</option><option value="regenerate">生成全新 UUID</option><option value="preserve">保留原 UUID</option></select></Field><CheckRow checked={mcs} onChange={setMcs} label="导入为 MCS 组件" hint="将生成新的 MCS UID 与兼容配置" />{error && <FormError>{error}</FormError>}<DialogActions busy={busy} onClose={onClose} submit="开始导入" /></form></Modal>;
 }
 
+type SettingsSection = "paths" | "identity" | "appearance" | "tools" | "about";
+
+const FEEDBACK_URL = "https://github.com/xiaobo121388/MCDevHelper/issues/new";
+
 function SettingsDialog({ settings: initialSettings, onSettings, onClose, onChanged, onNotice }: { settings: AppSettings; onSettings: (settings: AppSettings) => void; onClose: () => void; onChanged: () => void; onNotice: (message: string) => void }) {
   const [sources, setSources] = useState<SourceRecord[]>([]);
   const [settings, setSettings] = useState(initialSettings);
   const [vscode, setVscode] = useState<{ available: boolean; path?: string; custom: boolean } | null>(null);
+  const [section, setSection] = useState<SettingsSection>("paths");
+  const [appVersion, setAppVersion] = useState("");
+  const [updateResult, setUpdateResult] = useState<UpdateCheckResult | null>(null);
+  const [updateError, setUpdateError] = useState("");
   const [busy, setBusy] = useState("");
   const load = useCallback(async () => {
     try {
-      const [nextSources, nextVsCode, nextSettings] = await Promise.all([api.sources(), api.vscodeStatus(), api.settings()]);
+      const [nextSources, nextVsCode, nextSettings, nextVersion] = await Promise.all([
+        api.sources(), api.vscodeStatus(), api.settings(), api.version(),
+      ]);
       setSources(nextSources);
       setVscode(nextVsCode);
       setSettings(nextSettings);
+      setAppVersion(nextVersion);
       onSettings(nextSettings);
     } catch (error) {
       onNotice(errorMessage(error));
@@ -467,27 +483,97 @@ function SettingsDialog({ settings: initialSettings, onSettings, onClose, onChan
   const chooseVsCode = async () => { const path = await open({ multiple: false, filters: [{ name: "Visual Studio Code", extensions: ["exe"] }] }); if (typeof path !== "string") return; try { await api.setVsCodePath(path); await load(); } catch (error) { onNotice(errorMessage(error)); } };
   const clearVsCode = async () => { try { await api.setVsCodePath(); await load(); } catch (error) { onNotice(errorMessage(error)); } };
   const copyMcpConfig = async () => { try { await navigator.clipboard.writeText(await api.mcpClientConfig()); onNotice("MCP 客户端配置已复制。" ); } catch (error) { onNotice(errorMessage(error)); } };
+  const checkForUpdates = async () => {
+    setBusy("update");
+    setUpdateError("");
+    try {
+      setUpdateResult(await api.checkForUpdates());
+    } catch (error) {
+      setUpdateResult(null);
+      setUpdateError(errorMessage(error));
+    } finally {
+      setBusy("");
+    }
+  };
+  const openGitHub = async (url: string) => {
+    if (!url.startsWith("https://github.com/xiaobo121388/MCDevHelper/")) {
+      onNotice("拒绝打开非官方 MCDH 链接。");
+      return;
+    }
+    try {
+      await openUrl(url);
+    } catch (error) {
+      onNotice(errorMessage(error));
+    }
+  };
   const close = () => { document.documentElement.dataset.theme = initialSettings.theme; onClose(); };
   const destinationSources = sources.filter((source) => source.kind !== "single");
+  const settingsNavigation: { id: SettingsSection; label: string; icon: ReactNode }[] = [
+    { id: "paths", label: "路径管理", icon: <FolderCog size={17} /> },
+    { id: "identity", label: "MCS 身份", icon: <UserRound size={17} /> },
+    { id: "appearance", label: "外观", icon: <Palette size={17} /> },
+    { id: "tools", label: "开发工具", icon: <Code2 size={17} /> },
+    { id: "about", label: "关于", icon: <Info size={17} /> },
+  ];
   return (
-    <Modal title="设置" subtitle="路径、MCS 身份、默认位置与外观" onClose={close} wide>
-      <div className="settings-sections">
-        <section>
-          <div className="section-heading"><div><h3>路径管理</h3><p>首次无记录时自动发现 MCS；之后只使用这里保存的目录。</p></div><button className="button secondary" disabled={!!busy} onClick={() => void rescanMcs()}><ScanSearch size={16} />重新扫描 MCS</button></div>
-          <div className="source-actions"><button className="button secondary" disabled={!!busy} onClick={() => void add("library")}><Folder size={17} />添加组件库</button><button className="button secondary" disabled={!!busy} onClick={() => void add("single")}><Box size={17} />添加单个组件</button><button className="button secondary" disabled={!!busy} onClick={() => void add("mcs")}><Sparkles size={17} />添加 MCS 路径</button></div>
-          <div className="source-list">{sources.map((source) => <div className="source-row" key={source.id}><span>{source.kind === "mcs_auto" ? <Sparkles size={17} /> : source.kind === "library" ? <Folder size={17} /> : <Box size={17} />}</span><div><strong>{sourceText(source)}</strong><p title={source.path}>{source.path}</p></div><button aria-label={`移除 ${source.path}`} onClick={() => void remove(source)}><X size={16} /></button></div>)}{!sources.length && <p className="source-empty">尚未保存来源目录。</p>}</div>
-          <Field label="新建组件默认位置"><select value={settings.default_destination ?? ""} onChange={(event) => setSettings((value) => ({ ...value, default_destination: event.target.value || undefined }))}><option value="">不指定（使用可用列表第一项）</option>{destinationSources.map((source) => <option key={source.id} value={source.path}>{destinationLabel(source)}</option>)}</select></Field>
-        </section>
-        <section>
-          <div className="section-heading"><div><h3>MCStudio 开发者身份</h3><p>MCS 配置仅写入本地 studio.json，不会用于登录或联网。</p></div><UserRound size={19} /></div>
-          <div className="settings-grid"><Field label="开发者昵称"><input value={settings.developer_nickname} onChange={(event) => setSettings((value) => ({ ...value, developer_nickname: event.target.value }))} /></Field><Field label="开发者账号"><input value={settings.developer_account} onChange={(event) => setSettings((value) => ({ ...value, developer_account: event.target.value }))} /></Field><Field label="用户 ID"><input value={settings.developer_user_id} onChange={(event) => setSettings((value) => ({ ...value, developer_user_id: event.target.value }))} /></Field></div>
-        </section>
-        <section>
-          <div className="settings-grid"><Field label="界面颜色"><select value={settings.theme} onChange={(event) => { const theme = event.target.value as AppSettings["theme"]; setSettings((value) => ({ ...value, theme })); document.documentElement.dataset.theme = theme; }}><option value="system">跟随系统</option><option value="light">亮色</option><option value="dark">暗色</option></select></Field></div>
-          <div className="settings-divider"><div><strong>Visual Studio Code</strong><p>{vscode?.available ? vscode.path : "未检测到 Code.exe，可手动指定。"}</p></div><button className="button secondary" onClick={() => void chooseVsCode()}>选择程序</button>{vscode?.custom && <button className="button secondary" onClick={() => void clearVsCode()}>恢复自动检测</button>}</div>
-          <div className="settings-divider"><div><strong>AI / MCP</strong><p>独立 stdio 服务，不监听网络端口。</p></div><button className="button secondary" onClick={() => void copyMcpConfig()}>复制客户端配置</button></div>
-        </section>
-        <div className="dialog-actions"><button className="button secondary" onClick={close}>关闭</button><button className="button primary" disabled={!!busy} onClick={() => void save()}><Save size={16} />{busy === "save" ? "保存中…" : "保存设置"}</button></div>
+    <Modal title="设置" subtitle="按类别管理路径、身份、外观与开发工具" onClose={close} wide className="settings-modal">
+      <div className="settings-layout">
+        <nav className="settings-nav" aria-label="设置分类">
+          {settingsNavigation.map((item) => (
+            <button
+              key={item.id}
+              className={section === item.id ? "active" : ""}
+              aria-current={section === item.id ? "page" : undefined}
+              onClick={() => setSection(item.id)}
+            >
+              {item.icon}<span>{item.label}</span><ChevronRight size={14} />
+            </button>
+          ))}
+        </nav>
+
+        <div className="settings-panel">
+          <div className="settings-panel-body">
+            {section === "paths" && <section>
+              <div className="section-heading"><div><h3>路径管理</h3><p>首次无记录时自动发现 MCS；之后只使用这里保存的目录。</p></div><button className="button secondary" disabled={!!busy} onClick={() => void rescanMcs()}><ScanSearch size={16} />重新扫描 MCS</button></div>
+              <div className="source-actions"><button className="button secondary" disabled={!!busy} onClick={() => void add("library")}><Folder size={17} />添加组件库</button><button className="button secondary" disabled={!!busy} onClick={() => void add("single")}><Box size={17} />添加单个组件</button><button className="button secondary" disabled={!!busy} onClick={() => void add("mcs")}><Sparkles size={17} />添加 MCS 路径</button></div>
+              <div className="source-list">{sources.map((source) => <div className="source-row" key={source.id}><span>{source.kind === "mcs_auto" ? <Sparkles size={17} /> : source.kind === "library" ? <Folder size={17} /> : <Box size={17} />}</span><div><strong>{sourceText(source)}</strong><p title={source.path}>{source.path}</p></div><button aria-label={`移除 ${source.path}`} onClick={() => void remove(source)}><X size={16} /></button></div>)}{!sources.length && <p className="source-empty">尚未保存来源目录。</p>}</div>
+              <Field label="新建组件默认位置"><select value={settings.default_destination ?? ""} onChange={(event) => setSettings((value) => ({ ...value, default_destination: event.target.value || undefined }))}><option value="">不指定（使用可用列表第一项）</option>{destinationSources.map((source) => <option key={source.id} value={source.path}>{destinationLabel(source)}</option>)}</select></Field>
+            </section>}
+
+            {section === "identity" && <section>
+              <div className="section-heading"><div><h3>MCStudio 开发者身份</h3><p>这些信息只用于生成本地 MCS 兼容文件，不用于登录。</p></div><UserRound size={19} /></div>
+              <div className="settings-grid"><Field label="开发者昵称"><input value={settings.developer_nickname} onChange={(event) => setSettings((value) => ({ ...value, developer_nickname: event.target.value }))} /></Field><Field label="开发者账号"><input value={settings.developer_account} onChange={(event) => setSettings((value) => ({ ...value, developer_account: event.target.value }))} /></Field><Field label="用户 ID"><input value={settings.developer_user_id} onChange={(event) => setSettings((value) => ({ ...value, developer_user_id: event.target.value }))} /></Field></div>
+            </section>}
+
+            {section === "appearance" && <section>
+              <div className="section-heading"><div><h3>外观</h3><p>选择亮色、暗色，或跟随 Windows 系统设置。</p></div><Palette size={19} /></div>
+              <div className="settings-grid single"><Field label="界面颜色"><select value={settings.theme} onChange={(event) => { const theme = event.target.value as AppSettings["theme"]; setSettings((value) => ({ ...value, theme })); document.documentElement.dataset.theme = theme; }}><option value="system">跟随系统</option><option value="light">亮色</option><option value="dark">暗色</option></select></Field></div>
+            </section>}
+
+            {section === "tools" && <section>
+              <div className="section-heading"><div><h3>开发工具</h3><p>配置编辑器，以及供 AI 使用的本地 MCP 服务。</p></div><Code2 size={19} /></div>
+              <div className="settings-tool"><div><strong>Visual Studio Code</strong><p>{vscode?.available ? vscode.path : "未检测到 Code.exe，可手动指定。"}</p></div><div className="settings-tool-actions"><button className="button secondary" onClick={() => void chooseVsCode()}>选择程序</button>{vscode?.custom && <button className="button secondary" onClick={() => void clearVsCode()}>恢复自动检测</button>}</div></div>
+              <div className="settings-tool"><div><strong>AI / MCP</strong><p>独立 stdio 服务，只读写本机组件，不监听网络端口。</p></div><div className="settings-tool-actions"><button className="button secondary" onClick={() => void copyMcpConfig()}>复制客户端配置</button></div></div>
+            </section>}
+
+            {section === "about" && <section>
+              <div className="about-product"><span className="brand-mark"><Boxes size={21} /></span><div><h3>MCDH · MCDevHelper</h3><p>网易中国版 PE 创作者的本地组件管理工具</p></div><strong>v{appVersion || "…"}</strong></div>
+              <div className="about-note"><Info size={17} /><p>默认不会联网。只有主动点击“检查更新”时才会访问 GitHub Releases API；反馈会交给系统浏览器打开 GitHub Issue 页面。</p></div>
+              <div className="settings-tool"><div><strong>检查更新</strong><p>查询 GitHub 上最新发布的正式 Release，不会自动下载或安装。</p></div><div className="settings-tool-actions"><button className="button primary" disabled={busy === "update"} onClick={() => void checkForUpdates()}><RefreshCw className={busy === "update" ? "spin" : ""} size={16} />{busy === "update" ? "检查中…" : "检查更新"}</button></div></div>
+              {updateError && <div className="update-result error"><TriangleAlert size={17} /><div><strong>检查失败</strong><p>{updateError}</p></div></div>}
+              {updateResult && <div className={`update-result ${updateResult.update_available ? "available" : "current"}`}>
+                <Info size={17} />
+                <div>
+                  <strong>{updateResult.no_release ? "尚无正式 Release" : updateResult.update_available ? `发现新版本 ${updateResult.latest_version}` : "当前已是最新版本"}</strong>
+                  <p>{updateResult.no_release ? "官方仓库目前没有可供检查的正式 Release。" : `${updateResult.release_name || updateResult.latest_version}${updateResult.published_at ? ` · ${formatDate(updateResult.published_at)}` : ""}`}</p>
+                </div>
+                {updateResult.release_url && <button className="button secondary" onClick={() => void openGitHub(updateResult.release_url!)}>查看 Release<ExternalLink size={14} /></button>}
+              </div>}
+              <div className="settings-tool"><div><strong>反馈问题</strong><p>在 GitHub 新建 Issue；提交内容前由你自行确认。</p></div><div className="settings-tool-actions"><button className="button secondary" onClick={() => void openGitHub(FEEDBACK_URL)}><MessageSquare size={16} />打开反馈页面<ExternalLink size={14} /></button></div></div>
+            </section>}
+          </div>
+          <div className="settings-footer"><button className="button secondary" onClick={close}>关闭</button><button className="button primary" disabled={!!busy} onClick={() => void save()}><Save size={16} />{busy === "save" ? "保存中…" : "保存设置"}</button></div>
+        </div>
       </div>
     </Modal>
   );
@@ -527,8 +613,8 @@ function ComponentDialog({ component, onClose, onDone, onNotice }: { component: 
   );
 }
 
-function Modal({ title, subtitle, onClose, children, wide = false }: { title: string; subtitle?: string; onClose: () => void; children: ReactNode; wide?: boolean }) {
-  return <div className="modal-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}><section className={wide ? "modal wide" : "modal"} role="dialog" aria-modal="true" aria-labelledby="modal-title"><header><div><h2 id="modal-title">{title}</h2>{subtitle && <p title={subtitle}>{subtitle}</p>}</div><button aria-label="关闭" onClick={onClose}><X size={19} /></button></header><div className="modal-content">{children}</div></section></div>;
+function Modal({ title, subtitle, onClose, children, wide = false, className = "" }: { title: string; subtitle?: string; onClose: () => void; children: ReactNode; wide?: boolean; className?: string }) {
+  return <div className="modal-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}><section className={["modal", wide ? "wide" : "", className].filter(Boolean).join(" ")} role="dialog" aria-modal="true" aria-labelledby="modal-title"><header><div><h2 id="modal-title">{title}</h2>{subtitle && <p title={subtitle}>{subtitle}</p>}</div><button aria-label="关闭" onClick={onClose}><X size={19} /></button></header><div className="modal-content">{children}</div></section></div>;
 }
 
 function Field({ label, children }: { label: string; children: ReactNode }) { return <label className="field"><span>{label}</span>{children}</label>; }

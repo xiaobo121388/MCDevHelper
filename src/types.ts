@@ -61,6 +61,16 @@ export interface OperationResult {
   warnings: string[];
 }
 
+export interface UpdateCheckResult {
+  current_version: string;
+  latest_version?: string;
+  release_name?: string;
+  release_url?: string;
+  published_at?: string;
+  update_available: boolean;
+  no_release: boolean;
+}
+
 export interface CoreError {
   code: string;
   message: string;

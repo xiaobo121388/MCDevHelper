@@ -11,6 +11,15 @@ const mocks = vi.hoisted(() => ({
   bumpVersion: vi.fn(),
   openWarningDirectory: vi.fn(),
   removeSource: vi.fn(),
+  sources: vi.fn(),
+  vscodeStatus: vi.fn(),
+  version: vi.fn(),
+  checkForUpdates: vi.fn(),
+  openUrl: vi.fn(),
+}));
+
+vi.mock("@tauri-apps/plugin-opener", () => ({
+  openUrl: mocks.openUrl,
 }));
 
 vi.mock("./api", () => ({
@@ -25,6 +34,10 @@ vi.mock("./api", () => ({
     bumpVersion: mocks.bumpVersion,
     openWarningDirectory: mocks.openWarningDirectory,
     removeSource: mocks.removeSource,
+    sources: mocks.sources,
+    vscodeStatus: mocks.vscodeStatus,
+    version: mocks.version,
+    checkForUpdates: mocks.checkForUpdates,
   },
   errorMessage: (error: unknown) => String(error),
 }));
@@ -50,6 +63,11 @@ describe("component workspace filters", () => {
     mocks.bumpVersion.mockReset();
     mocks.openWarningDirectory.mockReset().mockResolvedValue(undefined);
     mocks.removeSource.mockReset().mockResolvedValue(true);
+    mocks.sources.mockReset().mockResolvedValue([]);
+    mocks.vscodeStatus.mockReset().mockResolvedValue({ available: false, custom: false });
+    mocks.version.mockReset().mockResolvedValue("0.1.0");
+    mocks.checkForUpdates.mockReset();
+    mocks.openUrl.mockReset().mockResolvedValue(undefined);
   });
 
   it("filters discovered cards by category, search text, and tag", async () => {
@@ -154,6 +172,37 @@ describe("component workspace filters", () => {
     expect(screen.getByLabelText("命名空间")).toHaveValue("mcdh");
     expect(screen.getByLabelText("生成位置")).toHaveValue("D:\\work\\account\\Cpp\\AddOn");
     expect(screen.queryByRole("option", { name: /Cpp\\Map/ })).not.toBeInTheDocument();
+  });
+
+  it("organizes settings by category and only checks GitHub on demand", async () => {
+    mocks.refresh.mockResolvedValue({ components: [], sources: [], warnings: [] });
+    mocks.checkForUpdates.mockResolvedValue({
+      current_version: "0.1.0",
+      latest_version: "v0.2.0",
+      release_name: "MCDH 0.2.0",
+      release_url: "https://github.com/xiaobo121388/MCDevHelper/releases/tag/v0.2.0",
+      published_at: "2026-08-10T12:00:00Z",
+      update_available: true,
+      no_release: false,
+    });
+    render(<App />);
+    await waitFor(() => expect(screen.getByRole("button", { name: /设置/ })).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: /设置/ }));
+
+    const navigation = await screen.findByRole("navigation", { name: "设置分类" });
+    expect(within(navigation).getByRole("button", { name: /路径管理/ })).toHaveAttribute("aria-current", "page");
+    expect(mocks.checkForUpdates).not.toHaveBeenCalled();
+    fireEvent.click(within(navigation).getByRole("button", { name: /关于/ }));
+    expect(await screen.findByText("v0.1.0")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "检查更新" }));
+    await waitFor(() => expect(mocks.checkForUpdates).toHaveBeenCalledTimes(1));
+    expect(await screen.findByText("发现新版本 v0.2.0")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /查看 Release/ }));
+    await waitFor(() => expect(mocks.openUrl).toHaveBeenCalledWith("https://github.com/xiaobo121388/MCDevHelper/releases/tag/v0.2.0"));
+
+    fireEvent.click(screen.getByRole("button", { name: /打开反馈页面/ }));
+    await waitFor(() => expect(mocks.openUrl).toHaveBeenCalledWith("https://github.com/xiaobo121388/MCDevHelper/issues/new"));
   });
 
   it("requires two confirmations before deleting a component", async () => {

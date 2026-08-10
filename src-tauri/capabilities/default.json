@@ -3,5 +3,5 @@
   "identifier": "desktop-default",
   "description": "MCDH desktop window permissions",
   "windows": ["main"],
-  "permissions": ["core:default", "dialog:allow-open"]
+  "permissions": ["core:default", "dialog:allow-open", "opener:default"]
 }
