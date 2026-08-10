@@ -43,10 +43,15 @@ export interface ComponentSummary {
   size_bytes: number;
 }
 
+export interface DiscoveryWarning {
+  path: string;
+  message: string;
+}
+
 export interface DiscoveryResult {
   components: ComponentSummary[];
   sources: SourceRecord[];
-  warnings: Array<{ path: string; message: string }>;
+  warnings: DiscoveryWarning[];
 }
 
 export interface OperationResult {

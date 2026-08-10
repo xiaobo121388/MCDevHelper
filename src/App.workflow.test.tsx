@@ -1,11 +1,25 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const mocks = vi.hoisted(() => ({ refresh: vi.fn(), settings: vi.fn(), delete: vi.fn() }));
+const mocks = vi.hoisted(() => ({
+  refresh: vi.fn(),
+  settings: vi.fn(),
+  setSettings: vi.fn(),
+  delete: vi.fn(),
+  openWarningDirectory: vi.fn(),
+  removeSource: vi.fn(),
+}));
 
 vi.mock("./api", () => ({
   desktop: true,
-  api: { refresh: mocks.refresh, settings: mocks.settings, delete: mocks.delete },
+  api: {
+    refresh: mocks.refresh,
+    settings: mocks.settings,
+    setSettings: mocks.setSettings,
+    delete: mocks.delete,
+    openWarningDirectory: mocks.openWarningDirectory,
+    removeSource: mocks.removeSource,
+  },
   errorMessage: (error: unknown) => String(error),
 }));
 
@@ -15,6 +29,7 @@ describe("component workspace filters", () => {
   afterEach(cleanup);
 
   beforeEach(() => {
+    window.localStorage.clear();
     mocks.refresh.mockReset();
     mocks.settings.mockReset().mockResolvedValue({
       developer_nickname: "MCDH",
@@ -22,7 +37,10 @@ describe("component workspace filters", () => {
       developer_user_id: "0",
       theme: "system",
     });
+    mocks.setSettings.mockReset();
     mocks.delete.mockReset().mockResolvedValue({ actual_path: "", modified_files: [], warnings: [] });
+    mocks.openWarningDirectory.mockReset().mockResolvedValue(undefined);
+    mocks.removeSource.mockReset().mockResolvedValue(true);
   });
 
   it("filters discovered cards by category, search text, and tag", async () => {
@@ -142,6 +160,44 @@ describe("component workspace filters", () => {
     fireEvent.click(screen.getByRole("button", { name: "删除" }));
     await waitFor(() => expect(mocks.delete).toHaveBeenCalledWith("delete-me"));
     expect(confirm).toHaveBeenCalledTimes(2);
+    confirm.mockRestore();
+  });
+
+  it("opens scan problem details and supports opening, ignoring, and removing a source", async () => {
+    const problem = {
+      path: "D:\\失效作品库\\损坏组件\\manifest.json",
+      message: "JSON 解析失败",
+    };
+    mocks.refresh
+      .mockResolvedValueOnce({
+        components: [],
+        sources: [{ id: "broken-source", kind: "library", path: "D:\\失效作品库" }],
+        warnings: [problem],
+      })
+      .mockResolvedValue({ components: [], sources: [], warnings: [] });
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
+    render(<App />);
+
+    const warningButton = await screen.findByRole("button", { name: /有 1 个扫描问题/ });
+    fireEvent.click(warningButton);
+    expect(screen.getByRole("heading", { name: "扫描问题" })).toBeInTheDocument();
+    expect(screen.getByText("JSON 解析失败")).toBeInTheDocument();
+    expect(screen.getByText(problem.path)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "打开文件夹" }));
+    await waitFor(() => expect(mocks.openWarningDirectory).toHaveBeenCalledWith(problem.path));
+
+    fireEvent.click(screen.getByRole("button", { name: "忽略" }));
+    expect(screen.queryByRole("button", { name: /有 1 个扫描问题/ })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /已忽略 1 个问题/ })).toBeInTheDocument();
+    expect(JSON.parse(window.localStorage.getItem("mcdh.ignored-discovery-warnings") ?? "[]")).toHaveLength(1);
+
+    fireEvent.click(screen.getByRole("button", { name: "重新显示" }));
+    expect(screen.getByRole("button", { name: /有 1 个扫描问题/ })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "移除来源" }));
+    await waitFor(() => expect(mocks.removeSource).toHaveBeenCalledWith("broken-source"));
+    await waitFor(() => expect(screen.getByText("当前没有扫描问题")).toBeInTheDocument());
+    expect(confirm).toHaveBeenCalledTimes(1);
     confirm.mockRestore();
   });
 });

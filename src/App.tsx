@@ -7,6 +7,8 @@ import {
   ChevronRight,
   Code2,
   Copy,
+  Eye,
+  EyeOff,
   Folder,
   FolderCog,
   FolderOpen,
@@ -25,6 +27,7 @@ import {
   Sparkles,
   Tag,
   Trash2,
+  TriangleAlert,
   UserRound,
   X,
 } from "lucide-react";
@@ -35,12 +38,14 @@ import type {
   ComponentKind,
   ComponentSummary,
   DiscoveryResult,
+  DiscoveryWarning,
   IdentityPolicy,
   SourceRecord,
   VersionPart,
 } from "./types";
 
 const EMPTY_RESULT: DiscoveryResult = { components: [], sources: [], warnings: [] };
+const IGNORED_WARNINGS_STORAGE_KEY = "mcdh.ignored-discovery-warnings";
 const DEFAULT_SETTINGS: AppSettings = {
   developer_nickname: "MCDH",
   developer_account: "mcdh@local.invalid",
@@ -60,9 +65,10 @@ export function App() {
   const [sortKey, setSortKey] = useState<SortKey>("modified");
   const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
-  const [modal, setModal] = useState<"create" | "import" | "settings" | null>(null);
+  const [modal, setModal] = useState<"create" | "import" | "settings" | "warnings" | null>(null);
   const [selected, setSelected] = useState<ComponentSummary | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [ignoredWarningKeys, setIgnoredWarningKeys] = useState<Set<string>>(readIgnoredWarningKeys);
 
   const refresh = useCallback(async () => {
     if (!desktop) {
@@ -71,7 +77,15 @@ export function App() {
     }
     setLoading(true);
     try {
-      setResult(await api.refresh());
+      const next = await api.refresh();
+      setResult(next);
+      setIgnoredWarningKeys((current) => {
+        const active = new Set(next.warnings.map(warningKey));
+        const pruned = new Set([...current].filter((key) => active.has(key)));
+        if (setsEqual(current, pruned)) return current;
+        writeIgnoredWarningKeys(pruned);
+        return pruned;
+      });
     } catch (error) {
       setNotice(errorMessage(error));
     } finally {
@@ -115,6 +129,32 @@ export function App() {
       return compared * direction || left.name.localeCompare(right.name, "zh-CN");
     });
   }, [kind, query, result.components, sortDirection, sortKey, tag]);
+  const visibleWarnings = useMemo(
+    () => result.warnings.filter((warning) => !ignoredWarningKeys.has(warningKey(warning))),
+    [ignoredWarningKeys, result.warnings],
+  );
+  const ignoredWarningCount = result.warnings.length - visibleWarnings.length;
+
+  const setWarningIgnored = (warning: DiscoveryWarning, ignored: boolean) => {
+    setIgnoredWarningKeys((current) => {
+      const next = new Set(current);
+      if (ignored) next.add(warningKey(warning));
+      else next.delete(warningKey(warning));
+      writeIgnoredWarningKeys(next);
+      return next;
+    });
+  };
+
+  const removeWarningSource = async (source: SourceRecord) => {
+    if (!window.confirm(`确定从 MCDH 中移除来源？\n${source.path}\n磁盘文件不会被删除。`)) return;
+    await api.removeSource(source.id);
+    if (settings.default_destination === source.path) {
+      const saved = await api.setSettings({ ...settings, default_destination: undefined });
+      setSettings(saved);
+    }
+    setNotice("来源记录已移除，磁盘文件未删除。");
+    await refresh();
+  };
 
   const done = async (message: string) => {
     setNotice(message);
@@ -159,10 +199,11 @@ export function App() {
           <label className="select-box sort-box"><ArrowDownUp size={16} /><select aria-label="排序字段" value={sortKey} onChange={(event) => { const value = event.target.value as SortKey; setSortKey(value); setSortDirection(value === "name" ? "asc" : "desc"); }}><option value="updated">MCS 时间</option><option value="name">名称</option><option value="modified">修改日期</option><option value="created">创建日期</option><option value="size">大小</option></select></label>
           <button className="icon-button" aria-label="切换排序方向" title={sortDirection === "desc" ? "当前倒序" : "当前正序"} onClick={() => setSortDirection((value) => value === "desc" ? "asc" : "desc")}><span className={sortDirection === "desc" ? "sort-direction desc" : "sort-direction"}>↑</span></button>
           <button className="icon-button" aria-label="刷新组件" title="刷新组件" onClick={() => void refresh()}><RefreshCw size={17} className={loading ? "spin" : ""} /></button>
+          {ignoredWarningCount > 0 && <button className="ignored-warning-button" onClick={() => setModal("warnings")}><EyeOff size={14} />已忽略 {ignoredWarningCount} 个问题</button>}
           <span className="result-count">{components.length} 个组件</span>
         </section>
 
-        {result.warnings.length > 0 && <div className="warning-line">有 {result.warnings.length} 个路径未能读取；打开设置后可检查来源。</div>}
+        {visibleWarnings.length > 0 && <button className="warning-line" onClick={() => setModal("warnings")}><TriangleAlert size={17} /><span>有 {visibleWarnings.length} 个扫描问题，点击查看具体原因并处理。</span><ChevronRight size={16} /></button>}
 
         <section className="component-grid" aria-live="polite">
           {components.map((component) => <ComponentCard key={component.id} component={component} onOpen={() => setSelected(component)} onNotice={setNotice} />)}
@@ -180,6 +221,7 @@ export function App() {
       {modal === "create" && <CreateDialog sources={result.sources} settings={settings} onConfigurePaths={() => setModal("settings")} onClose={() => setModal(null)} onDone={(message) => { setModal(null); void done(message); }} />}
       {modal === "import" && <ImportDialog onClose={() => setModal(null)} onDone={(message) => { setModal(null); void done(message); }} />}
       {modal === "settings" && <SettingsDialog settings={settings} onSettings={setSettings} onClose={() => setModal(null)} onChanged={() => void refresh()} onNotice={setNotice} />}
+      {modal === "warnings" && <WarningsDialog warnings={result.warnings} sources={result.sources} ignoredKeys={ignoredWarningKeys} onIgnore={setWarningIgnored} onRemoveSource={removeWarningSource} onClose={() => setModal(null)} onNotice={setNotice} />}
       {selected && <ComponentDialog component={selected} onClose={() => setSelected(null)} onDone={(message) => { setSelected(null); void done(message); }} onNotice={setNotice} />}
       {notice && <div className="toast" role="status">{notice}</div>}
     </div>
@@ -188,6 +230,62 @@ export function App() {
 
 function NavItem({ active, icon, label, count, onClick }: { active: boolean; icon: ReactNode; label: string; count: number; onClick: () => void }) {
   return <button className={active ? "nav-item active" : "nav-item"} onClick={onClick}><span>{icon}</span>{label}<small>{count}</small></button>;
+}
+
+function WarningsDialog({ warnings, sources, ignoredKeys, onIgnore, onRemoveSource, onClose, onNotice }: {
+  warnings: DiscoveryWarning[];
+  sources: SourceRecord[];
+  ignoredKeys: Set<string>;
+  onIgnore: (warning: DiscoveryWarning, ignored: boolean) => void;
+  onRemoveSource: (source: SourceRecord) => Promise<void>;
+  onClose: () => void;
+  onNotice: (message: string) => void;
+}) {
+  const [busy, setBusy] = useState("");
+  const openDirectory = async (warning: DiscoveryWarning) => {
+    setBusy(`open:${warningKey(warning)}`);
+    try {
+      await api.openWarningDirectory(warning.path);
+    } catch (error) {
+      onNotice(errorMessage(error));
+    } finally {
+      setBusy("");
+    }
+  };
+  const removeSource = async (source: SourceRecord) => {
+    setBusy(`remove:${source.id}`);
+    try {
+      await onRemoveSource(source);
+    } catch (error) {
+      onNotice(errorMessage(error));
+    } finally {
+      setBusy("");
+    }
+  };
+  return (
+    <Modal title="扫描问题" subtitle="查看无法读取的路径并直接处理" onClose={onClose} wide>
+      <div className="warnings-dialog">
+        <div className="warnings-help"><TriangleAlert size={18} /><p>移除来源只会删除 MCDH 中的路径记录，不会删除磁盘文件。忽略状态保存在本机，可随时重新显示。</p></div>
+        {warnings.length ? <div className="warning-list">{warnings.map((warning) => {
+          const key = warningKey(warning);
+          const source = sourceForWarning(warning, sources);
+          const ignored = ignoredKeys.has(key);
+          return (
+            <article className={ignored ? "warning-item ignored" : "warning-item"} key={key}>
+              <div className="warning-item-heading"><div><strong>{warning.message}</strong><p title={warning.path}>{warning.path || "未知路径"}</p></div>{ignored && <span><EyeOff size={12} />已忽略</span>}</div>
+              <div className="warning-source">{source ? `${sourceText(source)}：${source.path}` : "未关联到可移除的来源记录"}</div>
+              <div className="warning-actions">
+                <button className="button secondary" disabled={!!busy || !warning.path} onClick={() => void openDirectory(warning)}><FolderOpen size={15} />打开文件夹</button>
+                <button className="button danger" disabled={!!busy || !source} title={source ? "只移除 MCDH 来源记录" : "该问题未关联到来源记录"} onClick={() => source && void removeSource(source)}><Trash2 size={15} />移除来源</button>
+                <button className="button secondary" disabled={!!busy} onClick={() => onIgnore(warning, !ignored)}>{ignored ? <Eye size={15} /> : <EyeOff size={15} />}{ignored ? "重新显示" : "忽略"}</button>
+              </div>
+            </article>
+          );
+        })}</div> : <div className="warnings-empty"><span><Eye size={22} /></span><strong>当前没有扫描问题</strong><p>刷新组件后，新问题会继续显示在主界面。</p></div>}
+        <div className="dialog-actions"><button className="button primary" onClick={onClose}>完成</button></div>
+      </div>
+    </Modal>
+  );
 }
 
 function ComponentCard({ component, onOpen, onNotice }: { component: ComponentSummary; onOpen: () => void; onNotice: (text: string) => void }) {
@@ -437,3 +535,25 @@ function compareComponents(left: ComponentSummary, right: ComponentSummary, key:
 function mcsPathMatchesKind(path: string, kind: ComponentKind) { const category = path.split(/[\\/]/).filter(Boolean).at(-1)?.toLocaleLowerCase(); if (kind === "addon") return category === "addon"; if (kind === "map") return category === "map"; return category === "material" || category === "light"; }
 function sourceText(source: SourceRecord) { if (source.kind === "mcs_auto") return "MCS 作品目录"; if (source.kind === "library") return "组件库"; return "单个组件"; }
 function destinationLabel(source: SourceRecord) { const name = source.path.split(/[\\/]/).filter(Boolean).at(-1) ?? source.path; return `${source.kind === "mcs_auto" ? `MCStudio · ${name}` : "组件库"} — ${source.path}`; }
+function warningKey(warning: DiscoveryWarning) { return `${normalizeWarningPath(warning.path)}\n${warning.message}`; }
+function normalizeWarningPath(path: string) { return path.replace(/\//g, "\\").replace(/\\+$/, "").toLocaleLowerCase(); }
+function sourceForWarning(warning: DiscoveryWarning, sources: SourceRecord[]) {
+  const warningPath = normalizeWarningPath(warning.path);
+  return sources
+    .filter((source) => { const sourcePath = normalizeWarningPath(source.path); return warningPath === sourcePath || warningPath.startsWith(`${sourcePath}\\`); })
+    .sort((left, right) => right.path.length - left.path.length)[0];
+}
+function readIgnoredWarningKeys() {
+  if (typeof window === "undefined") return new Set<string>();
+  try {
+    const stored = JSON.parse(window.localStorage.getItem(IGNORED_WARNINGS_STORAGE_KEY) ?? "[]");
+    return new Set<string>(Array.isArray(stored) ? stored.filter((value): value is string => typeof value === "string") : []);
+  } catch {
+    return new Set<string>();
+  }
+}
+function writeIgnoredWarningKeys(keys: Set<string>) {
+  if (typeof window === "undefined") return;
+  try { window.localStorage.setItem(IGNORED_WARNINGS_STORAGE_KEY, JSON.stringify([...keys].sort())); } catch { /* Storage can be unavailable in restricted WebViews. */ }
+}
+function setsEqual(left: Set<string>, right: Set<string>) { return left.size === right.size && [...left].every((value) => right.has(value)); }
