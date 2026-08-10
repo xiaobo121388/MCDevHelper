@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
+  AppSettings,
   ComponentKind,
   ComponentSummary,
   DiscoveryResult,
@@ -16,12 +17,17 @@ export const api = {
   sources: () => invoke<SourceRecord[]>("list_sources"),
   addSingle: (path: string) => invoke<SourceRecord>("add_single_component", { path }),
   addLibrary: (path: string) => invoke<SourceRecord>("add_library", { path }),
+  addMcsPath: (path: string) => invoke<SourceRecord[]>("add_mcs_path", { path }),
+  rescanMcsPaths: () => invoke<SourceRecord[]>("rescan_mcs_paths"),
   removeSource: (sourceId: string) => invoke<boolean>("remove_source", { sourceId }),
+  settings: () => invoke<AppSettings>("get_settings"),
+  setSettings: (settings: AppSettings) => invoke<AppSettings>("set_settings", { settings }),
   create: (request: {
     name: string;
     kind: ComponentKind;
     destination: string;
     mcs_compatible: boolean;
+    namespace?: string;
   }) => invoke<OperationResult>("create_component", { request }),
   import: (request: {
     source: string;
@@ -39,6 +45,8 @@ export const api = {
     invoke<OperationResult>("move_component", { request }),
   export: (request: { component_id: string; destination: string }) =>
     invoke<OperationResult>("export_component", { request }),
+  delete: (componentId: string) =>
+    invoke<OperationResult>("delete_component", { componentId }),
   tags: (componentId: string, tags: string[]) =>
     invoke<OperationResult>("set_component_tags", {
       request: { component_id: componentId, tags },

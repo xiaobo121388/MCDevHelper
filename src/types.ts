@@ -2,6 +2,15 @@ export type ComponentKind = "addon" | "material" | "map";
 export type SourceKind = "mcs_auto" | "single" | "library";
 export type IdentityPolicy = "preserve" | "regenerate" | "error";
 export type VersionPart = "major" | "minor" | "patch";
+export type ThemePreference = "light" | "dark" | "system";
+
+export interface AppSettings {
+  developer_nickname: string;
+  developer_account: string;
+  developer_user_id: string;
+  default_destination?: string;
+  theme: ThemePreference;
+}
 
 export interface SourceRecord {
   id: string;
@@ -28,7 +37,10 @@ export interface ComponentSummary {
   version?: [number, number, number];
   tags: string[];
   icon_path?: string;
+  updated_at?: string;
   modified_at?: string;
+  created_at?: string;
+  size_bytes: number;
 }
 
 export interface DiscoveryResult {
