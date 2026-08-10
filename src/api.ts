@@ -58,6 +58,7 @@ export const api = {
       request: { component_id: componentId, part },
     }),
   openDirectory: (componentId: string) => invoke<void>("open_component_directory", { componentId }),
+  openWarningDirectory: (path: string) => invoke<void>("open_warning_directory", { path }),
   openVsCode: (componentId: string) => invoke<void>("open_component_in_vscode", { componentId }),
   vscodeStatus: () =>
     invoke<{ available: boolean; path?: string; custom: boolean }>("vscode_status"),

@@ -1,4 +1,5 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::process::Command;
 
 use mcdh_core::{
     AppSettings, BumpManifestVersionRequest, ComponentService, ComponentSummary,
@@ -179,6 +180,37 @@ fn open_component_directory(state: State<'_, AppState>, component_id: String) ->
 }
 
 #[tauri::command]
+fn open_warning_directory(path: PathBuf) -> CommandResult<()> {
+    if !path.is_absolute() {
+        return Err(
+            mcdh_core::CoreError::InvalidInput("扫描问题路径不是绝对路径".into()).payload(),
+        );
+    }
+    let directory = nearest_existing_directory(&path)
+        .ok_or_else(|| mcdh_core::CoreError::NotFound(path.clone()).payload())?;
+    Command::new("explorer.exe")
+        .arg(&directory)
+        .spawn()
+        .map_err(|error| mcdh_core::CoreError::io(&directory, error).payload())?;
+    Ok(())
+}
+
+fn nearest_existing_directory(path: &Path) -> Option<PathBuf> {
+    let mut candidate = if path.is_dir() {
+        Some(path)
+    } else {
+        path.parent()
+    };
+    while let Some(current) = candidate {
+        if current.is_dir() {
+            return Some(current.to_path_buf());
+        }
+        candidate = current.parent();
+    }
+    None
+}
+
+#[tauri::command]
 fn vscode_status(state: State<'_, AppState>) -> CommandResult<VsCodeStatus> {
     core_result(state.service().vscode_status())
 }
@@ -241,10 +273,26 @@ pub fn run() {
             regenerate_manifest_uuids,
             bump_manifest_version,
             open_component_directory,
+            open_warning_directory,
             open_component_in_vscode,
             vscode_status,
             set_vscode_path,
         ])
         .run(tauri::generate_context!())
         .expect("failed to run MCDH");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::nearest_existing_directory;
+
+    #[test]
+    fn warning_paths_fall_back_to_the_nearest_existing_parent() {
+        let crate_directory = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let missing = crate_directory.join("missing/warning/item");
+        assert_eq!(
+            nearest_existing_directory(&missing).as_deref(),
+            Some(crate_directory)
+        );
+    }
 }
