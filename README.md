@@ -5,12 +5,13 @@ MCDH 是面向网易《我的世界》中国版 PE 创作者的 Windows 离线�
 ## 特点
 
 - 完全离线：无账号、无遥测、无更新检查、无在线字体、无 CDN，也不监听网络端口。
-- 轻量桌面端：Tauri 2 + 系统 WebView2，简体中文界面，自动跟随系统浅色/深色主题。
-- 多来源管理：自动扫描所有逻辑盘的 MCS 工作目录，可另加单个组件目录或组件库目录。
-- 完整工作流：新建、导入、复制、移动、导出、标签、UUID 重生、版本提升、目录和 VS Code 打开。
+- 轻量桌面端：Tauri 2 + 系统 WebView2，简体中文界面，可跟随系统或固定为浅色/深色主题。
+- 多来源管理：首次启动自动发现所有逻辑盘的 MCS 工作目录，随后只扫描已保存来源，也可手动重新发现或添加自定义 MCS 路径。
+- 完整工作流：新建、导入、复制、移动、导出、双重确认删除、标签、UUID 重生、版本提升、目录和 VS Code 打开。
+- 快速查找：按标签筛选，并按 MCS 时间、名称、修改日期、创建日期或大小排序；默认按修改日期倒序。
 - 安全导入：支持文件夹、ZIP、mcpack、mcaddon 和内嵌包，拒绝路径穿越、绝对路径与符号链接条目。
-- MCS 兼容：识别 Type 1/3/4/7；需要时生成中性身份的 `studio.json` 和 `work.mcscfg`。
-- AI 接口：`mcdh-mcp.exe` 使用标准输入输出，提供 17 个严格 JSON Schema 工具，不提供删除组件工具。
+- MCS 兼容：识别 Type 1/3/4/7；可配置本地开发者身份和命名空间，并生成兼容的 `studio.json` 与 `work.mcscfg`。
+- AI 接口：`mcdh-mcp.exe` 使用标准输入输出，提供 21 个严格 JSON Schema 工具，不提供删除组件工具。
 
 ## 系统要求
 
@@ -29,17 +30,18 @@ MCDH 是面向网易《我的世界》中国版 PE 创作者的 Windows 离线�
 
 ## 快速使用
 
-1. 打开“路径管理”。MCDH 会自动扫描 `<盘符>:\MCStudioDownload\work\<账号>\Cpp\AddOn|Map|Material|Light`。
-2. “添加组件库”会扫描所选目录的直接子目录；“添加单个组件”只管理所选目录。
-3. 使用“新建组件”选择模组、材质或地图及目标目录。只有目标确实是 MCS 分类目录时才启用“MCS 兼容配置”。
-4. 组件卡片右下角可打开目录、用 VS Code 打开，或进入配置面板。
-5. 导出始终生成清洁 ZIP：AddOn 根目录只保留检测到的 BP/RP，地图和材质移除点号项及 MCS 私有配置。
+1. 首次启动且没有保存记录时，MCDH 自动扫描 `<盘符>:\MCStudioDownload\work\<账号>\Cpp\AddOn|Map|Material|Light` 并保存找到的分类目录。
+2. 打开左下角“设置”管理路径。“添加组件库”扫描所选目录的直接子目录，“添加单个组件”只管理所选目录；也可添加任意 MCS 分类目录或主动重新扫描逻辑盘。
+3. 在设置中配置新建默认目录、MCStudio 开发者昵称/账号/用户 ID，以及跟随系统、亮色或暗色主题。
+4. 使用“新建组件”从已配置目录的下拉框选择目标；启用“MCS 兼容配置”后可填写命名空间，默认是 `mcdh`。
+5. 组件卡片右下角可打开目录、用 VS Code 打开或进入配置面板；删除需要连续两次确认并会永久移除整个组件目录。
+6. 导出始终生成清洁 ZIP：AddOn 根目录只保留检测到的 BP/RP，地图和材质移除点号项及 MCS 私有配置。
 
 复制组件时可选择保留或重生 manifest UUID；复制到 MCS 时总会生成新的 MCS UID。移动默认保留 manifest UUID。重要作品建议先自行备份。
 
 ## MCP 配置
 
-在“路径管理”底部点击“复制客户端配置”，或手动配置：
+在“设置”底部点击“复制客户端配置”，或手动配置：
 
 ```json
 {
@@ -53,7 +55,7 @@ MCDH 是面向网易《我的世界》中国版 PE 创作者的 Windows 离线�
 
 MCP 仅使用 stdio；stdout 只输出协议消息，运行日志写入 stderr。可用工具：
 
-`list_components`、`get_component`、`refresh_components`、`list_sources`、`add_single_component`、`add_library`、`remove_source`、`create_component`、`import_component`、`copy_component`、`move_component`、`export_component`、`set_component_tags`、`regenerate_manifest_uuids`、`bump_manifest_version`、`open_component_directory`、`open_component_in_vscode`。
+`list_components`、`get_component`、`refresh_components`、`list_sources`、`add_single_component`、`add_library`、`add_mcs_path`、`rescan_mcs_paths`、`remove_source`、`get_settings`、`set_settings`、`create_component`、`import_component`、`copy_component`、`move_component`、`export_component`、`set_component_tags`、`regenerate_manifest_uuids`、`bump_manifest_version`、`open_component_directory`、`open_component_in_vscode`。
 
 ## 开发与验证
 
@@ -78,7 +80,7 @@ pnpm release:windows
 ## 数据与隐私
 
 - SQLite 使用 WAL、5 秒 busy timeout 和跨进程文件锁。
-- MCS 模板仅使用 `mcdh@local.invalid`、`MCDH`、`0` 等中性身份，除 MCS 必需的实际目标路径外不含本机绝对路径。
+- MCS 模板源码仅包含 `mcdh@local.invalid`、`MCDH`、`0` 等中性默认值；用户可在设置中替换这些本地生成信息，模板除 MCS 必需的实际目标路径外不含本机绝对路径。
 - 应用没有账号系统、游戏启动/测试功能、遥测、网络请求或自动更新。
 - 设置环境变量 `MCDH_DATA_DIR` 可为自动化测试隔离数据库；设置 `MCDH_DISABLE_MCS_SCAN=1` 可在测试进程中禁用自动 MCS 扫描。
 
