@@ -85,10 +85,14 @@ pub(crate) fn expand_nested_mcpacks(root: &Path) -> Result<()> {
 }
 
 pub(crate) fn write_zip(source: &Path, destination: &Path) -> Result<()> {
-    write_zip_mappings(&[(source.to_path_buf(), PathBuf::new())], destination)
+    write_zip_mappings(
+        &[(source.to_path_buf(), PathBuf::new())],
+        destination,
+        false,
+    )
 }
 
-pub(crate) fn write_zip_roots(sources: &[PathBuf], destination: &Path) -> Result<()> {
+pub(crate) fn write_addon_zip_roots(sources: &[PathBuf], destination: &Path) -> Result<()> {
     let mappings = sources
         .iter()
         .map(|source| {
@@ -99,10 +103,14 @@ pub(crate) fn write_zip_roots(sources: &[PathBuf], destination: &Path) -> Result
             Ok((source.clone(), prefix))
         })
         .collect::<Result<Vec<_>>>()?;
-    write_zip_mappings(&mappings, destination)
+    write_zip_mappings(&mappings, destination, true)
 }
 
-fn write_zip_mappings(mappings: &[(PathBuf, PathBuf)], destination: &Path) -> Result<()> {
+fn write_zip_mappings(
+    mappings: &[(PathBuf, PathBuf)],
+    destination: &Path,
+    exclude_python_artifacts: bool,
+) -> Result<()> {
     let file = File::create(destination).map_err(|error| CoreError::io(destination, error))?;
     let mut writer = ZipWriter::new(file);
     let compressed_options = SimpleFileOptions::default()
@@ -124,6 +132,7 @@ fn write_zip_mappings(mappings: &[(PathBuf, PathBuf)], destination: &Path) -> Re
             destination,
             compressed_options,
             stored_options,
+            exclude_python_artifacts,
         )?;
     }
     writer
@@ -139,6 +148,7 @@ fn append_zip_tree(
     destination: &Path,
     compressed_options: SimpleFileOptions,
     stored_options: SimpleFileOptions,
+    exclude_python_artifacts: bool,
 ) -> Result<()> {
     for entry in WalkDir::new(source).follow_links(false) {
         let entry = entry.map_err(|error| {
@@ -148,6 +158,9 @@ fn append_zip_tree(
             )
         })?;
         if entry.path() == source || entry.file_type().is_symlink() {
+            continue;
+        }
+        if exclude_python_artifacts && is_python_development_artifact(entry.path()) {
             continue;
         }
         let relative = entry
@@ -179,6 +192,14 @@ fn append_zip_tree(
         }
     }
     Ok(())
+}
+
+fn is_python_development_artifact(path: &Path) -> bool {
+    path.extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| {
+            extension.eq_ignore_ascii_case("pyi") || extension.eq_ignore_ascii_case("pyc")
+        })
 }
 
 fn should_store_entry(path: &Path, size: u64) -> bool {
@@ -314,6 +335,34 @@ mod tests {
         assert_eq!(
             archive.by_name("texture.png").unwrap().compression(),
             CompressionMethod::Stored
+        );
+    }
+
+    #[test]
+    fn addon_archives_exclude_python_stubs_and_bytecode_recursively() {
+        let temp = tempfile::tempdir().unwrap();
+        let behavior = temp.path().join("behavior_pack");
+        fs::create_dir_all(behavior.join("scripts/cache")).unwrap();
+        fs::write(behavior.join("scripts/main.py"), b"print('kept')").unwrap();
+        fs::write(
+            behavior.join("scripts/types.pyi"),
+            b"def run() -> None: ...",
+        )
+        .unwrap();
+        fs::write(behavior.join("scripts/cache/main.PYC"), b"bytecode").unwrap();
+        let archive_path = temp.path().join("addon.zip");
+
+        write_addon_zip_roots(&[behavior], &archive_path).unwrap();
+        let mut archive = ZipArchive::new(File::open(archive_path).unwrap()).unwrap();
+        let names = (0..archive.len())
+            .map(|index| archive.by_index(index).unwrap().name().to_owned())
+            .collect::<Vec<_>>();
+        assert!(names.contains(&"behavior_pack/scripts/main.py".into()));
+        assert!(!names.iter().any(|name| name.ends_with(".pyi")));
+        assert!(
+            !names
+                .iter()
+                .any(|name| name.to_ascii_lowercase().ends_with(".pyc"))
         );
     }
 }

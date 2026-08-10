@@ -11,8 +11,8 @@ use uuid::Uuid;
 use walkdir::{DirEntry, WalkDir};
 
 use crate::archive::{
-    expand_nested_mcpacks, extract_archive, is_supported_archive, temporary_zip_path, write_zip,
-    write_zip_roots,
+    expand_nested_mcpacks, extract_archive, is_supported_archive, temporary_zip_path,
+    write_addon_zip_roots, write_zip,
 };
 use crate::json::{parse_jsonc, parse_options};
 use crate::path_utils::canonicalize;
@@ -248,7 +248,7 @@ impl ComponentService {
             None => unique_child(&destination, &sanitize_file_name(&name)),
         };
         let mut staging = StagingDirectory::new(&destination)?;
-        let report = copy_clean_content(&import_root, staging.path(), kind)?;
+        let report = copy_clean_content(&import_root, staging.path(), kind, false)?;
         verify_copy(staging.path(), &report)?;
         if request.identity_policy == IdentityPolicy::Regenerate {
             regenerate_manifest_identifiers(staging.path())?;
@@ -546,9 +546,10 @@ fn copy_component_content(
             CopyFilter {
                 exclude_mcs,
                 exclude_dot: false,
+                exclude_python_artifacts: false,
             },
         ),
-        CopyMode::Clean => copy_clean_content(&component.path, destination, component.kind),
+        CopyMode::Clean => copy_clean_content(&component.path, destination, component.kind, false),
     }
 }
 
@@ -556,6 +557,7 @@ fn copy_clean_content(
     source: &Path,
     destination: &Path,
     kind: ComponentKind,
+    exclude_python_artifacts: bool,
 ) -> Result<CopyReport> {
     if kind != ComponentKind::Addon {
         return copy_tree(
@@ -564,6 +566,7 @@ fn copy_clean_content(
             CopyFilter {
                 exclude_mcs: true,
                 exclude_dot: true,
+                exclude_python_artifacts: false,
             },
         );
     }
@@ -577,6 +580,7 @@ fn copy_clean_content(
             CopyFilter {
                 exclude_mcs: true,
                 exclude_dot: false,
+                exclude_python_artifacts,
             },
         );
     }
@@ -591,6 +595,7 @@ fn copy_clean_content(
             CopyFilter {
                 exclude_mcs: false,
                 exclude_dot: false,
+                exclude_python_artifacts,
             },
         )?;
         let prefix = PathBuf::from(file_name);
@@ -616,7 +621,7 @@ fn write_clean_component_zip(
     if kind == ComponentKind::Addon {
         let pack_directories = direct_pack_directories(source)?;
         if !pack_directories.is_empty() {
-            return write_zip_roots(&pack_directories, destination);
+            return write_addon_zip_roots(&pack_directories, destination);
         }
     }
 
@@ -624,7 +629,7 @@ fn write_clean_component_zip(
         .prefix(".mcdh-export-")
         .tempdir_in(staging_parent)
         .map_err(|error| CoreError::io(staging_parent, error))?;
-    let report = copy_clean_content(source, staging.path(), kind)?;
+    let report = copy_clean_content(source, staging.path(), kind, kind == ComponentKind::Addon)?;
     verify_copy(staging.path(), &report)?;
     write_zip(staging.path(), destination)
 }
@@ -633,6 +638,7 @@ fn write_clean_component_zip(
 struct CopyFilter {
     exclude_mcs: bool,
     exclude_dot: bool,
+    exclude_python_artifacts: bool,
 }
 
 fn copy_tree(source: &Path, destination: &Path, filter: CopyFilter) -> Result<CopyReport> {
@@ -699,6 +705,16 @@ fn include_entry(source: &Path, entry: &DirEntry, filter: CopyFilter) -> bool {
         {
             return false;
         }
+    }
+    if filter.exclude_python_artifacts
+        && relative
+            .extension()
+            .and_then(|extension| extension.to_str())
+            .is_some_and(|extension| {
+                extension.eq_ignore_ascii_case("pyi") || extension.eq_ignore_ascii_case("pyc")
+            })
+    {
+        return false;
     }
     true
 }
@@ -1752,6 +1768,22 @@ mod tests {
             &addon.join("behavior_pack_Z6mMrsGM/manifest.json"),
             manifest("Behavior", "data", Uuid::new_v4()),
         );
+        fs::create_dir_all(addon.join("behavior_pack_Z6mMrsGM/scripts/cache")).unwrap();
+        fs::write(
+            addon.join("behavior_pack_Z6mMrsGM/scripts/server.py"),
+            b"print('kept')",
+        )
+        .unwrap();
+        fs::write(
+            addon.join("behavior_pack_Z6mMrsGM/scripts/server.pyi"),
+            b"def start() -> None: ...",
+        )
+        .unwrap();
+        fs::write(
+            addon.join("behavior_pack_Z6mMrsGM/scripts/cache/server.pyc"),
+            b"bytecode",
+        )
+        .unwrap();
         write_json(
             &addon.join("resource_pack_p69M2JA2/manifest.json"),
             manifest("Resources", "resources", Uuid::new_v4()),
@@ -1780,6 +1812,11 @@ mod tests {
             .collect::<Vec<_>>();
         assert!(names.contains(&"behavior_pack_Z6mMrsGM/manifest.json".into()));
         assert!(names.contains(&"resource_pack_p69M2JA2/manifest.json".into()));
+        assert!(names.contains(&"behavior_pack_Z6mMrsGM/scripts/server.py".into()));
+        assert!(!names.iter().any(|name| {
+            let lower = name.to_ascii_lowercase();
+            lower.ends_with(".pyi") || lower.ends_with(".pyc")
+        }));
         assert!(!names.iter().any(|name| name.contains(".venv")));
         assert!(!names.iter().any(|name| name.ends_with("work.mcscfg")));
     }
