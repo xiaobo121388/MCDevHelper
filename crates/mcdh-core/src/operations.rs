@@ -14,10 +14,11 @@ use crate::archive::{
 };
 use crate::path_utils::canonicalize;
 use crate::{
-    BumpManifestVersionRequest, ComponentKind, ComponentSummary, CopyComponentRequest, CoreError,
-    CreateComponentRequest, DiscoveryService, ExportComponentRequest, IdentityPolicy,
-    ImportComponentRequest, LocalIndex, McsTemplateIdentity, MoveComponentRequest, OperationResult,
-    Result, SetComponentTagsRequest, TemplateRequest, TemplateService, VersionPart, VsCodeStatus,
+    BumpManifestVersionRequest, ComponentKind, ComponentOrigin, ComponentSummary,
+    CopyComponentRequest, CoreError, CreateComponentRequest, DiscoveryService,
+    ExportComponentRequest, IdentityPolicy, ImportComponentRequest, LocalIndex,
+    McsTemplateIdentity, MoveComponentRequest, OperationResult, Result, SetComponentTagsRequest,
+    TemplateRequest, TemplateService, VersionPart, VsCodeStatus,
 };
 
 #[cfg(test)]
@@ -294,6 +295,28 @@ impl ComponentService {
             component: Some(component),
             actual_path: archive_path.clone(),
             modified_files: vec![archive_path],
+            warnings: Vec::new(),
+        })
+    }
+
+    pub fn delete_component(&self, component_id: &str) -> Result<OperationResult> {
+        let _guard = self.index.try_lock_mutations()?;
+        let component = self.find_component(component_id)?;
+        let path = canonicalize(&component.path)?;
+        if !path.is_dir() || path.parent().is_none() || path.file_name().is_none() {
+            return Err(CoreError::InvalidInput(
+                "拒绝删除无效或过于宽泛的组件路径".into(),
+            ));
+        }
+        fs::remove_dir_all(&path).map_err(|error| CoreError::io(&path, error))?;
+        self.index.remove_component_metadata(&path)?;
+        if let ComponentOrigin::Single { source_id } = &component.origin {
+            self.index.remove_source(source_id)?;
+        }
+        Ok(OperationResult {
+            component: Some(component),
+            actual_path: path,
+            modified_files: Vec::new(),
             warnings: Vec::new(),
         })
     }
@@ -1366,6 +1389,27 @@ mod tests {
             Some(mcs.actual_path.to_string_lossy().as_ref())
         );
         assert!(mcs.actual_path.join("work.mcscfg").is_file());
+    }
+
+    #[test]
+    fn deletes_a_discovered_component_and_its_single_source() {
+        let temp = tempfile::tempdir().unwrap();
+        let index = LocalIndex::open(temp.path().join("state/mcdh.db")).unwrap();
+        let component_path = temp.path().join("待删除组件");
+        write_json(
+            &component_path.join("manifest.json"),
+            manifest("待删除组件", "resources", Uuid::new_v4()),
+        );
+        index
+            .add_source(SourceKind::Single, &component_path)
+            .unwrap();
+        let service = ComponentService::new(index.clone()).with_mcs_work_roots(Vec::new());
+        let component = service.current_components().unwrap().remove(0);
+
+        let result = service.delete_component(&component.id).unwrap();
+        assert_eq!(result.actual_path, component_path);
+        assert!(!component_path.exists());
+        assert!(index.list_sources().unwrap().is_empty());
     }
 
     #[test]

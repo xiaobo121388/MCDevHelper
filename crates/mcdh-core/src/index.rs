@@ -221,6 +221,15 @@ impl LocalIndex {
         Ok(changed > 0)
     }
 
+    pub fn remove_component_metadata(&self, path: impl AsRef<Path>) -> Result<bool> {
+        let path = normalize_path(path.as_ref())?;
+        let changed = self.connection()?.execute(
+            "DELETE FROM component_metadata WHERE path = ?1",
+            [path.to_string_lossy().as_ref()],
+        )?;
+        Ok(changed > 0)
+    }
+
     pub fn setting(&self, key: &str) -> Result<Option<String>> {
         Ok(self
             .connection()?
