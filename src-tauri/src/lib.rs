@@ -1,8 +1,8 @@
 use std::path::PathBuf;
 
 use mcdh_core::{
-    BumpManifestVersionRequest, ComponentService, ComponentSummary, CopyComponentRequest,
-    CreateComponentRequest, DiscoveryResult, DiscoveryService, ErrorPayload,
+    AppSettings, BumpManifestVersionRequest, ComponentService, ComponentSummary,
+    CopyComponentRequest, CreateComponentRequest, DiscoveryResult, DiscoveryService, ErrorPayload,
     ExportComponentRequest, ImportComponentRequest, LocalIndex, MoveComponentRequest,
     OperationResult, SetComponentTagsRequest, SourceKind, SourceRecord, VsCodeStatus,
 };
@@ -47,8 +47,9 @@ fn mcp_client_config() -> CommandResult<String> {
 }
 
 #[tauri::command]
-fn refresh_components(state: State<'_, AppState>) -> CommandResult<DiscoveryResult> {
-    core_result(DiscoveryService::new(state.index.clone()).refresh())
+async fn refresh_components(state: State<'_, AppState>) -> CommandResult<DiscoveryResult> {
+    let index = state.index.clone();
+    background(move || DiscoveryService::new(index).refresh()).await
 }
 
 #[tauri::command]
@@ -77,6 +78,27 @@ fn add_library(state: State<'_, AppState>, path: PathBuf) -> CommandResult<Sourc
 #[tauri::command]
 fn remove_source(state: State<'_, AppState>, source_id: String) -> CommandResult<bool> {
     core_result(state.index.remove_source(&source_id))
+}
+
+#[tauri::command]
+fn add_mcs_path(state: State<'_, AppState>, path: PathBuf) -> CommandResult<Vec<SourceRecord>> {
+    core_result(DiscoveryService::new(state.index.clone()).add_mcs_source_path(&path))
+}
+
+#[tauri::command]
+async fn rescan_mcs_paths(state: State<'_, AppState>) -> CommandResult<Vec<SourceRecord>> {
+    let index = state.index.clone();
+    background(move || DiscoveryService::new(index).rescan_mcs_sources()).await
+}
+
+#[tauri::command]
+fn get_settings(state: State<'_, AppState>) -> CommandResult<AppSettings> {
+    core_result(state.index.app_settings())
+}
+
+#[tauri::command]
+fn set_settings(state: State<'_, AppState>, settings: AppSettings) -> CommandResult<AppSettings> {
+    core_result(state.index.set_app_settings(&settings))
 }
 
 #[tauri::command]
@@ -117,6 +139,14 @@ fn export_component(
     request: ExportComponentRequest,
 ) -> CommandResult<OperationResult> {
     core_result(state.service().export_component(&request))
+}
+
+#[tauri::command]
+fn delete_component(
+    state: State<'_, AppState>,
+    component_id: String,
+) -> CommandResult<OperationResult> {
+    core_result(state.service().delete_component(&component_id))
 }
 
 #[tauri::command]
@@ -167,6 +197,19 @@ fn core_result<T>(result: mcdh_core::Result<T>) -> CommandResult<T> {
     result.map_err(|error| error.payload())
 }
 
+async fn background<T, F>(operation: F) -> CommandResult<T>
+where
+    T: Send + 'static,
+    F: FnOnce() -> mcdh_core::Result<T> + Send + 'static,
+{
+    tauri::async_runtime::spawn_blocking(operation)
+        .await
+        .map_err(|error| {
+            mcdh_core::CoreError::InvalidInput(format!("后台任务失败：{error}")).payload()
+        })?
+        .map_err(|error| error.payload())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let state = AppState::open().expect("failed to open MCDH local index");
@@ -183,12 +226,17 @@ pub fn run() {
             list_sources,
             add_single_component,
             add_library,
+            add_mcs_path,
             remove_source,
+            rescan_mcs_paths,
+            get_settings,
+            set_settings,
             create_component,
             import_component,
             copy_component,
             move_component,
             export_component,
+            delete_component,
             set_component_tags,
             regenerate_manifest_uuids,
             bump_manifest_version,
