@@ -387,11 +387,11 @@ impl ComponentService {
     }
 
     pub fn open_component_directory(&self, component_id: &str) -> Result<()> {
-        let component = self.find_component(component_id)?;
+        let path = self.indexed_component_path(component_id)?;
         Command::new("explorer.exe")
-            .arg(&component.path)
+            .arg(&path)
             .spawn()
-            .map_err(|error| CoreError::io(&component.path, error))?;
+            .map_err(|error| CoreError::io(&path, error))?;
         Ok(())
     }
 
@@ -427,7 +427,7 @@ impl ComponentService {
     }
 
     pub fn open_component_in_vscode(&self, component_id: &str) -> Result<()> {
-        let component = self.find_component(component_id)?;
+        let path = self.indexed_component_path(component_id)?;
         let configured = self
             .index
             .setting("vscode_path")?
@@ -437,8 +437,7 @@ impl ComponentService {
             .filter(|path| path.is_file())
             .or_else(detect_vscode)
             .ok_or_else(|| CoreError::NotFound(PathBuf::from("Visual Studio Code")))?;
-        let target = preferred_workspace(&component.path)
-            .map_err(|error| CoreError::io(&component.path, error))?;
+        let target = preferred_workspace(&path).map_err(|error| CoreError::io(&path, error))?;
         Command::new(&executable)
             .arg(&target)
             .spawn()
@@ -1543,6 +1542,50 @@ mod tests {
             Some(mcs.actual_path.to_string_lossy().as_ref())
         );
         assert!(mcs.actual_path.join("work.mcscfg").is_file());
+    }
+
+    #[test]
+    fn resolves_open_targets_from_the_index_without_discovery() {
+        let temp = tempfile::tempdir().unwrap();
+        let index = LocalIndex::open(temp.path().join("state/mcdh.db")).unwrap();
+        let component = temp.path().join("indexed-component");
+        fs::create_dir_all(&component).unwrap();
+        let component_id = index.component_id(&component).unwrap();
+
+        let broken_library = temp.path().join("broken-library");
+        fs::create_dir_all(broken_library.join("broken-component")).unwrap();
+        fs::write(
+            broken_library.join("broken-component/manifest.json"),
+            b"{broken json",
+        )
+        .unwrap();
+        index
+            .add_source(SourceKind::Library, &broken_library)
+            .unwrap();
+
+        let service = ComponentService::new(index);
+        assert_eq!(
+            service.indexed_component_path(&component_id).unwrap(),
+            component
+        );
+
+        fs::remove_dir_all(&component).unwrap();
+        assert!(matches!(
+            service.indexed_component_path(&component_id),
+            Err(CoreError::NotFound(path)) if path == component
+        ));
+    }
+
+    #[test]
+    fn prefers_only_a_single_workspace_file() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path();
+        let first = root.join("project.code-workspace");
+        fs::write(&first, b"{}").unwrap();
+        assert_eq!(preferred_workspace(root).unwrap(), first);
+
+        fs::write(root.join("second.code-workspace"), b"{}").unwrap();
+        assert_eq!(preferred_workspace(root).unwrap(), root);
     }
 
     #[test]

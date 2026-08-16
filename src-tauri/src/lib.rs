@@ -277,8 +277,12 @@ fn bump_manifest_version(
 }
 
 #[tauri::command]
-fn open_component_directory(state: State<'_, AppState>, component_id: String) -> CommandResult<()> {
-    core_result(state.service().open_component_directory(&component_id))
+async fn open_component_directory(
+    state: State<'_, AppState>,
+    component_id: String,
+) -> CommandResult<()> {
+    let index = state.index.clone();
+    background(move || ComponentService::new(index).open_component_directory(&component_id)).await
 }
 
 #[tauri::command]
@@ -323,8 +327,12 @@ fn set_vscode_path(state: State<'_, AppState>, path: Option<PathBuf>) -> Command
 }
 
 #[tauri::command]
-fn open_component_in_vscode(state: State<'_, AppState>, component_id: String) -> CommandResult<()> {
-    core_result(state.service().open_component_in_vscode(&component_id))
+async fn open_component_in_vscode(
+    state: State<'_, AppState>,
+    component_id: String,
+) -> CommandResult<()> {
+    let index = state.index.clone();
+    background(move || ComponentService::new(index).open_component_in_vscode(&component_id)).await
 }
 
 fn core_result<T>(result: mcdh_core::Result<T>) -> CommandResult<T> {
