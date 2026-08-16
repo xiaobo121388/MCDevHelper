@@ -38,6 +38,7 @@ import {
 } from "lucide-react";
 import { FormEvent, ReactNode, useCallback, useEffect, useMemo, useState } from "react";
 import { api, desktop, errorMessage } from "./api";
+import { releaseNotesFor } from "./releaseNotes";
 import type {
   AppSettings,
   ComponentKind,
@@ -56,6 +57,7 @@ import type {
 const EMPTY_RESULT: DiscoveryResult = { components: [], sources: [], warnings: [] };
 const IGNORED_WARNINGS_STORAGE_KEY = "mcdh.ignored-discovery-warnings";
 const LAST_EXPORT_DESTINATION_STORAGE_KEY = "mcdh.last-export-destination";
+const LAST_LAUNCHED_VERSION_STORAGE_KEY = "mcdh.last-launched-version";
 const DEFAULT_SETTINGS: AppSettings = {
   developer_nickname: "MCDH",
   developer_account: "mcdh@local.invalid",
@@ -65,6 +67,9 @@ const DEFAULT_SETTINGS: AppSettings = {
 const kindText: Record<ComponentKind, string> = { addon: "模组", material: "材质", map: "地图" };
 type SortKey = "updated" | "name" | "modified" | "created" | "size";
 type SortDirection = "asc" | "desc";
+type StartupDialog =
+  | { kind: "updated"; currentVersion: string; notes: string[] }
+  | { kind: "available"; update: UpdateCheckResult };
 
 export function App() {
   const [result, setResult] = useState(EMPTY_RESULT);
@@ -79,6 +84,7 @@ export function App() {
   const [selected, setSelected] = useState<ComponentSummary | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [ignoredWarningKeys, setIgnoredWarningKeys] = useState<Set<string>>(readIgnoredWarningKeys);
+  const [startupDialogs, setStartupDialogs] = useState<StartupDialog[]>([]);
 
   const refresh = useCallback(async () => {
     if (!desktop) {
@@ -110,6 +116,32 @@ export function App() {
   useEffect(() => {
     if (!desktop) return;
     void api.settings().then(setSettings).catch((error) => setNotice(errorMessage(error)));
+  }, []);
+
+  useEffect(() => {
+    if (!desktop) return;
+    let active = true;
+    void (async () => {
+      try {
+        const currentVersion = await api.version();
+        const previousVersion = readLastLaunchedVersion();
+        writeLastLaunchedVersion(currentVersion);
+        if (active && shouldShowReleaseNotes(previousVersion, currentVersion)) {
+          setStartupDialogs((current) => [...current, { kind: "updated", currentVersion, notes: releaseNotesFor(currentVersion) }]);
+        }
+      } catch {
+        // Version detection must never block startup.
+      }
+      try {
+        const update = await api.checkForUpdates();
+        if (active && update.update_available) {
+          setStartupDialogs((current) => [...current, { kind: "available", update }]);
+        }
+      } catch {
+        // Offline startup remains fully usable; manual checking reports errors in Settings.
+      }
+    })();
+    return () => { active = false; };
   }, []);
 
   useEffect(() => {
@@ -172,6 +204,20 @@ export function App() {
     await refresh();
   };
 
+  const dismissStartupDialog = () => setStartupDialogs((current) => current.slice(1));
+  const openStartupRelease = async (url: string) => {
+    if (!isOfficialMcdhUrl(url)) {
+      setNotice("拒绝打开非官方 MCDH 链接。");
+      return;
+    }
+    try {
+      await openUrl(url);
+      dismissStartupDialog();
+    } catch (error) {
+      setNotice(errorMessage(error));
+    }
+  };
+
   return (
     <div className="app-shell">
       <aside className="sidebar">
@@ -190,7 +236,7 @@ export function App() {
         <button className="sidebar-action" onClick={() => setModal("settings")}>
           <Settings size={18} /><span>设置</span><ChevronRight size={15} />
         </button>
-        <div className="offline-badge"><span /> 本地优先 · 无自动联网</div>
+        <div className="offline-badge"><span /> 本地优先 · 启动检查更新</div>
       </aside>
 
       <main className="workspace">
@@ -255,8 +301,35 @@ export function App() {
           void done(message);
         }
       }} onNotice={setNotice} />}
+      {startupDialogs[0] && <StartupUpdateDialog dialog={startupDialogs[0]} onClose={dismissStartupDialog} onOpenRelease={(url) => void openStartupRelease(url)} />}
       {notice && <div className="toast" role="status">{notice}</div>}
     </div>
+  );
+}
+
+function StartupUpdateDialog({ dialog, onClose, onOpenRelease }: { dialog: StartupDialog; onClose: () => void; onOpenRelease: (url: string) => void }) {
+  if (dialog.kind === "updated") {
+    return (
+      <Modal title={`已更新至 ${displayVersion(dialog.currentVersion)}`} subtitle="首次启动更新日志" onClose={onClose}>
+        <div className="release-dialog">
+          <div className="release-heading"><Sparkles size={21} /><div><strong>更新已完成</strong><p>以下是此版本的主要变化。</p></div></div>
+          <ul className="release-notes">{dialog.notes.map((note) => <li key={note}>{note}</li>)}</ul>
+          <div className="dialog-actions"><button className="button primary" onClick={onClose}>知道了</button></div>
+        </div>
+      </Modal>
+    );
+  }
+
+  const update = dialog.update;
+  return (
+    <Modal title={`发现新版本 ${displayVersion(update.latest_version ?? "")}`} subtitle={`当前版本 ${displayVersion(update.current_version)}`} onClose={onClose}>
+      <div className="release-dialog">
+        <div className="release-heading available"><Sparkles size={21} /><div><strong>{update.release_name || update.latest_version}</strong><p>{update.published_at ? `发布于 ${formatDate(update.published_at)}` : "GitHub 已发布新的正式版本。"}</p></div></div>
+        {update.release_notes && <p className="remote-release-notes">{update.release_notes}</p>}
+        <p className="release-download-note">MCDH 不会自动下载安装包，点击后将使用系统浏览器打开官方 Release 页面。</p>
+        <div className="dialog-actions"><button className="button secondary" onClick={onClose}>稍后提醒</button>{update.release_url && <button className="button primary" onClick={() => onOpenRelease(update.release_url!)}>前往下载<ExternalLink size={14} /></button>}</div>
+      </div>
+    </Modal>
   );
 }
 
@@ -522,7 +595,7 @@ function SettingsDialog({ settings: initialSettings, onSettings, onClose, onChan
     }
   };
   const openGitHub = async (url: string) => {
-    if (!url.startsWith("https://github.com/xiaobo121388/MCDevHelper/")) {
+    if (!isOfficialMcdhUrl(url)) {
       onNotice("拒绝打开非官方 MCDH 链接。");
       return;
     }
@@ -584,8 +657,8 @@ function SettingsDialog({ settings: initialSettings, onSettings, onClose, onChan
 
             {section === "about" && <section>
               <div className="about-product"><span className="brand-mark"><Boxes size={21} /></span><div><h3>MCDH · MCDevHelper</h3><p>网易中国版 PE 创作者的本地组件管理工具</p></div><strong>v{appVersion || "…"}</strong></div>
-              <div className="about-note"><Info size={17} /><p>默认不会联网。只有主动点击“检查更新”时才会访问 GitHub Releases API；反馈会交给系统浏览器打开 GitHub Issue 页面。</p></div>
-              <div className="settings-tool"><div><strong>检查更新</strong><p>查询 GitHub 上最新发布的正式 Release，不会自动下载或安装。</p></div><div className="settings-tool-actions"><button className="button primary" disabled={busy === "update"} onClick={() => void checkForUpdates()}><RefreshCw className={busy === "update" ? "spin" : ""} size={16} />{busy === "update" ? "检查中…" : "检查更新"}</button></div></div>
+              <div className="about-note"><Info size={17} /><p>每次启动会向 GitHub Releases API 查询一次最新版本；不会自动下载或安装。反馈会交给系统浏览器打开 GitHub Issue 页面。</p></div>
+              <div className="settings-tool"><div><strong>检查更新</strong><p>启动时会自动检查，也可以在这里立即重新查询最新正式 Release。</p></div><div className="settings-tool-actions"><button className="button primary" disabled={busy === "update"} onClick={() => void checkForUpdates()}><RefreshCw className={busy === "update" ? "spin" : ""} size={16} />{busy === "update" ? "检查中…" : "检查更新"}</button></div></div>
               {updateError && <div className="update-result error"><TriangleAlert size={17} /><div><strong>检查失败</strong><p>{updateError}</p></div></div>}
               {updateResult && <div className={`update-result ${updateResult.update_available ? "available" : "current"}`}>
                 <Info size={17} />
@@ -718,6 +791,29 @@ function readLastExportDestination() {
 function writeLastExportDestination(destination: string) {
   if (typeof window === "undefined") return;
   try { window.localStorage.setItem(LAST_EXPORT_DESTINATION_STORAGE_KEY, destination); } catch { /* Storage can be unavailable in restricted WebViews. */ }
+}
+function readLastLaunchedVersion() {
+  if (typeof window === "undefined") return null;
+  try { return window.localStorage.getItem(LAST_LAUNCHED_VERSION_STORAGE_KEY); } catch { return null; }
+}
+function writeLastLaunchedVersion(version: string) {
+  if (typeof window === "undefined") return;
+  try { window.localStorage.setItem(LAST_LAUNCHED_VERSION_STORAGE_KEY, version); } catch { /* Storage can be unavailable in restricted WebViews. */ }
+}
+function shouldShowReleaseNotes(previousVersion: string | null, currentVersion: string) {
+  if (!previousVersion) return true;
+  const previous = parseVersion(previousVersion);
+  const current = parseVersion(currentVersion);
+  if (!previous || !current) return previousVersion.trim() !== currentVersion.trim();
+  return current.some((part, index) => part > previous[index] && current.slice(0, index).every((value, before) => value === previous[before]));
+}
+function parseVersion(version: string): [number, number, number] | null {
+  const match = version.trim().match(/^[vV]?(\d+)\.(\d+)\.(\d+)(?:[-+].*)?$/);
+  return match ? [Number(match[1]), Number(match[2]), Number(match[3])] : null;
+}
+function displayVersion(version: string) { const normalized = version.trim().replace(/^[vV]/, ""); return normalized ? `v${normalized}` : "未知版本"; }
+function isOfficialMcdhUrl(url: string) {
+  try { const parsed = new URL(url); return parsed.protocol === "https:" && parsed.hostname === "github.com" && parsed.pathname.startsWith("/xiaobo121388/MCDevHelper/"); } catch { return false; }
 }
 function destinationExistsPath(error: unknown): string | undefined {
   let payload = error;

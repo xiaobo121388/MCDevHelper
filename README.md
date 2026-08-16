@@ -4,7 +4,7 @@ MCDH 是面向网易《我的世界》中国版 PE 创作者的 Windows 本地�
 
 ## 特点
 
-- 本地优先：无账号、无遥测、无在线字体、无 CDN，也不监听网络端口；仅在用户主动检查更新时访问 GitHub。
+- 本地优先：无账号、无遥测、无在线字体、无 CDN，也不监听网络端口；启动时仅访问 GitHub 检查正式更新。
 - 轻量桌面端：Tauri 2 + 系统 WebView2，简体中文界面，可跟随系统或固定为浅色/深色主题。
 - 多来源管理：首次启动自动发现所有逻辑盘的 MCS 工作目录，随后只扫描已保存来源，也可手动重新发现或添加自定义 MCS 路径。
 - 完整工作流：新建、导入、复制、移动、导出、双重确认删除、标签、UUID 重生、版本提升、目录和 VS Code 打开。
@@ -19,7 +19,7 @@ MCDH 是面向网易《我的世界》中国版 PE 创作者的 Windows 本地�
 
 - Windows 10/11 x64。
 - 已安装系统 WebView2 Runtime。Windows 10 的受支持版本和 Windows 11 通常已随系统提供；MCDH 不联网下载运行时。
-- 安装和管理组件不需要管理员权限，也不需要 Node.js、Rust 或网络连接；“检查更新”和打开反馈页面需要网络。
+- 安装和管理组件不需要管理员权限，也不需要 Node.js、Rust 或持续网络连接；启动更新检查和打开反馈页面需要网络，检查失败不影响本地功能。
 
 发行包当前未进行商业代码签名，首次运行时 Windows 可能显示 SmartScreen 提示。请核对 `SHA256SUMS.txt` 后再运行。
 
@@ -63,7 +63,9 @@ MCDH 新建、导入或复制组件时会在根目录生成 `.mcdh.json`；没�
 
 ## 检查更新与反馈
 
-打开“设置 > 关于”可以查看当前版本。MCDH 不会在启动或后台自动检查；只有点击“检查更新”后，才会向 GitHub 官方 [`GET /repos/xiaobo121388/MCDevHelper/releases/latest`](https://docs.github.com/en/rest/releases/releases?apiVersion=2026-03-10#get-the-latest-release) 接口发起一次未认证请求，并展示最新正式 Release，不会自动下载或安装。未认证请求只能读取公开资源；仓库未公开或尚无正式 Release 时会显示“未找到公开 Release”。
+MCDH 每次启动会向 GitHub 官方 [`GET /repos/xiaobo121388/MCDevHelper/releases/latest`](https://docs.github.com/en/rest/releases/releases?apiVersion=2026-03-10#get-the-latest-release) 接口发起一次未认证请求；发现新版本时弹窗展示 Release 名称、更新说明和官方下载入口，但不会自动下载或安装。网络不可用时静默跳过，不影响组件管理；也可以在“设置 > 关于”手动重新检查。
+
+应用会在本机记录上次启动的版本。首次安装或检测到版本升级后的第一次启动会优先显示该版本的内置更新日志，并立即记录为已读；同一次启动若还发现更高版本，会在关闭更新日志后继续显示更新提示。
 
 “反馈问题”会使用系统默认浏览器打开仓库的 GitHub 新建 Issue 页面，MCDH 不会代替用户填写或提交内容。
 
@@ -109,7 +111,7 @@ pnpm release:windows
 
 - SQLite 使用 WAL、5 秒 busy timeout 和跨进程文件锁。
 - MCS 模板源码仅包含 `mcdh@local.invalid`、`MCDH`、`0` 等中性默认值；用户可在设置中替换这些本地生成信息，模板除 MCS 必需的实际目标路径外不含本机绝对路径。
-- 应用没有账号系统、游戏启动/测试功能、遥测或自动更新。主动检查更新时仅请求 `api.github.com` 的公开 Release 元数据，反馈则交由系统浏览器打开 GitHub；其他组件管理功能不联网。
+- 应用没有账号系统、游戏启动/测试功能、遥测或自动下载安装。每次启动及用户手动检查时仅请求 `api.github.com` 的公开 Release 元数据，反馈则交由系统浏览器打开 GitHub；其他组件管理功能不联网。
 - 设置环境变量 `MCDH_DATA_DIR` 可为自动化测试隔离数据库；设置 `MCDH_DISABLE_MCS_SCAN=1` 可在测试进程中禁用自动 MCS 扫描。
 
 ## 开源参考与许可

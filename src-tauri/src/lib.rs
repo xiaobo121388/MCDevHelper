@@ -45,6 +45,7 @@ struct GitHubRelease {
     name: Option<String>,
     html_url: String,
     published_at: Option<String>,
+    body: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -54,6 +55,7 @@ struct UpdateCheckResult {
     release_name: Option<String>,
     release_url: Option<String>,
     published_at: Option<String>,
+    release_notes: Option<String>,
     update_available: bool,
     no_release: bool,
 }
@@ -66,6 +68,7 @@ impl UpdateCheckResult {
             release_name: None,
             release_url: None,
             published_at: None,
+            release_notes: None,
             update_available: false,
             no_release: true,
         }
@@ -79,6 +82,7 @@ impl UpdateCheckResult {
             release_name: release.name,
             release_url: Some(release.html_url),
             published_at: release.published_at,
+            release_notes: release.body.filter(|body| !body.trim().is_empty()),
             no_release: false,
         }
     }
@@ -432,9 +436,11 @@ mod tests {
             name: Some("MCDH 1.2.0".into()),
             html_url: "https://github.com/xiaobo121388/MCDevHelper/releases/tag/v1.2.0".into(),
             published_at: Some("2026-08-10T12:00:00Z".into()),
+            body: Some("新增自动更新提示".into()),
         });
         assert!(result.update_available);
         assert_eq!(result.latest_version.as_deref(), Some("v1.2.0"));
+        assert_eq!(result.release_notes.as_deref(), Some("新增自动更新提示"));
         assert_eq!(
             result.release_url.as_deref(),
             Some("https://github.com/xiaobo121388/MCDevHelper/releases/tag/v1.2.0")

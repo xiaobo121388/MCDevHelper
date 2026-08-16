@@ -53,6 +53,7 @@ describe("component workspace filters", () => {
 
   beforeEach(() => {
     window.localStorage.clear();
+    window.localStorage.setItem("mcdh.last-launched-version", "1.1.0");
     mocks.refresh.mockReset();
     mocks.settings.mockReset().mockResolvedValue({
       developer_nickname: "MCDH",
@@ -71,8 +72,14 @@ describe("component workspace filters", () => {
     mocks.removeSource.mockReset().mockResolvedValue(true);
     mocks.sources.mockReset().mockResolvedValue([]);
     mocks.vscodeStatus.mockReset().mockResolvedValue({ available: false, custom: false });
-    mocks.version.mockReset().mockResolvedValue("0.1.0");
-    mocks.checkForUpdates.mockReset();
+    mocks.version.mockReset().mockResolvedValue("1.1.0");
+    mocks.checkForUpdates.mockReset().mockResolvedValue({
+      current_version: "1.1.0",
+      latest_version: "v1.1.0",
+      release_name: "MCDH 1.1.0",
+      update_available: false,
+      no_release: false,
+    });
     mocks.openUrl.mockReset().mockResolvedValue(undefined);
   });
 
@@ -239,35 +246,100 @@ describe("component workspace filters", () => {
     }));
   });
 
-  it("organizes settings by category and only checks GitHub on demand", async () => {
+  it("organizes settings and supports a manual check after the startup check", async () => {
     mocks.refresh.mockResolvedValue({ components: [], sources: [], warnings: [] });
-    mocks.checkForUpdates.mockResolvedValue({
-      current_version: "0.1.0",
-      latest_version: "v0.2.0",
-      release_name: "MCDH 0.2.0",
-      release_url: "https://github.com/xiaobo121388/MCDevHelper/releases/tag/v0.2.0",
-      published_at: "2026-08-10T12:00:00Z",
-      update_available: true,
-      no_release: false,
-    });
+    mocks.checkForUpdates
+      .mockResolvedValueOnce({
+        current_version: "1.1.0",
+        latest_version: "v1.1.0",
+        release_name: "MCDH 1.1.0",
+        update_available: false,
+        no_release: false,
+      })
+      .mockResolvedValueOnce({
+        current_version: "1.1.0",
+        latest_version: "v1.2.0",
+        release_name: "MCDH 1.2.0",
+        release_url: "https://github.com/xiaobo121388/MCDevHelper/releases/tag/v1.2.0",
+        published_at: "2026-08-10T12:00:00Z",
+        update_available: true,
+        no_release: false,
+      });
     render(<App />);
     await waitFor(() => expect(screen.getByRole("button", { name: /设置/ })).toBeInTheDocument());
     fireEvent.click(screen.getByRole("button", { name: /设置/ }));
 
     const navigation = await screen.findByRole("navigation", { name: "设置分类" });
     expect(within(navigation).getByRole("button", { name: /路径管理/ })).toHaveAttribute("aria-current", "page");
-    expect(mocks.checkForUpdates).not.toHaveBeenCalled();
+    await waitFor(() => expect(mocks.checkForUpdates).toHaveBeenCalledTimes(1));
     fireEvent.click(within(navigation).getByRole("button", { name: /关于/ }));
-    expect(await screen.findByText("v0.1.0")).toBeInTheDocument();
+    expect(await screen.findByText("v1.1.0")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "检查更新" }));
-    await waitFor(() => expect(mocks.checkForUpdates).toHaveBeenCalledTimes(1));
-    expect(await screen.findByText("发现新版本 v0.2.0")).toBeInTheDocument();
+    await waitFor(() => expect(mocks.checkForUpdates).toHaveBeenCalledTimes(2));
+    expect(await screen.findByText("发现新版本 v1.2.0")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /查看 Release/ }));
-    await waitFor(() => expect(mocks.openUrl).toHaveBeenCalledWith("https://github.com/xiaobo121388/MCDevHelper/releases/tag/v0.2.0"));
+    await waitFor(() => expect(mocks.openUrl).toHaveBeenCalledWith("https://github.com/xiaobo121388/MCDevHelper/releases/tag/v1.2.0"));
 
     fireEvent.click(screen.getByRole("button", { name: /打开反馈页面/ }));
     await waitFor(() => expect(mocks.openUrl).toHaveBeenCalledWith("https://github.com/xiaobo121388/MCDevHelper/issues/new"));
+  });
+
+  it("automatically reports a newer GitHub release on startup", async () => {
+    mocks.refresh.mockResolvedValue({ components: [], sources: [], warnings: [] });
+    mocks.checkForUpdates.mockResolvedValue({
+      current_version: "1.1.0",
+      latest_version: "v1.2.0",
+      release_name: "MCDH 1.2.0",
+      release_url: "https://github.com/xiaobo121388/MCDevHelper/releases/tag/v1.2.0",
+      release_notes: "新增批量管理功能\n修复已知问题",
+      published_at: "2026-08-12T12:00:00Z",
+      update_available: true,
+      no_release: false,
+    });
+
+    render(<App />);
+    expect(await screen.findByRole("heading", { name: "发现新版本 v1.2.0" })).toBeInTheDocument();
+    expect(screen.getByText(/新增批量管理功能/)).toBeInTheDocument();
+    expect(mocks.checkForUpdates).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByRole("button", { name: /前往下载/ }));
+    await waitFor(() => expect(mocks.openUrl).toHaveBeenCalledWith("https://github.com/xiaobo121388/MCDevHelper/releases/tag/v1.2.0"));
+    await waitFor(() => expect(screen.queryByRole("heading", { name: "发现新版本 v1.2.0" })).not.toBeInTheDocument());
+  });
+
+  it("shows the bundled changelog once after upgrading, before another update prompt", async () => {
+    window.localStorage.setItem("mcdh.last-launched-version", "1.0.0");
+    mocks.refresh.mockResolvedValue({ components: [], sources: [], warnings: [] });
+    mocks.checkForUpdates.mockResolvedValue({
+      current_version: "1.1.0",
+      latest_version: "v1.2.0",
+      release_name: "MCDH 1.2.0",
+      release_url: "https://github.com/xiaobo121388/MCDevHelper/releases/tag/v1.2.0",
+      update_available: true,
+      no_release: false,
+    });
+
+    const { unmount } = render(<App />);
+    expect(await screen.findByRole("heading", { name: "已更新至 v1.1.0" })).toBeInTheDocument();
+    expect(screen.getByText(/新增 .mcdh.json 可携带组件元数据/)).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "发现新版本 v1.2.0" })).not.toBeInTheDocument();
+    expect(window.localStorage.getItem("mcdh.last-launched-version")).toBe("1.1.0");
+
+    fireEvent.click(screen.getByRole("button", { name: "知道了" }));
+    expect(await screen.findByRole("heading", { name: "发现新版本 v1.2.0" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "稍后提醒" }));
+    unmount();
+
+    mocks.checkForUpdates.mockResolvedValue({
+      current_version: "1.1.0",
+      latest_version: "v1.1.0",
+      update_available: false,
+      no_release: false,
+    });
+    render(<App />);
+    await waitFor(() => expect(mocks.checkForUpdates).toHaveBeenCalledTimes(2));
+    expect(screen.queryByRole("heading", { name: "已更新至 v1.1.0" })).not.toBeInTheDocument();
   });
 
   it("requires two confirmations before deleting a component", async () => {

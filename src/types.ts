@@ -70,6 +70,7 @@ export interface UpdateCheckResult {
   release_name?: string;
   release_url?: string;
   published_at?: string;
+  release_notes?: string;
   update_available: boolean;
   no_release: boolean;
 }
