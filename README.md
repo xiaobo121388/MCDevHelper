@@ -8,11 +8,12 @@ MCDH 是面向网易《我的世界》中国版 PE 创作者的 Windows 本地�
 - 轻量桌面端：Tauri 2 + 系统 WebView2，简体中文界面，可跟随系统或固定为浅色/深色主题。
 - 多来源管理：首次启动自动发现所有逻辑盘的 MCS 工作目录，随后只扫描已保存来源，也可手动重新发现或添加自定义 MCS 路径。
 - 完整工作流：新建、导入、复制、移动、导出、双重确认删除、标签、UUID 重生、版本提升、目录和 VS Code 打开。
+- 可携带元数据：组件根目录的 `.mcdh.json` 保存显示名称、标签和收藏状态，左侧收藏视图可快速筛选常用组件。
 - 快速查找：按标签筛选，并按 MCS 时间、名称、修改日期、创建日期或大小排序；默认按修改日期倒序。
 - 安全导入：支持文件夹、ZIP、mcpack、mcaddon 和内嵌包，拒绝路径穿越、绝对路径与符号链接条目。
 - JSONC 兼容：组件文件、MCS 配置、世界包清单、内置模板和本地 JSON 设置均支持 `//`、`/* ... */` 注释与尾随逗号。
 - MCS 兼容：识别 Type 1/3/4/7；可配置本地开发者身份和命名空间，并生成兼容的 `studio.json` 与 `work.mcscfg`。
-- AI 接口：`mcdh-mcp.exe` 使用标准输入输出，提供 21 个严格 JSON Schema 工具，不提供删除组件工具。
+- AI 接口：`mcdh-mcp.exe` 使用标准输入输出，提供 22 个严格 JSON Schema 工具，不提供删除组件工具。
 
 ## 系统要求
 
@@ -35,14 +36,30 @@ MCDH 是面向网易《我的世界》中国版 PE 创作者的 Windows 本地�
 2. 打开左下角“设置”管理路径。“添加组件库”扫描所选目录的直接子目录，“添加单个组件”只管理所选目录；也可添加任意 MCS 分类目录或主动重新扫描逻辑盘。
 3. 设置面板左侧按“路径管理、MCS 身份、外观、开发工具、关于”分类；可配置新建默认目录、开发者身份和跟随系统/亮色/暗色主题。
 4. 使用“新建组件”从已配置目录的下拉框选择目标；启用“MCS 兼容配置”后可填写命名空间，默认是 `mcdh`。
-5. 组件卡片右下角可打开目录、用 VS Code 打开或进入配置面板；删除需要连续两次确认并会永久移除整个组件目录。
-6. 导出始终生成清洁 ZIP：AddOn 根目录只保留检测到的 BP/RP，并递归剔除 `.pyi`、`.pyc`；地图和材质移除点号项及 MCS 私有配置。大型 AddOn 会在后台直接压缩已识别包，界面显示“导出中…”且不会重新扫描全部来源。
+5. 组件卡片可一键收藏，右下角可打开目录、用 VS Code 打开或进入配置面板；配置面板可修改显示名称、标签和收藏状态。删除需要连续两次确认并会永久移除整个组件目录。
+6. “导出游戏 ZIP”继续生成清洁游戏包：AddOn 根目录只保留检测到的 BP/RP，并递归剔除 `.pyi`、`.pyc`；地图和材质移除点号项、`.mcdh.json` 及 MCS 私有配置。“导出完整 ZIP”保留组件根目录内的全部普通文件和空目录，适合备份和迁移编辑环境。
+7. 导入默认按游戏内容清洁处理；启用“完整恢复”后保留点号项、MCS 配置和开发辅助文件。两种导入仍会拒绝路径穿越、绝对路径和符号链接。
 
 主界面出现扫描问题提示时可直接打开详情，逐条查看路径和原因，并选择打开最近可访问的文件夹、移除 MCDH 来源记录或忽略。移除来源和忽略都不会删除磁盘文件；已忽略问题可从筛选栏重新显示。
 
 复制组件时可选择保留或重生 manifest UUID；复制到 MCS 时总会生成新的 MCS UID。移动默认保留 manifest UUID。重要作品建议先自行备份。
 
 UUID 重生、版本提升和标签同步会在原 JSONC 文本中定点更新并原子写回，保留已有注释、缩进、尾随逗号和 UTF-8 BOM。UUID 与版本快捷操作通过本地索引直接定位单个组件，不会额外扫描全部来源；MCP 的 JSON-RPC 消息仍须使用标准 JSON。
+
+## 组件元数据
+
+MCDH 新建、导入或复制组件时会在根目录生成 `.mcdh.json`；没有该文件的旧组件仍可正常使用，只有在第一次修改显示名称、标签或收藏时才会创建。文件格式如下，读取时兼容 JSONC 注释和尾随逗号：
+
+```json
+{
+  "schema_version": 1,
+  "display_name": "组件名称",
+  "tags": ["开发", "测试"],
+  "favorite": false
+}
+```
+
+有效配置优先于 MCS、manifest 和本机旧标签记录。配置损坏或版本不受支持时，组件仍会使用原始信息显示，同时在扫描问题中报告 `.mcdh.json`；MCDH 不会静默覆盖损坏配置。完整导出会携带该文件；旧组件缺少配置时只在完整 ZIP 内补入生成的配置，不修改源目录。符号链接不会被复制或导出。
 
 ## 检查更新与反馈
 
@@ -66,7 +83,7 @@ UUID 重生、版本提升和标签同步会在原 JSONC 文本中定点更新�
 
 MCP 仅使用 stdio；stdout 只输出协议消息，运行日志写入 stderr。可用工具：
 
-`list_components`、`get_component`、`refresh_components`、`list_sources`、`add_single_component`、`add_library`、`add_mcs_path`、`rescan_mcs_paths`、`remove_source`、`get_settings`、`set_settings`、`create_component`、`import_component`、`copy_component`、`move_component`、`export_component`、`set_component_tags`、`regenerate_manifest_uuids`、`bump_manifest_version`、`open_component_directory`、`open_component_in_vscode`。
+`list_components`、`get_component`、`refresh_components`、`list_sources`、`add_single_component`、`add_library`、`add_mcs_path`、`rescan_mcs_paths`、`remove_source`、`get_settings`、`set_settings`、`create_component`、`import_component`、`copy_component`、`move_component`、`export_component`、`set_component_tags`、`set_component_metadata`、`regenerate_manifest_uuids`、`bump_manifest_version`、`open_component_directory`、`open_component_in_vscode`。`import_component` 和 `export_component` 的 `content_mode` 可选 `clean` 或 `full`，省略时保持 `clean`。
 
 ## 开发与验证
 

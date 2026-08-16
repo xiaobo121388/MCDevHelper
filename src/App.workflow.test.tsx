@@ -7,6 +7,8 @@ const mocks = vi.hoisted(() => ({
   setSettings: vi.fn(),
   delete: vi.fn(),
   export: vi.fn(),
+  import: vi.fn(),
+  metadata: vi.fn(),
   regenerateUuids: vi.fn(),
   bumpVersion: vi.fn(),
   openWarningDirectory: vi.fn(),
@@ -30,6 +32,8 @@ vi.mock("./api", () => ({
     setSettings: mocks.setSettings,
     delete: mocks.delete,
     export: mocks.export,
+    import: mocks.import,
+    metadata: mocks.metadata,
     regenerateUuids: mocks.regenerateUuids,
     bumpVersion: mocks.bumpVersion,
     openWarningDirectory: mocks.openWarningDirectory,
@@ -59,6 +63,8 @@ describe("component workspace filters", () => {
     mocks.setSettings.mockReset();
     mocks.delete.mockReset().mockResolvedValue({ actual_path: "", modified_files: [], warnings: [] });
     mocks.export.mockReset();
+    mocks.import.mockReset();
+    mocks.metadata.mockReset();
     mocks.regenerateUuids.mockReset();
     mocks.bumpVersion.mockReset();
     mocks.openWarningDirectory.mockReset().mockResolvedValue(undefined);
@@ -143,6 +149,45 @@ describe("component workspace filters", () => {
     expect(within(screen.getAllByRole("article")[0]).getByText("Alpha 组件")).toBeInTheDocument();
   });
 
+  it("filters favorites and toggles a card without rescanning", async () => {
+    const favorite = { id: "favorite", name: "已收藏", kind: "addon" as const, path: "D:\\收藏", origin: { kind: "library" as const }, manifests: [], tags: [], favorite: true, size_bytes: 1 };
+    const regular = { id: "regular", name: "普通组件", kind: "map" as const, path: "D:\\普通", origin: { kind: "library" as const }, manifests: [], tags: [], favorite: false, size_bytes: 1 };
+    mocks.refresh.mockResolvedValue({ components: [favorite, regular], sources: [], warnings: [] });
+    mocks.metadata.mockResolvedValue({ component: { ...regular, favorite: true }, actual_path: regular.path, modified_files: [regular.path + "\\.mcdh.json"], warnings: [] });
+    render(<App />);
+    await waitFor(() => expect(screen.getByText("普通组件")).toBeInTheDocument());
+
+    const navigation = within(screen.getByRole("navigation", { name: "组件分类" }));
+    fireEvent.click(navigation.getByRole("button", { name: /收藏1/ }));
+    expect(screen.getByText("已收藏")).toBeInTheDocument();
+    expect(screen.queryByText("普通组件")).not.toBeInTheDocument();
+
+    fireEvent.click(navigation.getByRole("button", { name: /全部组件/ }));
+    fireEvent.click(screen.getByRole("button", { name: "收藏 普通组件" }));
+    await waitFor(() => expect(mocks.metadata).toHaveBeenCalledWith("regular", "普通组件", [], true));
+    expect(navigation.getByRole("button", { name: /收藏2/ })).toBeInTheDocument();
+    expect(mocks.refresh).toHaveBeenCalledTimes(1);
+  });
+
+  it("edits display metadata locally without rescanning", async () => {
+    const component = { id: "metadata", name: "旧名称", kind: "material" as const, path: "D:\\元数据", origin: { kind: "library" as const }, manifests: [], tags: ["旧标签"], favorite: false, size_bytes: 1 };
+    const updated = { ...component, name: "新名称", tags: ["开发", "测试"], favorite: true };
+    mocks.refresh.mockResolvedValue({ components: [component], sources: [], warnings: [] });
+    mocks.metadata.mockResolvedValue({ component: updated, actual_path: component.path, modified_files: [component.path + "\\.mcdh.json"], warnings: [] });
+    render(<App />);
+    await waitFor(() => expect(screen.getByText("旧名称")).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole("button", { name: "配置 旧名称" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "显示名称" }), { target: { value: "新名称" } });
+    fireEvent.change(screen.getByRole("textbox", { name: /标签/ }), { target: { value: "开发, 测试" } });
+    fireEvent.click(screen.getByRole("checkbox", { name: /收藏组件/ }));
+    fireEvent.click(screen.getByRole("button", { name: "保存组件信息" }));
+
+    await waitFor(() => expect(mocks.metadata).toHaveBeenCalledWith("metadata", "新名称", ["开发", " 测试"], true));
+    expect(await screen.findByText("新名称")).toBeInTheDocument();
+    expect(mocks.refresh).toHaveBeenCalledTimes(1);
+  });
+
   it("does not rescan when the window regains focus", async () => {
     mocks.refresh.mockResolvedValue({ components: [], sources: [], warnings: [] });
     render(<App />);
@@ -172,6 +217,26 @@ describe("component workspace filters", () => {
     expect(screen.getByLabelText("命名空间")).toHaveValue("mcdh");
     expect(screen.getByLabelText("生成位置")).toHaveValue("D:\\work\\account\\Cpp\\AddOn");
     expect(screen.queryByRole("option", { name: /Cpp\\Map/ })).not.toBeInTheDocument();
+  });
+
+  it("sends the explicit full restore mode during import", async () => {
+    mocks.refresh.mockResolvedValue({ components: [], sources: [], warnings: [] });
+    mocks.import.mockResolvedValue({ actual_path: "D:\\组件库\\完整恢复", modified_files: [], warnings: [] });
+    render(<App />);
+    await waitFor(() => expect(screen.getByRole("button", { name: "导入" })).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: "导入" }));
+    fireEvent.change(screen.getByPlaceholderText("选择组件包或文件夹"), { target: { value: "D:\\备份\\组件.zip" } });
+    fireEvent.change(screen.getByPlaceholderText("选择一个可写目录"), { target: { value: "D:\\组件库" } });
+    fireEvent.click(screen.getByRole("checkbox", { name: /完整恢复/ }));
+    fireEvent.click(screen.getByRole("button", { name: "开始导入" }));
+
+    await waitFor(() => expect(mocks.import).toHaveBeenCalledWith({
+      source: "D:\\备份\\组件.zip",
+      destination: "D:\\组件库",
+      mcs_compatible: false,
+      identity_policy: "error",
+      content_mode: "full",
+    }));
   });
 
   it("organizes settings by category and only checks GitHub on demand", async () => {
@@ -285,10 +350,11 @@ describe("component workspace filters", () => {
     fireEvent.change(screen.getByPlaceholderText("选择一个可写目录"), {
       target: { value: "D:\\导出" },
     });
-    fireEvent.click(screen.getByRole("button", { name: "导出 ZIP" }));
+    fireEvent.click(screen.getByRole("button", { name: "导出游戏 ZIP" }));
     await waitFor(() => expect(mocks.export).toHaveBeenCalledWith({
       component_id: component.id,
       destination: "D:\\导出",
+      content_mode: "clean",
     }));
     expect(screen.getByRole("button", { name: "导出中…" })).toBeDisabled();
 
@@ -297,7 +363,25 @@ describe("component workspace filters", () => {
       modified_files: ["D:\\导出\\大型模组.zip"],
       warnings: [],
     });
-    await waitFor(() => expect(screen.getByText("ZIP 已导出")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText("游戏 ZIP 已导出")).toBeInTheDocument());
+    expect(mocks.refresh).toHaveBeenCalledTimes(1);
+
+    mocks.export.mockResolvedValue({
+      actual_path: "D:\\导出\\大型模组 完整.zip",
+      modified_files: ["D:\\导出\\大型模组 完整.zip"],
+      warnings: [],
+    });
+    fireEvent.click(screen.getByRole("button", { name: "配置 大型模组" }));
+    fireEvent.change(screen.getByPlaceholderText("选择一个可写目录"), {
+      target: { value: "D:\\导出" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "导出完整 ZIP" }));
+    await waitFor(() => expect(mocks.export).toHaveBeenLastCalledWith({
+      component_id: component.id,
+      destination: "D:\\导出",
+      content_mode: "full",
+    }));
+    expect(await screen.findByText("完整 ZIP 已导出")).toBeInTheDocument();
     expect(mocks.refresh).toHaveBeenCalledTimes(1);
   });
 

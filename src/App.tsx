@@ -29,6 +29,7 @@ import {
   Settings,
   Settings2,
   Sparkles,
+  Star,
   Tag,
   Trash2,
   TriangleAlert,
@@ -66,7 +67,7 @@ export function App() {
   const [result, setResult] = useState(EMPTY_RESULT);
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState("");
-  const [kind, setKind] = useState<"all" | ComponentKind>("all");
+  const [kind, setKind] = useState<"all" | "favorites" | ComponentKind>("all");
   const [tag, setTag] = useState("all");
   const [sortKey, setSortKey] = useState<SortKey>("modified");
   const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
@@ -125,7 +126,8 @@ export function App() {
   const components = useMemo(() => {
     const needle = query.trim().toLocaleLowerCase();
     const filtered = result.components.filter((component) => {
-      if (kind !== "all" && component.kind !== kind) return false;
+      if (kind === "favorites" && !component.favorite) return false;
+      if (kind !== "all" && kind !== "favorites" && component.kind !== kind) return false;
       if (tag !== "all" && !component.tags.includes(tag)) return false;
       return !needle || `${component.name}\n${component.path}`.toLocaleLowerCase().includes(needle);
     });
@@ -179,6 +181,7 @@ export function App() {
           <NavItem active={kind === "addon"} icon={<Box />} label="模组" count={countKind(result.components, "addon")} onClick={() => setKind("addon")} />
           <NavItem active={kind === "material"} icon={<Palette />} label="材质" count={countKind(result.components, "material")} onClick={() => setKind("material")} />
           <NavItem active={kind === "map"} icon={<Map />} label="地图" count={countKind(result.components, "map")} onClick={() => setKind("map")} />
+          <NavItem active={kind === "favorites"} icon={<Star />} label="收藏" count={result.components.filter((component) => component.favorite).length} onClick={() => setKind("favorites")} />
         </nav>
         <div className="sidebar-spacer" />
         <button className="sidebar-action" onClick={() => setModal("settings")}>
@@ -191,7 +194,7 @@ export function App() {
         <header className="topbar">
           <div>
             <p className="eyebrow">创作组件</p>
-            <h1>{kind === "all" ? "全部组件" : kindText[kind]}</h1>
+            <h1>{kind === "all" ? "全部组件" : kind === "favorites" ? "收藏" : kindText[kind]}</h1>
           </div>
           <div className="top-actions">
             <button className="button secondary" onClick={() => setModal("import")}><Import size={17} />导入</button>
@@ -212,7 +215,13 @@ export function App() {
         {visibleWarnings.length > 0 && <button className="warning-line" onClick={() => setModal("warnings")}><TriangleAlert size={17} /><span>有 {visibleWarnings.length} 个扫描问题，点击查看具体原因并处理。</span><ChevronRight size={16} /></button>}
 
         <section className="component-grid" aria-live="polite">
-          {components.map((component) => <ComponentCard key={component.id} component={component} onOpen={() => setSelected(component)} onNotice={setNotice} />)}
+          {components.map((component) => <ComponentCard key={component.id} component={component} onOpen={() => setSelected(component)} onUpdate={(updated, message) => {
+            setResult((current) => ({
+              ...current,
+              components: current.components.map((item) => item.id === updated.id ? updated : item),
+            }));
+            setNotice(message);
+          }} onNotice={setNotice} />)}
           {!loading && components.length === 0 && (
             <div className="empty-state">
               <span><Boxes size={28} /></span>
@@ -308,7 +317,8 @@ function WarningsDialog({ warnings, sources, ignoredKeys, onIgnore, onRemoveSour
   );
 }
 
-function ComponentCard({ component, onOpen, onNotice }: { component: ComponentSummary; onOpen: () => void; onNotice: (text: string) => void }) {
+function ComponentCard({ component, onOpen, onUpdate, onNotice }: { component: ComponentSummary; onOpen: () => void; onUpdate: (component: ComponentSummary, message: string) => void; onNotice: (text: string) => void }) {
+  const [favoriteBusy, setFavoriteBusy] = useState(false);
   const icon = component.kind === "addon" ? <Box /> : component.kind === "material" ? <Palette /> : <Map />;
   const openDirectory = async () => {
     try { await api.openDirectory(component.id); } catch (error) { onNotice(errorMessage(error)); }
@@ -316,12 +326,24 @@ function ComponentCard({ component, onOpen, onNotice }: { component: ComponentSu
   const openCode = async () => {
     try { await api.openVsCode(component.id); } catch (error) { onNotice(errorMessage(error)); }
   };
+  const toggleFavorite = async () => {
+    setFavoriteBusy(true);
+    try {
+      const favorite = !component.favorite;
+      const operation = await api.metadata(component.id, component.name, component.tags, favorite);
+      onUpdate(operation.component ?? { ...component, favorite }, favorite ? "已加入收藏" : "已取消收藏");
+    } catch (error) {
+      onNotice(errorMessage(error));
+    } finally {
+      setFavoriteBusy(false);
+    }
+  };
   return (
     <article className="component-card">
       <div className={`component-icon ${component.kind}`}>{icon}</div>
       <div className="component-heading">
         <div><h2 title={component.name}>{component.name}</h2><p title={component.path}>{component.path}</p></div>
-        <button className="card-menu" aria-label={`配置 ${component.name}`} onClick={onOpen}><MoreHorizontal size={19} /></button>
+        <div className="card-heading-actions"><button className={component.favorite ? "favorite-button active" : "favorite-button"} disabled={favoriteBusy} aria-label={`${component.favorite ? "取消收藏" : "收藏"} ${component.name}`} aria-pressed={component.favorite} onClick={() => void toggleFavorite()}><Star size={18} fill={component.favorite ? "currentColor" : "none"} /></button><button className="card-menu" aria-label={`配置 ${component.name}`} onClick={onOpen}><MoreHorizontal size={19} /></button></div>
       </div>
       <div className="badges">
         <span>{kindText[component.kind]}</span>
@@ -381,6 +403,7 @@ function ImportDialog({ onClose, onDone }: DialogProps) {
   const [source, setSource] = useState("");
   const [destination, setDestination] = useState("");
   const [mcs, setMcs] = useState(false);
+  const [full, setFull] = useState(false);
   const [policy, setPolicy] = useState<IdentityPolicy>("error");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -390,10 +413,10 @@ function ImportDialog({ onClose, onDone }: DialogProps) {
   };
   const submit = async (event: FormEvent) => {
     event.preventDefault(); setBusy(true); setError("");
-    try { const result = await api.import({ source, destination, mcs_compatible: mcs, identity_policy: policy }); onDone(`已导入到 ${result.actual_path}`); }
+    try { const result = await api.import({ source, destination, mcs_compatible: mcs, identity_policy: policy, content_mode: full ? "full" : "clean" }); onDone(`已导入到 ${result.actual_path}`); }
     catch (reason) { setError(errorMessage(reason)); } finally { setBusy(false); }
   };
-  return <Modal title="导入组件" subtitle="支持文件夹、ZIP、mcpack 和 mcaddon" onClose={onClose}><form onSubmit={submit} className="dialog-form"><Field label="导入来源"><div className="path-row"><input required value={source} onChange={(event) => setSource(event.target.value)} placeholder="选择组件包或文件夹" /><button type="button" onClick={() => void chooseSource(false)}>选文件</button><button type="button" onClick={() => void chooseSource(true)}>选文件夹</button></div></Field><PathField label="存放位置" value={destination} onChange={setDestination} /><Field label="遇到重复 UUID"><select value={policy} onChange={(event) => setPolicy(event.target.value as IdentityPolicy)}><option value="error">停止并提示</option><option value="regenerate">生成全新 UUID</option><option value="preserve">保留原 UUID</option></select></Field><CheckRow checked={mcs} onChange={setMcs} label="导入为 MCS 组件" hint="将生成新的 MCS UID 与兼容配置" />{error && <FormError>{error}</FormError>}<DialogActions busy={busy} onClose={onClose} submit="开始导入" /></form></Modal>;
+  return <Modal title="导入组件" subtitle="支持文件夹、ZIP、mcpack 和 mcaddon" onClose={onClose}><form onSubmit={submit} className="dialog-form"><Field label="导入来源"><div className="path-row"><input required value={source} onChange={(event) => setSource(event.target.value)} placeholder="选择组件包或文件夹" /><button type="button" onClick={() => void chooseSource(false)}>选文件</button><button type="button" onClick={() => void chooseSource(true)}>选文件夹</button></div></Field><PathField label="存放位置" value={destination} onChange={setDestination} /><Field label="遇到重复 UUID"><select value={policy} onChange={(event) => setPolicy(event.target.value as IdentityPolicy)}><option value="error">停止并提示</option><option value="regenerate">生成全新 UUID</option><option value="preserve">保留原 UUID</option></select></Field><CheckRow checked={full} onChange={setFull} label="完整恢复" hint="保留点号项、MCS 配置和开发辅助文件；关闭时按游戏内容清洁导入" /><CheckRow checked={mcs} onChange={setMcs} label="导入为 MCS 组件" hint="将生成新的 MCS UID 与兼容配置" />{error && <FormError>{error}</FormError>}<DialogActions busy={busy} onClose={onClose} submit="开始导入" /></form></Modal>;
 }
 
 type SettingsSection = "paths" | "identity" | "appearance" | "tools" | "about";
@@ -580,7 +603,9 @@ function SettingsDialog({ settings: initialSettings, onSettings, onClose, onChan
 }
 
 function ComponentDialog({ component, onClose, onDone, onNotice }: { component: ComponentSummary; onClose: () => void; onDone: (message: string, operation: OperationResult, refreshAfter: boolean) => void; onNotice: (message: string) => void }) {
+  const [displayName, setDisplayName] = useState(component.name);
   const [tags, setTags] = useState(component.tags.join(", "));
+  const [favorite, setFavorite] = useState(component.favorite);
   const [destination, setDestination] = useState("");
   const [mcs, setMcs] = useState(false);
   const [identity, setIdentity] = useState<"preserve" | "regenerate">("regenerate");
@@ -598,7 +623,7 @@ function ComponentDialog({ component, onClose, onDone, onNotice }: { component: 
       <div className="component-dialog">
         <section>
           <h3>快捷配置</h3>
-          <Field label="标签（使用逗号分隔）"><div className="inline-action"><input value={tags} onChange={(event) => setTags(event.target.value)} placeholder="开发, 测试" /><button disabled={!!busy} onClick={() => void run("tags", () => api.tags(component.id, tags.split(/[,，]/)), "标签已保存")}>保存</button></div></Field>
+          <div className="metadata-editor"><Field label="显示名称"><input required value={displayName} onChange={(event) => setDisplayName(event.target.value)} placeholder="组件显示名称" /></Field><Field label="标签（使用逗号分隔）"><input value={tags} onChange={(event) => setTags(event.target.value)} placeholder="开发, 测试" /></Field><CheckRow checked={favorite} onChange={setFavorite} label="收藏组件" hint="收藏后可从左侧收藏视图快速找到" /><div className="metadata-actions"><button className="button secondary" disabled={!!busy || !displayName.trim()} onClick={() => void run("metadata", () => api.metadata(component.id, displayName, tags.split(/[,，]/), favorite), "组件信息已保存", false)}><Save size={15} />{busy === "metadata" ? "保存中…" : "保存组件信息"}</button></div></div>
           <div className="config-row"><div><strong>Manifest UUID</strong><p>重生 header、module，并同步内部依赖和地图清单；保留 JSONC 注释。</p></div><button disabled={!!busy} onClick={() => { if (window.confirm("确定重生所有已识别 manifest UUID？")) void run("uuid", () => api.regenerateUuids(component.id), "UUID 已重新生成", false); }}>随机重生</button></div>
           <div className="config-row"><div><strong>包版本</strong><p>同步 header、module、依赖和地图包清单；保留 JSONC 注释。</p></div><select value={part} onChange={(event) => setPart(event.target.value as VersionPart)}><option value="patch">Patch</option><option value="minor">Minor</option><option value="major">Major</option></select><button disabled={!!busy} onClick={() => void run("version", () => api.bumpVersion(component.id, part), "版本已提升", false)}>提升版本</button></div>
         </section>
@@ -606,7 +631,7 @@ function ComponentDialog({ component, onClose, onDone, onNotice }: { component: 
           <h3>复制、移动、导出与删除</h3>
           <PathField label="目标目录" value={destination} onChange={setDestination} />
           <div className="transfer-options"><label>复制 UUID <select value={identity} onChange={(event) => setIdentity(event.target.value as "preserve" | "regenerate")}><option value="regenerate">生成新的</option><option value="preserve">保留</option></select></label><CheckRow checked={mcs} onChange={setMcs} label="目标为 MCS 分类目录" /></div>
-          <div className="transfer-buttons"><button className="button secondary" disabled={!!busy} onClick={() => needDestination() && void run("copy", () => api.copy({ component_id: component.id, destination, mcs_compatible: mcs, identity_policy: identity }), "组件已复制")}><Copy size={16} />复制</button><button className="button secondary" disabled={!!busy} onClick={() => needDestination() && window.confirm("移动完成后原目录将被移除，是否继续？") && void run("move", () => api.move({ component_id: component.id, destination, mcs_compatible: mcs }), "组件已移动")}><FolderCog size={16} />移动</button><button className="button secondary" disabled={!!busy} onClick={() => needDestination() && void run("export", () => api.export({ component_id: component.id, destination }), "ZIP 已导出", false)}><Archive size={16} />{busy === "export" ? "导出中…" : "导出 ZIP"}</button><button className="button danger" disabled={!!busy} onClick={remove}><Trash2 size={16} />删除</button></div>
+          <div className="transfer-buttons"><button className="button secondary" disabled={!!busy} onClick={() => needDestination() && void run("copy", () => api.copy({ component_id: component.id, destination, mcs_compatible: mcs, identity_policy: identity }), "组件已复制")}><Copy size={16} />复制</button><button className="button secondary" disabled={!!busy} onClick={() => needDestination() && window.confirm("移动完成后原目录将被移除，是否继续？") && void run("move", () => api.move({ component_id: component.id, destination, mcs_compatible: mcs }), "组件已移动")}><FolderCog size={16} />移动</button><button className="button secondary" disabled={!!busy} onClick={() => needDestination() && void run("export-clean", () => api.export({ component_id: component.id, destination, content_mode: "clean" }), "游戏 ZIP 已导出", false)}><Archive size={16} />{busy === "export-clean" ? "导出中…" : "导出游戏 ZIP"}</button><button className="button secondary" disabled={!!busy} title="保留点号项、MCS 配置和开发辅助文件" onClick={() => needDestination() && void run("export-full", () => api.export({ component_id: component.id, destination, content_mode: "full" }), "完整 ZIP 已导出", false)}><Archive size={16} />{busy === "export-full" ? "导出中…" : "导出完整 ZIP"}</button><button className="button danger" disabled={!!busy} onClick={remove}><Trash2 size={16} />删除</button></div>
         </section>
       </div>
     </Modal>

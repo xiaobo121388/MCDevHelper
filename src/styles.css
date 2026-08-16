@@ -214,8 +214,11 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px s
 .component-heading { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px; }
 .component-heading h2 { overflow: hidden; margin: 2px 0 4px; font-size: 15px; text-overflow: ellipsis; white-space: nowrap; }
 .component-heading p { overflow: hidden; margin: 0; color: var(--subtle); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
-.card-menu { width: 28px; height: 28px; border: 0; border-radius: 7px; color: var(--muted); background: transparent; cursor: pointer; }
-.card-menu:hover { background: var(--panel-soft); }
+.card-heading-actions { display: flex; gap: 2px; }
+.card-menu, .favorite-button { display: grid; width: 28px; height: 28px; place-items: center; border: 0; border-radius: 7px; color: var(--muted); background: transparent; cursor: pointer; }
+.card-menu:hover, .favorite-button:hover { background: var(--panel-soft); }
+.favorite-button.active { color: #e5a526; background: color-mix(in srgb, #e5a526 12%, transparent); }
+.favorite-button:disabled { cursor: wait; opacity: .58; }
 .badges, .tag-row { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 5px; align-items: center; }
 .badges span { padding: 3px 7px; border-radius: 6px; color: var(--muted); background: var(--panel-soft); font-size: 10px; }
 .badges .mcs-badge { color: var(--mcs-label); background: var(--accent-soft); font-weight: 700; }
@@ -335,6 +338,8 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px s
 .component-dialog { display: grid; gap: 23px; }
 .component-dialog section { display: grid; gap: 13px; }
 .component-dialog h3 { margin: 0 0 2px; font-size: 13px; }
+.metadata-editor { display: grid; gap: 12px; padding: 13px; border: 1px solid var(--border); border-radius: 9px; background: var(--panel-soft); }
+.metadata-actions { display: flex; justify-content: flex-end; }
 .config-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 8px; padding: 11px 12px; border: 1px solid var(--border); border-radius: 9px; }
 .config-row strong { font-size: 11px; }
 .config-row p { margin: 3px 0 0; color: var(--muted); font-size: 9px; }

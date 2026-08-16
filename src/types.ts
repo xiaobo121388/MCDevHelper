@@ -2,6 +2,7 @@ export type ComponentKind = "addon" | "material" | "map";
 export type SourceKind = "mcs_auto" | "single" | "library";
 export type IdentityPolicy = "preserve" | "regenerate" | "error";
 export type VersionPart = "major" | "minor" | "patch";
+export type ContentMode = "clean" | "full";
 export type ThemePreference = "light" | "dark" | "system";
 
 export interface AppSettings {
@@ -36,6 +37,7 @@ export interface ComponentSummary {
   manifests: ManifestSummary[];
   version?: [number, number, number];
   tags: string[];
+  favorite: boolean;
   icon_path?: string;
   updated_at?: string;
   modified_at?: string;

@@ -3,6 +3,7 @@ import type {
   AppSettings,
   ComponentKind,
   ComponentSummary,
+  ContentMode,
   DiscoveryResult,
   IdentityPolicy,
   OperationResult,
@@ -37,6 +38,7 @@ export const api = {
     destination: string;
     mcs_compatible: boolean;
     identity_policy: IdentityPolicy;
+    content_mode: ContentMode;
   }) => invoke<OperationResult>("import_component", { request }),
   copy: (request: {
     component_id: string;
@@ -46,13 +48,17 @@ export const api = {
   }) => invoke<OperationResult>("copy_component", { request }),
   move: (request: { component_id: string; destination: string; mcs_compatible: boolean }) =>
     invoke<OperationResult>("move_component", { request }),
-  export: (request: { component_id: string; destination: string }) =>
+  export: (request: { component_id: string; destination: string; content_mode: ContentMode }) =>
     invoke<OperationResult>("export_component", { request }),
   delete: (componentId: string) =>
     invoke<OperationResult>("delete_component", { componentId }),
   tags: (componentId: string, tags: string[]) =>
     invoke<OperationResult>("set_component_tags", {
       request: { component_id: componentId, tags },
+    }),
+  metadata: (componentId: string, displayName: string, tags: string[], favorite: boolean) =>
+    invoke<OperationResult>("set_component_metadata", {
+      request: { component_id: componentId, display_name: displayName, tags, favorite },
     }),
   regenerateUuids: (componentId: string) =>
     invoke<OperationResult>("regenerate_manifest_uuids", { componentId }),
