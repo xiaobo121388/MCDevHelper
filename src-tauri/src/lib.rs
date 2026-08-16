@@ -428,16 +428,16 @@ mod tests {
     #[test]
     fn release_payload_preserves_the_official_download_page() {
         let result = UpdateCheckResult::from_release(GitHubRelease {
-            tag_name: "v0.2.0".into(),
-            name: Some("MCDH 0.2.0".into()),
-            html_url: "https://github.com/xiaobo121388/MCDevHelper/releases/tag/v0.2.0".into(),
+            tag_name: "v1.2.0".into(),
+            name: Some("MCDH 1.2.0".into()),
+            html_url: "https://github.com/xiaobo121388/MCDevHelper/releases/tag/v1.2.0".into(),
             published_at: Some("2026-08-10T12:00:00Z".into()),
         });
         assert!(result.update_available);
-        assert_eq!(result.latest_version.as_deref(), Some("v0.2.0"));
+        assert_eq!(result.latest_version.as_deref(), Some("v1.2.0"));
         assert_eq!(
             result.release_url.as_deref(),
-            Some("https://github.com/xiaobo121388/MCDevHelper/releases/tag/v0.2.0")
+            Some("https://github.com/xiaobo121388/MCDevHelper/releases/tag/v1.2.0")
         );
     }
 }

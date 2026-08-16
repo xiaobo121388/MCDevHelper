@@ -43,8 +43,19 @@ Copy-Item -LiteralPath $installer.FullName -Destination $installerTarget -Force
 
 $artifacts = @($installerTarget, $portableArchive)
 $checksums = $artifacts | ForEach-Object {
-    $hash = Get-FileHash -Algorithm SHA256 -LiteralPath $_
-    "$($hash.Hash.ToLowerInvariant())  $([IO.Path]::GetFileName($_))"
+    $stream = [IO.File]::OpenRead($_)
+    try {
+        $sha256 = [Security.Cryptography.SHA256]::Create()
+        try {
+            $hashBytes = $sha256.ComputeHash($stream)
+        } finally {
+            $sha256.Dispose()
+        }
+    } finally {
+        $stream.Dispose()
+    }
+    $hash = [BitConverter]::ToString($hashBytes).Replace("-", "").ToLowerInvariant()
+    "$hash  $([IO.Path]::GetFileName($_))"
 }
 [IO.File]::WriteAllLines((Join-Path $releaseRoot "SHA256SUMS.txt"), $checksums, [Text.UTF8Encoding]::new($false))
 
