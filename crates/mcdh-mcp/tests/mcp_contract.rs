@@ -142,6 +142,7 @@ fn initializes_lists_strict_schemas_and_calls_every_tool() {
         "move_component",
         "export_component",
         "set_component_tags",
+        "set_component_metadata",
         "regenerate_manifest_uuids",
         "bump_manifest_version",
         "open_component_directory",
@@ -214,6 +215,17 @@ fn initializes_lists_strict_schemas_and_calls_every_tool() {
         "set_component_tags",
         json!({"component_id": component_id, "tags": ["测试", "自动化"]}),
     );
+    let metadata = client.call(
+        "set_component_metadata",
+        json!({
+            "component_id": component_id,
+            "display_name": "协议收藏模组",
+            "tags": ["测试", "收藏"],
+            "favorite": true
+        }),
+    );
+    assert_eq!(metadata["component"]["name"], "协议收藏模组");
+    assert_eq!(metadata["component"]["favorite"], true);
     client.call(
         "regenerate_manifest_uuids",
         json!({"component_id": component_id}),

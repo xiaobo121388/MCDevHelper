@@ -8,6 +8,7 @@ use uuid::Uuid;
 use walkdir::WalkDir;
 
 use crate::json::parse_jsonc;
+use crate::metadata::{metadata_path, read_component_metadata};
 use crate::path_utils::canonicalize;
 use crate::{
     ComponentKind, ComponentOrigin, ComponentSummary, CoreError, DiscoveryResult, DiscoveryWarning,
@@ -196,7 +197,7 @@ impl DiscoveryService {
                 ),
             };
             if matches {
-                return self.inspect(&path, origin, context);
+                return self.inspect(&path, origin, context, None);
             }
         }
 
@@ -209,6 +210,7 @@ impl DiscoveryService {
                     source_path: category_path.to_path_buf(),
                 },
                 Some(context),
+                None,
             );
         }
 
@@ -340,7 +342,7 @@ impl DiscoveryService {
             return;
         }
         let is_single = matches!(origin_kind(&origin), SourceKind::Single);
-        match self.inspect(&canonical, origin, mcs_context) {
+        match self.inspect(&canonical, origin, mcs_context, Some(warnings)) {
             Ok(component) => components.push(component),
             Err(CoreError::InvalidComponent(_)) => {
                 if is_single {
@@ -359,7 +361,20 @@ impl DiscoveryService {
         path: &Path,
         origin: ComponentOrigin,
         mcs_context: Option<McsContext>,
+        warnings: Option<&mut Vec<DiscoveryWarning>>,
     ) -> Result<ComponentSummary> {
+        let component_metadata = match read_component_metadata(path) {
+            Ok(metadata) => metadata,
+            Err(error) => {
+                if let Some(warnings) = warnings {
+                    warnings.push(DiscoveryWarning {
+                        path: metadata_path(path),
+                        message: error.to_string(),
+                    });
+                }
+                None
+            }
+        };
         let work_config = read_optional_json(&path.join("work.mcscfg"))?;
         let manifest_paths = find_manifest_paths(path)?;
         let mut manifests = manifest_paths
@@ -395,7 +410,7 @@ impl DiscoveryService {
             category: context.category.clone(),
         });
 
-        let name = work_config
+        let fallback_name = work_config
             .as_ref()
             .and_then(|config| config.get("Name"))
             .and_then(Value::as_str)
@@ -403,6 +418,10 @@ impl DiscoveryService {
             .map(ToOwned::to_owned)
             .or_else(|| manifests.iter().find_map(|manifest| manifest.name.clone()))
             .unwrap_or_else(|| file_name(path));
+        let name = component_metadata
+            .as_ref()
+            .map(|metadata| metadata.display_name.clone())
+            .unwrap_or(fallback_name);
         let version = manifests.iter().find_map(|manifest| manifest.version);
         let icon_path = find_icon(path, &manifests);
         let metadata = fs::metadata(path).map_err(|error| CoreError::io(path, error))?;
@@ -416,7 +435,13 @@ impl DiscoveryService {
             .or(modified_at);
         let size_bytes = directory_size(path);
         let id = self.index.component_id(path)?;
-        let tags = self.index.tags(path)?;
+        let tags = match &component_metadata {
+            Some(metadata) => metadata.tags.clone(),
+            None => self.index.tags(path)?,
+        };
+        let favorite = component_metadata
+            .as_ref()
+            .is_some_and(|metadata| metadata.favorite);
 
         Ok(ComponentSummary {
             id,
@@ -428,6 +453,7 @@ impl DiscoveryService {
             manifests,
             version,
             tags,
+            favorite,
             icon_path,
             updated_at,
             modified_at,
@@ -834,6 +860,62 @@ mod tests {
             .unwrap();
         assert_eq!(material.name, "漂亮材质");
         assert_eq!(material.version, Some([1, 2, 3]));
+    }
+
+    #[test]
+    fn applies_portable_metadata_and_keeps_components_with_invalid_metadata() {
+        let temp = tempfile::tempdir().unwrap();
+        let index = LocalIndex::open(temp.path().join("state/mcdh.db")).unwrap();
+        let library = temp.path().join("library");
+        let configured = library.join("configured");
+        let broken = library.join("broken");
+        let legacy = library.join("legacy");
+        for (path, name) in [
+            (&configured, "Manifest 配置"),
+            (&broken, "损坏配置回退"),
+            (&legacy, "旧组件"),
+        ] {
+            write_json(&path.join("manifest.json"), manifest(name, "resources"));
+        }
+        write_json(
+            &configured.join(".mcdh.json"),
+            serde_json::json!({
+                "schema_version": 1,
+                "display_name": "自定义显示名称",
+                "tags": ["收藏", "开发"],
+                "favorite": true
+            }),
+        );
+        fs::write(broken.join(".mcdh.json"), b"{broken json").unwrap();
+        index.set_tags(&broken, &["旧标签".into()]).unwrap();
+        index.set_tags(&legacy, &["数据库标签".into()]).unwrap();
+        index.add_source(SourceKind::Library, &library).unwrap();
+
+        let result = DiscoveryService::new(index)
+            .refresh_with_mcs_work_roots(&[])
+            .unwrap();
+        assert_eq!(result.components.len(), 3);
+        let configured = result
+            .components
+            .iter()
+            .find(|component| component.path == configured)
+            .unwrap();
+        assert_eq!(configured.name, "自定义显示名称");
+        assert_eq!(configured.tags, vec!["开发", "收藏"]);
+        assert!(configured.favorite);
+
+        let broken = result
+            .components
+            .iter()
+            .find(|component| component.path == broken)
+            .unwrap();
+        assert_eq!(broken.name, "损坏配置回退");
+        assert_eq!(broken.tags, vec!["旧标签"]);
+        assert!(!broken.favorite);
+        assert_eq!(result.warnings.len(), 1);
+        assert!(result.warnings[0].path.ends_with(".mcdh.json"));
+
+        assert!(!legacy.join(".mcdh.json").exists());
     }
 
     #[test]

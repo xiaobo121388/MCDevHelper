@@ -1,5 +1,5 @@
 use std::fs::{self, File};
-use std::io;
+use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
 use uuid::Uuid;
@@ -89,6 +89,21 @@ pub(crate) fn write_zip(source: &Path, destination: &Path) -> Result<()> {
         &[(source.to_path_buf(), PathBuf::new())],
         destination,
         false,
+        None,
+    )
+}
+
+pub(crate) fn write_zip_with_extra_file(
+    source: &Path,
+    destination: &Path,
+    name: &str,
+    content: &[u8],
+) -> Result<()> {
+    write_zip_mappings(
+        &[(source.to_path_buf(), PathBuf::new())],
+        destination,
+        false,
+        Some((name, content)),
     )
 }
 
@@ -103,13 +118,14 @@ pub(crate) fn write_addon_zip_roots(sources: &[PathBuf], destination: &Path) -> 
             Ok((source.clone(), prefix))
         })
         .collect::<Result<Vec<_>>>()?;
-    write_zip_mappings(&mappings, destination, true)
+    write_zip_mappings(&mappings, destination, true, None)
 }
 
 fn write_zip_mappings(
     mappings: &[(PathBuf, PathBuf)],
     destination: &Path,
     exclude_python_artifacts: bool,
+    extra_file: Option<(&str, &[u8])>,
 ) -> Result<()> {
     let file = File::create(destination).map_err(|error| CoreError::io(destination, error))?;
     let mut writer = ZipWriter::new(file);
@@ -134,6 +150,14 @@ fn write_zip_mappings(
             stored_options,
             exclude_python_artifacts,
         )?;
+    }
+    if let Some((name, content)) = extra_file {
+        writer
+            .start_file(name.replace('\\', "/"), compressed_options)
+            .map_err(|error| archive_error(destination, error))?;
+        writer
+            .write_all(content)
+            .map_err(|error| CoreError::io(destination, error))?;
     }
     writer
         .finish()

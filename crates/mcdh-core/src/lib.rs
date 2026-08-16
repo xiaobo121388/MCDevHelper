@@ -5,6 +5,7 @@ mod discovery;
 mod error;
 mod index;
 mod json;
+mod metadata;
 mod model;
 mod operations;
 mod path_utils;
@@ -13,11 +14,12 @@ mod template;
 pub use error::{CoreError, ErrorPayload, Result};
 pub use index::{LocalIndex, MutationGuard};
 pub use model::{
-    AppSettings, BumpManifestVersionRequest, ComponentKind, ComponentOrigin, ComponentSummary,
-    CopyComponentRequest, CreateComponentRequest, DiscoveryResult, DiscoveryWarning,
-    ExportComponentRequest, IdentityPolicy, ImportComponentRequest, ManifestSummary, McsInfo,
-    McsTemplateIdentity, MoveComponentRequest, OperationResult, SetComponentTagsRequest,
-    SourceKind, SourceRecord, ThemePreference, VersionPart, VsCodeStatus,
+    AppSettings, BumpManifestVersionRequest, ComponentKind, ComponentMetadata, ComponentOrigin,
+    ComponentSummary, ContentMode, CopyComponentRequest, CreateComponentRequest, DiscoveryResult,
+    DiscoveryWarning, ExportComponentRequest, IdentityPolicy, ImportComponentRequest,
+    ManifestSummary, McsInfo, McsTemplateIdentity, MoveComponentRequest, OperationResult,
+    SetComponentMetadataRequest, SetComponentTagsRequest, SourceKind, SourceRecord,
+    ThemePreference, VersionPart, VsCodeStatus,
 };
 pub use operations::ComponentService;
 pub use template::{RenderedFile, RenderedTemplate, TemplateRequest, TemplateService};

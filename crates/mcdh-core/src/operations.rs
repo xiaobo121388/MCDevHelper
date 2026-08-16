@@ -12,16 +12,21 @@ use walkdir::{DirEntry, WalkDir};
 
 use crate::archive::{
     expand_nested_mcpacks, extract_archive, is_supported_archive, temporary_zip_path,
-    write_addon_zip_roots, write_zip,
+    write_addon_zip_roots, write_zip, write_zip_with_extra_file,
 };
 use crate::json::{parse_jsonc, parse_options};
+use crate::metadata::{
+    METADATA_FILE_NAME, metadata_bytes, metadata_path, normalized_metadata,
+    read_component_metadata, write_component_metadata,
+};
 use crate::path_utils::canonicalize;
 use crate::{
-    BumpManifestVersionRequest, ComponentKind, ComponentOrigin, ComponentSummary,
+    BumpManifestVersionRequest, ComponentKind, ComponentOrigin, ComponentSummary, ContentMode,
     CopyComponentRequest, CoreError, CreateComponentRequest, DiscoveryService,
     ExportComponentRequest, IdentityPolicy, ImportComponentRequest, LocalIndex,
-    McsTemplateIdentity, MoveComponentRequest, OperationResult, Result, SetComponentTagsRequest,
-    TemplateRequest, TemplateService, VersionPart, VsCodeStatus,
+    McsTemplateIdentity, MoveComponentRequest, OperationResult, Result,
+    SetComponentMetadataRequest, SetComponentTagsRequest, TemplateRequest, TemplateService,
+    VersionPart, VsCodeStatus,
 };
 
 #[cfg(test)]
@@ -90,6 +95,10 @@ impl ComponentService {
             fs::write(&path, file.content.as_bytes())
                 .map_err(|error| CoreError::io(&path, error))?;
         }
+        write_component_metadata(
+            staging.path(),
+            &normalized_metadata(&request.name, &[], false)?,
+        )?;
         let actual_path = staging.publish(&target)?;
         let modified_files = collect_files(&actual_path)?;
         self.index.component_id(&actual_path)?;
@@ -135,6 +144,7 @@ impl ComponentService {
                 &self.mcs_identity(None)?,
             )?;
         }
+        preserve_or_create_metadata(&component, staging.path())?;
         let actual_path = staging.publish(&target)?;
         self.index.component_id(&actual_path)?;
         Ok(OperationResult {
@@ -186,6 +196,7 @@ impl ComponentService {
                     &self.mcs_identity(None)?,
                 )?;
             }
+            preserve_metadata_file(&component.path, staging.path())?;
             if fail_move_after_copy() {
                 return Err(CoreError::InvalidInput("测试注入的移动发布失败".into()));
             }
@@ -231,7 +242,23 @@ impl ComponentService {
             .as_ref()
             .map_or(source.as_path(), tempfile::TempDir::path);
         let import_root = unwrap_single_directory(unpacked)?;
-        let (kind, name) = inspect_import(&import_root, &source)?;
+        let (kind, fallback_name) = inspect_import(&import_root, &source)?;
+        let mut warnings = Vec::new();
+        let imported_metadata = if request.content_mode == ContentMode::Full {
+            match read_component_metadata(&import_root) {
+                Ok(metadata) => metadata,
+                Err(error) => {
+                    warnings.push(error.to_string());
+                    None
+                }
+            }
+        } else {
+            None
+        };
+        let name = imported_metadata
+            .as_ref()
+            .map(|metadata| metadata.display_name.clone())
+            .unwrap_or(fallback_name);
         let duplicate_uuids = duplicate_manifest_uuids(&import_root, &self.current_components()?)?;
         if !duplicate_uuids.is_empty() && request.identity_policy == IdentityPolicy::Error {
             return Err(CoreError::Conflict(format!(
@@ -248,7 +275,19 @@ impl ComponentService {
             None => unique_child(&destination, &sanitize_file_name(&name)),
         };
         let mut staging = StagingDirectory::new(&destination)?;
-        let report = copy_clean_content(&import_root, staging.path(), kind, false)?;
+        let report = match request.content_mode {
+            ContentMode::Clean => copy_clean_content(&import_root, staging.path(), kind, false)?,
+            ContentMode::Full => copy_tree(
+                &import_root,
+                staging.path(),
+                CopyFilter {
+                    exclude_mcs: false,
+                    exclude_dot: false,
+                    exclude_python_artifacts: false,
+                    exclude_metadata: false,
+                },
+            )?,
+        };
         verify_copy(staging.path(), &report)?;
         if request.identity_policy == IdentityPolicy::Regenerate {
             regenerate_manifest_identifiers(staging.path())?;
@@ -263,26 +302,68 @@ impl ComponentService {
                 &self.mcs_identity(None)?,
             )?;
         }
+        if !metadata_path(staging.path()).exists() {
+            write_component_metadata(staging.path(), &normalized_metadata(&name, &[], false)?)?;
+        }
         let actual_path = staging.publish(&target)?;
         self.index.component_id(&actual_path)?;
         Ok(OperationResult {
             component: None,
             modified_files: collect_files(&actual_path)?,
             actual_path,
-            warnings: Vec::new(),
+            warnings,
         })
     }
 
     pub fn export_component(&self, request: &ExportComponentRequest) -> Result<OperationResult> {
         let _guard = self.index.try_lock_mutations()?;
         let component_path = self.indexed_component_path(&request.component_id)?;
-        let (component_kind, component_name) = inspect_export(&component_path)?;
+        let (component_kind, fallback_name) = inspect_export(&component_path)?;
+        let mut warnings = Vec::new();
+        let component_metadata = match read_component_metadata(&component_path) {
+            Ok(metadata) => metadata,
+            Err(error) => {
+                warnings.push(error.to_string());
+                None
+            }
+        };
+        let component_name = component_metadata
+            .as_ref()
+            .map(|metadata| metadata.display_name.clone())
+            .unwrap_or(fallback_name);
         let destination = existing_directory(&request.destination)?;
-        let archive_path = unique_archive_path(&destination, &sanitize_file_name(&component_name));
+        let archive_name = match request.content_mode {
+            ContentMode::Clean => component_name.clone(),
+            ContentMode::Full => format!("{component_name} 完整"),
+        };
+        let archive_path = unique_archive_path(&destination, &sanitize_file_name(&archive_name));
         let temporary = temporary_zip_path(&destination);
-        if let Err(error) =
-            write_clean_component_zip(&component_path, component_kind, &destination, &temporary)
-        {
+        let write_result = match request.content_mode {
+            ContentMode::Clean => {
+                write_clean_component_zip(&component_path, component_kind, &destination, &temporary)
+            }
+            ContentMode::Full => {
+                let metadata_is_regular = fs::symlink_metadata(metadata_path(&component_path))
+                    .is_ok_and(|metadata| metadata.is_file() && !metadata.file_type().is_symlink());
+                if metadata_is_regular {
+                    write_zip(&component_path, &temporary)
+                } else {
+                    let generated = normalized_metadata(
+                        &component_name,
+                        &self.index.tags(&component_path)?,
+                        false,
+                    )?;
+                    let bytes = metadata_bytes(&generated)?;
+                    write_zip_with_extra_file(
+                        &component_path,
+                        &temporary,
+                        METADATA_FILE_NAME,
+                        &bytes,
+                    )
+                }
+            }
+        };
+        if let Err(error) = write_result {
             let _ = fs::remove_file(&temporary);
             return Err(error);
         }
@@ -294,7 +375,7 @@ impl ComponentService {
             component: None,
             actual_path: archive_path.clone(),
             modified_files: vec![archive_path],
-            warnings: Vec::new(),
+            warnings,
         })
     }
 
@@ -321,20 +402,38 @@ impl ComponentService {
     }
 
     pub fn set_component_tags(&self, request: &SetComponentTagsRequest) -> Result<OperationResult> {
+        let component = self.discovery.get_indexed(&request.component_id)?;
+        self.set_component_metadata(&SetComponentMetadataRequest {
+            component_id: request.component_id.clone(),
+            display_name: component.name,
+            tags: request.tags.clone(),
+            favorite: component.favorite,
+        })
+    }
+
+    pub fn set_component_metadata(
+        &self,
+        request: &SetComponentMetadataRequest,
+    ) -> Result<OperationResult> {
         let _guard = self.index.try_lock_mutations()?;
-        let component = self.find_component(&request.component_id)?;
+        let component = self.discovery.get_indexed(&request.component_id)?;
+        let metadata = normalized_metadata(&request.display_name, &request.tags, request.favorite)?;
+        read_component_metadata(&component.path)?;
         let mut modified_files = Vec::new();
         let work_config = component.path.join("work.mcscfg");
         if component.mcs.is_some() && work_config.is_file() {
-            let tags = normalize_tags(&request.tags)
-                .into_iter()
+            let tags = metadata
+                .tags
+                .iter()
+                .cloned()
                 .map(CstInputValue::from)
                 .collect();
             update_jsonc_property(&work_config, "CustomTags", CstInputValue::Array(tags))?;
             modified_files.push(work_config);
         }
-        self.index.set_tags(&component.path, &request.tags)?;
-        let updated = self.find_component(&request.component_id)?;
+        modified_files.push(write_component_metadata(&component.path, &metadata)?);
+        self.index.set_tags(&component.path, &metadata.tags)?;
+        let updated = self.discovery.get_indexed(&request.component_id)?;
         Ok(OperationResult {
             component: Some(updated),
             actual_path: component.path,
@@ -546,10 +645,40 @@ fn copy_component_content(
                 exclude_mcs,
                 exclude_dot: false,
                 exclude_python_artifacts: false,
+                exclude_metadata: false,
             },
         ),
         CopyMode::Clean => copy_clean_content(&component.path, destination, component.kind, false),
     }
+}
+
+fn preserve_or_create_metadata(component: &ComponentSummary, destination: &Path) -> Result<()> {
+    preserve_metadata_file(&component.path, destination)?;
+    if !metadata_path(destination).exists() {
+        write_component_metadata(
+            destination,
+            &normalized_metadata(&component.name, &component.tags, component.favorite)?,
+        )?;
+    }
+    Ok(())
+}
+
+fn preserve_metadata_file(source: &Path, destination: &Path) -> Result<()> {
+    let source = metadata_path(source);
+    let target = metadata_path(destination);
+    if target.exists() {
+        return Ok(());
+    }
+    let metadata = match fs::symlink_metadata(&source) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(CoreError::io(&source, error)),
+    };
+    if metadata.file_type().is_symlink() || !metadata.is_file() {
+        return Ok(());
+    }
+    fs::copy(&source, &target).map_err(|error| CoreError::io(&target, error))?;
+    Ok(())
 }
 
 fn copy_clean_content(
@@ -566,6 +695,7 @@ fn copy_clean_content(
                 exclude_mcs: true,
                 exclude_dot: true,
                 exclude_python_artifacts: false,
+                exclude_metadata: true,
             },
         );
     }
@@ -580,6 +710,7 @@ fn copy_clean_content(
                 exclude_mcs: true,
                 exclude_dot: false,
                 exclude_python_artifacts,
+                exclude_metadata: true,
             },
         );
     }
@@ -595,6 +726,7 @@ fn copy_clean_content(
                 exclude_mcs: false,
                 exclude_dot: false,
                 exclude_python_artifacts,
+                exclude_metadata: true,
             },
         )?;
         let prefix = PathBuf::from(file_name);
@@ -638,6 +770,7 @@ struct CopyFilter {
     exclude_mcs: bool,
     exclude_dot: bool,
     exclude_python_artifacts: bool,
+    exclude_metadata: bool,
 }
 
 fn copy_tree(source: &Path, destination: &Path, filter: CopyFilter) -> Result<CopyReport> {
@@ -704,6 +837,12 @@ fn include_entry(source: &Path, entry: &DirEntry, filter: CopyFilter) -> bool {
         {
             return false;
         }
+    }
+    if filter.exclude_metadata
+        && relative.components().count() == 1
+        && relative.file_name() == Some(OsStr::new(METADATA_FILE_NAME))
+    {
+        return false;
     }
     if filter.exclude_python_artifacts
         && relative
@@ -1276,18 +1415,6 @@ fn replace_file(source: &Path, destination: &Path) -> std::io::Result<()> {
     fs::rename(source, destination)
 }
 
-fn normalize_tags(tags: &[String]) -> Vec<String> {
-    let mut normalized = tags
-        .iter()
-        .map(|tag| tag.trim())
-        .filter(|tag| !tag.is_empty())
-        .map(ToOwned::to_owned)
-        .collect::<Vec<_>>();
-    normalized.sort_by_key(|tag| tag.to_lowercase());
-    normalized.dedup_by(|left, right| left.eq_ignore_ascii_case(right));
-    normalized
-}
-
 fn verify_copy(root: &Path, report: &CopyReport) -> Result<()> {
     for (relative, expected_size) in &report.files {
         let path = root.join(relative);
@@ -1524,6 +1651,7 @@ mod tests {
             .unwrap();
         assert!(generic.actual_path.ends_with("示例_模组"));
         assert!(!generic.actual_path.join("studio.json").exists());
+        assert!(generic.actual_path.join(METADATA_FILE_NAME).is_file());
         assert_eq!(manifest_files(&generic.actual_path).unwrap().len(), 2);
 
         let mcs = service
@@ -1542,6 +1670,7 @@ mod tests {
             Some(mcs.actual_path.to_string_lossy().as_ref())
         );
         assert!(mcs.actual_path.join("work.mcscfg").is_file());
+        assert!(mcs.actual_path.join(METADATA_FILE_NAME).is_file());
     }
 
     #[test]
@@ -1644,6 +1773,7 @@ mod tests {
             .unwrap();
         let copied_manifest = read_json(&copied.actual_path.join("manifest.json")).unwrap();
         assert_ne!(copied_manifest["header"]["uuid"], old_uuid.to_string());
+        assert!(copied.actual_path.join(METADATA_FILE_NAME).is_file());
 
         let moved_result = service
             .move_component(&MoveComponentRequest {
@@ -1741,6 +1871,7 @@ mod tests {
                 destination: library.clone(),
                 mcs_compatible: false,
                 identity_policy: IdentityPolicy::Preserve,
+                content_mode: ContentMode::Clean,
             })
             .unwrap();
         assert!(
@@ -1762,14 +1893,15 @@ mod tests {
             .unwrap()
             .components
             .remove(0);
-        fs::write(exports.join("Behavior.zip"), b"existing").unwrap();
+        fs::write(exports.join("组合包.zip"), b"existing").unwrap();
         let exported = service
             .export_component(&ExportComponentRequest {
                 component_id: component.id,
                 destination: exports,
+                content_mode: ContentMode::Clean,
             })
             .unwrap();
-        assert!(exported.actual_path.ends_with("Behavior (2).zip"));
+        assert!(exported.actual_path.ends_with("组合包 (2).zip"));
 
         let file = fs::File::open(exported.actual_path).unwrap();
         let mut archive = ZipArchive::new(file).unwrap();
@@ -1783,6 +1915,123 @@ mod tests {
         assert!(names.contains(&"behavior/manifest.json".into()));
         assert!(names.contains(&"resources/manifest.json".into()));
         assert!(!names.iter().any(|name| name.ends_with("studio.json")));
+    }
+
+    #[test]
+    fn exports_and_imports_full_component_backups_without_cleaning_files() {
+        let temp = tempfile::tempdir().unwrap();
+        let index = LocalIndex::open(temp.path().join("state/mcdh.db")).unwrap();
+        let library = temp.path().join("library");
+        let exports = temp.path().join("exports");
+        let full_restore = temp.path().join("full-restore");
+        let clean_restore = temp.path().join("clean-restore");
+        for directory in [&library, &exports, &full_restore, &clean_restore] {
+            fs::create_dir_all(directory).unwrap();
+        }
+        let map = library.join("完整地图");
+        fs::create_dir_all(map.join("db")).unwrap();
+        fs::write(map.join("db/chunk.bin"), b"world").unwrap();
+        fs::write(map.join(".hidden"), b"development").unwrap();
+        fs::write(map.join("types.pyi"), b"typing").unwrap();
+        write_json(
+            &map.join("work.mcscfg"),
+            serde_json::json!({"Type": 1, "Name": "完整地图"}),
+        );
+        write_json(
+            &map.join("studio.json"),
+            serde_json::json!({"private": true}),
+        );
+        index.set_tags(&map, &["备份".into()]).unwrap();
+        index.add_source(SourceKind::Library, &library).unwrap();
+        let component = DiscoveryService::new(index.clone())
+            .refresh_with_mcs_work_roots(&[])
+            .unwrap()
+            .components
+            .remove(0);
+        assert!(!map.join(METADATA_FILE_NAME).exists());
+        let service = ComponentService::new(index).with_mcs_work_roots(Vec::new());
+
+        let clean = service
+            .export_component(&ExportComponentRequest {
+                component_id: component.id.clone(),
+                destination: exports.clone(),
+                content_mode: ContentMode::Clean,
+            })
+            .unwrap();
+        let full = service
+            .export_component(&ExportComponentRequest {
+                component_id: component.id,
+                destination: exports,
+                content_mode: ContentMode::Full,
+            })
+            .unwrap();
+        assert!(!map.join(METADATA_FILE_NAME).exists());
+
+        let archive_names = |path: &Path| {
+            let mut archive = ZipArchive::new(fs::File::open(path).unwrap()).unwrap();
+            (0..archive.len())
+                .map(|index| archive.by_index(index).unwrap().name().to_owned())
+                .collect::<Vec<_>>()
+        };
+        let clean_names = archive_names(&clean.actual_path);
+        assert!(!clean_names.iter().any(|name| {
+            name == METADATA_FILE_NAME
+                || name == ".hidden"
+                || name == "studio.json"
+                || name == "work.mcscfg"
+        }));
+        let full_names = archive_names(&full.actual_path);
+        for expected in [
+            METADATA_FILE_NAME,
+            ".hidden",
+            "types.pyi",
+            "studio.json",
+            "work.mcscfg",
+            "db/chunk.bin",
+        ] {
+            assert!(
+                full_names.contains(&expected.to_owned()),
+                "missing {expected}"
+            );
+        }
+        assert!(full.actual_path.ends_with("完整地图 完整.zip"));
+
+        let restored = service
+            .import_component(&ImportComponentRequest {
+                source: full.actual_path.clone(),
+                destination: full_restore,
+                mcs_compatible: false,
+                identity_policy: IdentityPolicy::Preserve,
+                content_mode: ContentMode::Full,
+            })
+            .unwrap();
+        for expected in [
+            METADATA_FILE_NAME,
+            ".hidden",
+            "types.pyi",
+            "studio.json",
+            "work.mcscfg",
+        ] {
+            assert!(restored.actual_path.join(expected).exists());
+        }
+        let restored_metadata = read_component_metadata(&restored.actual_path)
+            .unwrap()
+            .unwrap();
+        assert_eq!(restored_metadata.tags, vec!["备份"]);
+
+        let cleaned = service
+            .import_component(&ImportComponentRequest {
+                source: full.actual_path,
+                destination: clean_restore,
+                mcs_compatible: false,
+                identity_policy: IdentityPolicy::Preserve,
+                content_mode: ContentMode::Clean,
+            })
+            .unwrap();
+        assert!(cleaned.actual_path.join(METADATA_FILE_NAME).is_file());
+        assert!(!cleaned.actual_path.join(".hidden").exists());
+        assert!(!cleaned.actual_path.join("studio.json").exists());
+        assert!(!cleaned.actual_path.join("work.mcscfg").exists());
     }
 
     #[test]
@@ -1844,6 +2093,7 @@ mod tests {
             .export_component(&ExportComponentRequest {
                 component_id: component.id,
                 destination: output,
+                content_mode: ContentMode::Clean,
             })
             .unwrap();
         assert!(exported.component.is_none());
@@ -1894,6 +2144,7 @@ mod tests {
                 destination: imports.clone(),
                 mcs_compatible: false,
                 identity_policy: IdentityPolicy::Error,
+                content_mode: ContentMode::Clean,
             })
             .unwrap_err();
         assert_eq!(error.code(), "conflict");
@@ -1904,6 +2155,7 @@ mod tests {
                 destination: imports,
                 mcs_compatible: false,
                 identity_policy: IdentityPolicy::Regenerate,
+                content_mode: ContentMode::Clean,
             })
             .unwrap();
         let document = read_json(&imported.actual_path.join("manifest.json")).unwrap();
@@ -2180,6 +2432,71 @@ mod tests {
             read_json(&addon.join("work.mcscfg")).unwrap()["CustomTags"],
             serde_json::json!(["开发", "测试"])
         );
+        let metadata = read_component_metadata(&addon).unwrap().unwrap();
+        assert_eq!(metadata.display_name, "标签模组");
+        assert_eq!(metadata.tags, vec!["开发", "测试"]);
+        assert!(!metadata.favorite);
+    }
+
+    #[test]
+    fn updates_display_metadata_without_rewriting_mcs_names() {
+        let temp = tempfile::tempdir().unwrap();
+        let index = LocalIndex::open(temp.path().join("state/mcdh.db")).unwrap();
+        let work = temp.path().join("work");
+        let addon = work.join("account/Cpp/AddOn/addon-id");
+        fs::create_dir_all(&addon).unwrap();
+        fs::write(
+            addon.join("work.mcscfg"),
+            r#"{
+                "UID": "addon-id",
+                "Type": 7,
+                "Name": "MCS 原名称",
+                "CustomTags": [],
+            }"#,
+        )
+        .unwrap();
+        write_json(
+            &addon.join("behavior/manifest.json"),
+            manifest("Behavior", "data", Uuid::new_v4()),
+        );
+        fs::write(
+            addon.join(METADATA_FILE_NAME),
+            r#"{
+                // preserve metadata comments
+                "schema_version": 1,
+                "display_name": "旧显示名称",
+                "tags": [],
+                "favorite": false,
+                "future": "preserved",
+            }"#,
+        )
+        .unwrap();
+        let component = DiscoveryService::new(index.clone())
+            .refresh_with_mcs_work_roots(std::slice::from_ref(&work))
+            .unwrap()
+            .components
+            .remove(0);
+        let service = ComponentService::new(index).with_mcs_work_roots(vec![work]);
+
+        let result = service
+            .set_component_metadata(&SetComponentMetadataRequest {
+                component_id: component.id,
+                display_name: " 新显示名称 ".into(),
+                tags: vec![" 收藏 ".into(), "收藏".into()],
+                favorite: true,
+            })
+            .unwrap();
+        let updated = result.component.unwrap();
+        assert_eq!(updated.name, "新显示名称");
+        assert_eq!(updated.tags, vec!["收藏"]);
+        assert!(updated.favorite);
+        assert_eq!(
+            read_json(&addon.join("work.mcscfg")).unwrap()["Name"],
+            "MCS 原名称"
+        );
+        let written = fs::read_to_string(addon.join(METADATA_FILE_NAME)).unwrap();
+        assert!(written.contains("// preserve metadata comments"));
+        assert!(written.contains("future"));
     }
 
     #[test]
@@ -2226,6 +2543,7 @@ mod tests {
                 .export_component(&ExportComponentRequest {
                     component_id: component.id,
                     destination: output.clone(),
+                    content_mode: ContentMode::Clean,
                 })
                 .unwrap();
             let file = fs::File::open(result.actual_path).unwrap();

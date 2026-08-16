@@ -1,10 +1,10 @@
 use std::path::PathBuf;
 
 use mcdh_core::{
-    AppSettings, BumpManifestVersionRequest, ComponentKind, ComponentService, CopyComponentRequest,
-    CreateComponentRequest, DiscoveryService, ExportComponentRequest, IdentityPolicy,
-    ImportComponentRequest, LocalIndex, MoveComponentRequest, SetComponentTagsRequest, SourceKind,
-    ThemePreference, VersionPart,
+    AppSettings, BumpManifestVersionRequest, ComponentKind, ComponentService, ContentMode,
+    CopyComponentRequest, CreateComponentRequest, DiscoveryService, ExportComponentRequest,
+    IdentityPolicy, ImportComponentRequest, LocalIndex, MoveComponentRequest,
+    SetComponentMetadataRequest, SetComponentTagsRequest, SourceKind, ThemePreference, VersionPart,
 };
 use rmcp::{
     Json, ServerHandler, ServiceExt,
@@ -128,6 +128,7 @@ impl McdhServer {
             destination: params.destination,
             mcs_compatible: params.mcs_compatible,
             identity_policy: params.identity_policy.into(),
+            content_mode: params.content_mode.into(),
         }))
     }
 
@@ -159,6 +160,7 @@ impl McdhServer {
         json_result(self.service().export_component(&ExportComponentRequest {
             component_id: params.component_id,
             destination: params.destination,
+            content_mode: params.content_mode.into(),
         }))
     }
 
@@ -168,6 +170,19 @@ impl McdhServer {
             component_id: params.component_id,
             tags: params.tags,
         }))
+    }
+
+    #[tool(description = "设置组件显示名称、标签和收藏状态，并写入组件根目录 .mcdh.json")]
+    fn set_component_metadata(&self, Parameters(params): Parameters<MetadataParams>) -> ToolResult {
+        json_result(
+            self.service()
+                .set_component_metadata(&SetComponentMetadataRequest {
+                    component_id: params.component_id,
+                    display_name: params.display_name,
+                    tags: params.tags,
+                    favorite: params.favorite,
+                }),
+        )
     }
 
     #[tool(
@@ -292,6 +307,8 @@ struct ImportParams {
     mcs_compatible: bool,
     #[serde(default)]
     identity_policy: McpIdentityPolicy,
+    #[serde(default)]
+    content_mode: McpContentMode,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -319,6 +336,8 @@ struct MoveParams {
 struct ExportParams {
     component_id: String,
     destination: PathBuf,
+    #[serde(default)]
+    content_mode: McpContentMode,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -326,6 +345,15 @@ struct ExportParams {
 struct TagsParams {
     component_id: String,
     tags: Vec<String>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct MetadataParams {
+    component_id: String,
+    display_name: String,
+    tags: Vec<String>,
+    favorite: bool,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -397,6 +425,23 @@ enum McpVersionPart {
     Minor,
     #[default]
     Patch,
+}
+
+#[derive(Debug, Default, Clone, Copy, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+enum McpContentMode {
+    #[default]
+    Clean,
+    Full,
+}
+
+impl From<McpContentMode> for ContentMode {
+    fn from(value: McpContentMode) -> Self {
+        match value {
+            McpContentMode::Clean => Self::Clean,
+            McpContentMode::Full => Self::Full,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, JsonSchema)]

@@ -37,6 +37,14 @@ pub enum VersionPart {
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+pub enum ContentMode {
+    #[default]
+    Clean,
+    Full,
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum ThemePreference {
     Light,
     Dark,
@@ -129,11 +137,31 @@ pub struct ComponentSummary {
     pub manifests: Vec<ManifestSummary>,
     pub version: Option<[u64; 3]>,
     pub tags: Vec<String>,
+    pub favorite: bool,
     pub icon_path: Option<PathBuf>,
     pub updated_at: Option<DateTime<Utc>>,
     pub modified_at: Option<DateTime<Utc>>,
     pub created_at: Option<DateTime<Utc>>,
     pub size_bytes: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ComponentMetadata {
+    pub schema_version: u64,
+    pub display_name: String,
+    pub tags: Vec<String>,
+    pub favorite: bool,
+}
+
+impl ComponentMetadata {
+    pub fn new(display_name: impl Into<String>, tags: Vec<String>, favorite: bool) -> Self {
+        Self {
+            schema_version: 1,
+            display_name: display_name.into(),
+            tags,
+            favorite,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -175,12 +203,24 @@ pub struct ImportComponentRequest {
     pub destination: PathBuf,
     pub mcs_compatible: bool,
     pub identity_policy: IdentityPolicy,
+    #[serde(default)]
+    pub content_mode: ContentMode,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ExportComponentRequest {
     pub component_id: String,
     pub destination: PathBuf,
+    #[serde(default)]
+    pub content_mode: ContentMode,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SetComponentMetadataRequest {
+    pub component_id: String,
+    pub display_name: String,
+    pub tags: Vec<String>,
+    pub favorite: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

@@ -6,7 +6,8 @@ use mcdh_core::{
     AppSettings, BumpManifestVersionRequest, ComponentService, ComponentSummary,
     CopyComponentRequest, CreateComponentRequest, DiscoveryResult, DiscoveryService, ErrorPayload,
     ExportComponentRequest, ImportComponentRequest, LocalIndex, MoveComponentRequest,
-    OperationResult, SetComponentTagsRequest, SourceKind, SourceRecord, VsCodeStatus,
+    OperationResult, SetComponentMetadataRequest, SetComponentTagsRequest, SourceKind,
+    SourceRecord, VsCodeStatus,
 };
 use serde::{Deserialize, Serialize};
 use tauri::State;
@@ -212,11 +213,12 @@ fn create_component(
 }
 
 #[tauri::command]
-fn import_component(
+async fn import_component(
     state: State<'_, AppState>,
     request: ImportComponentRequest,
 ) -> CommandResult<OperationResult> {
-    core_result(state.service().import_component(&request))
+    let index = state.index.clone();
+    background(move || ComponentService::new(index).import_component(&request)).await
 }
 
 #[tauri::command]
@@ -258,6 +260,14 @@ fn set_component_tags(
     request: SetComponentTagsRequest,
 ) -> CommandResult<OperationResult> {
     core_result(state.service().set_component_tags(&request))
+}
+
+#[tauri::command]
+fn set_component_metadata(
+    state: State<'_, AppState>,
+    request: SetComponentMetadataRequest,
+) -> CommandResult<OperationResult> {
+    core_result(state.service().set_component_metadata(&request))
 }
 
 #[tauri::command]
@@ -381,6 +391,7 @@ pub fn run() {
             export_component,
             delete_component,
             set_component_tags,
+            set_component_metadata,
             regenerate_manifest_uuids,
             bump_manifest_version,
             open_component_directory,
