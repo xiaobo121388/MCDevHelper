@@ -18,6 +18,8 @@ pub enum CoreError {
     Busy,
     #[error("组件标识冲突：{0}")]
     Conflict(String),
+    #[error("导出文件已存在：{0}")]
+    DestinationExists(PathBuf),
     #[error("压缩包处理失败：{path}: {message}")]
     Archive { path: PathBuf, message: String },
     #[error("文件操作失败：{path}: {source}")]
@@ -54,6 +56,7 @@ impl CoreError {
             Self::InvalidComponent(_) => "invalid_component",
             Self::Busy => "busy",
             Self::Conflict(_) => "conflict",
+            Self::DestinationExists(_) => "destination_exists",
             Self::Archive { .. } => "archive_error",
             Self::Io { .. } => "io_error",
             Self::Json { .. } => "json_error",
@@ -64,6 +67,7 @@ impl CoreError {
     pub fn path(&self) -> Option<&Path> {
         match self {
             Self::NotFound(path)
+            | Self::DestinationExists(path)
             | Self::InvalidComponent(path)
             | Self::Io { path, .. }
             | Self::Json { path, .. } => Some(path),

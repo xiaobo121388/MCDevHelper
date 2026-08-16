@@ -45,6 +45,15 @@ pub enum ContentMode {
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+pub enum ExportConflictPolicy {
+    #[default]
+    Rename,
+    Overwrite,
+    Error,
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum ThemePreference {
     Light,
     Dark,
@@ -213,6 +222,8 @@ pub struct ExportComponentRequest {
     pub destination: PathBuf,
     #[serde(default)]
     pub content_mode: ContentMode,
+    #[serde(default)]
+    pub conflict_policy: ExportConflictPolicy,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

@@ -347,7 +347,7 @@ describe("component workspace filters", () => {
     await waitFor(() => expect(screen.getByText("大型模组")).toBeInTheDocument());
 
     fireEvent.click(screen.getByRole("button", { name: "配置 大型模组" }));
-    fireEvent.change(screen.getByPlaceholderText("选择一个可写目录"), {
+    fireEvent.change(screen.getByLabelText("导出目录"), {
       target: { value: "D:\\导出" },
     });
     fireEvent.click(screen.getByRole("button", { name: "导出游戏 ZIP" }));
@@ -355,6 +355,7 @@ describe("component workspace filters", () => {
       component_id: component.id,
       destination: "D:\\导出",
       content_mode: "clean",
+      conflict_policy: "error",
     }));
     expect(screen.getByRole("button", { name: "导出中…" })).toBeDisabled();
 
@@ -372,16 +373,56 @@ describe("component workspace filters", () => {
       warnings: [],
     });
     fireEvent.click(screen.getByRole("button", { name: "配置 大型模组" }));
-    fireEvent.change(screen.getByPlaceholderText("选择一个可写目录"), {
-      target: { value: "D:\\导出" },
-    });
+    expect(screen.getByLabelText("导出目录")).toHaveValue("D:\\导出");
     fireEvent.click(screen.getByRole("button", { name: "导出完整 ZIP" }));
     await waitFor(() => expect(mocks.export).toHaveBeenLastCalledWith({
       component_id: component.id,
       destination: "D:\\导出",
       content_mode: "full",
+      conflict_policy: "error",
     }));
     expect(await screen.findByText("完整 ZIP 已导出")).toBeInTheDocument();
+    expect(mocks.refresh).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    ["添加后缀", "rename"],
+    ["覆盖原文件", "overwrite"],
+  ] as const)("offers %s when an export file already exists", async (action, policy) => {
+    const component = {
+      id: `conflict-${policy}`,
+      name: "重名模组",
+      kind: "addon" as const,
+      path: "D:\\重名模组",
+      origin: { kind: "library" as const, source_id: "library" },
+      manifests: [],
+      tags: [],
+      size_bytes: 1024,
+    };
+    mocks.refresh.mockResolvedValue({ components: [component], sources: [], warnings: [] });
+    mocks.export
+      .mockRejectedValueOnce({ code: "destination_exists", message: "导出文件已存在", path: "D:\\导出\\重名模组.zip" })
+      .mockResolvedValueOnce({ actual_path: `D:\\导出\\重名模组${policy === "rename" ? " (2)" : ""}.zip`, modified_files: [], warnings: [] });
+    render(<App />);
+    await waitFor(() => expect(screen.getByText("重名模组")).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole("button", { name: "配置 重名模组" }));
+    fireEvent.change(screen.getByLabelText("导出目录"), { target: { value: "D:\\导出" } });
+    fireEvent.click(screen.getByRole("button", { name: "导出游戏 ZIP" }));
+    expect(await screen.findByText("导出文件已存在")).toBeInTheDocument();
+    expect(screen.getByText("D:\\导出\\重名模组.zip")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "添加后缀" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "覆盖原文件" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: action }));
+    await waitFor(() => expect(mocks.export).toHaveBeenLastCalledWith({
+      component_id: component.id,
+      destination: "D:\\导出",
+      content_mode: "clean",
+      conflict_policy: policy,
+    }));
+    expect(await screen.findByText("游戏 ZIP 已导出")).toBeInTheDocument();
+    expect(window.localStorage.getItem("mcdh.last-export-destination")).toBe("D:\\导出");
     expect(mocks.refresh).toHaveBeenCalledTimes(1);
   });
 

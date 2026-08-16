@@ -3,6 +3,7 @@ export type SourceKind = "mcs_auto" | "single" | "library";
 export type IdentityPolicy = "preserve" | "regenerate" | "error";
 export type VersionPart = "major" | "minor" | "patch";
 export type ContentMode = "clean" | "full";
+export type ExportConflictPolicy = "rename" | "overwrite" | "error";
 export type ThemePreference = "light" | "dark" | "system";
 
 export interface AppSettings {

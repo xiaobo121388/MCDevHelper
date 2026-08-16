@@ -44,15 +44,18 @@ import type {
   ComponentSummary,
   DiscoveryResult,
   DiscoveryWarning,
+  ExportConflictPolicy,
   IdentityPolicy,
   OperationResult,
   SourceRecord,
   UpdateCheckResult,
+  ContentMode,
   VersionPart,
 } from "./types";
 
 const EMPTY_RESULT: DiscoveryResult = { components: [], sources: [], warnings: [] };
 const IGNORED_WARNINGS_STORAGE_KEY = "mcdh.ignored-discovery-warnings";
+const LAST_EXPORT_DESTINATION_STORAGE_KEY = "mcdh.last-export-destination";
 const DEFAULT_SETTINGS: AppSettings = {
   developer_nickname: "MCDH",
   developer_account: "mcdh@local.invalid",
@@ -607,12 +610,33 @@ function ComponentDialog({ component, onClose, onDone, onNotice }: { component: 
   const [tags, setTags] = useState(component.tags.join(", "));
   const [favorite, setFavorite] = useState(component.favorite);
   const [destination, setDestination] = useState("");
+  const [exportDestination, setExportDestination] = useState(readLastExportDestination);
+  const [exportConflict, setExportConflict] = useState<{ contentMode: ContentMode; destination: string; path: string } | null>(null);
   const [mcs, setMcs] = useState(false);
   const [identity, setIdentity] = useState<"preserve" | "regenerate">("regenerate");
   const [part, setPart] = useState<VersionPart>("patch");
   const [busy, setBusy] = useState("");
   const run = async (label: string, action: () => Promise<OperationResult>, message: string, refreshAfter = true) => { setBusy(label); try { onDone(message, await action(), refreshAfter); } catch (error) { onNotice(errorMessage(error)); } finally { setBusy(""); } };
   const needDestination = () => { if (destination) return true; onNotice("请先选择目标目录。" ); return false; };
+  const runExport = async (contentMode: ContentMode, conflictPolicy: ExportConflictPolicy = "error", selectedDestination = exportDestination) => {
+    if (!selectedDestination) { onNotice("请先选择导出目录。"); return; }
+    setBusy(`export-${contentMode}`);
+    try {
+      const operation = await api.export({ component_id: component.id, destination: selectedDestination, content_mode: contentMode, conflict_policy: conflictPolicy });
+      writeLastExportDestination(selectedDestination);
+      setExportConflict(null);
+      onDone(contentMode === "clean" ? "游戏 ZIP 已导出" : "完整 ZIP 已导出", operation, false);
+    } catch (error) {
+      const conflictPath = destinationExistsPath(error);
+      if (conflictPolicy === "error" && conflictPath !== undefined) {
+        setExportConflict({ contentMode, destination: selectedDestination, path: conflictPath });
+      } else {
+        onNotice(errorMessage(error));
+      }
+    } finally {
+      setBusy("");
+    }
+  };
   const remove = () => {
     if (!window.confirm(`确定删除“${component.name}”吗？`)) return;
     if (!window.confirm(`再次确认：将永久删除磁盘目录\n${component.path}\n此操作无法撤销。`)) return;
@@ -628,10 +652,15 @@ function ComponentDialog({ component, onClose, onDone, onNotice }: { component: 
           <div className="config-row"><div><strong>包版本</strong><p>同步 header、module、依赖和地图包清单；保留 JSONC 注释。</p></div><select value={part} onChange={(event) => setPart(event.target.value as VersionPart)}><option value="patch">Patch</option><option value="minor">Minor</option><option value="major">Major</option></select><button disabled={!!busy} onClick={() => void run("version", () => api.bumpVersion(component.id, part), "版本已提升", false)}>提升版本</button></div>
         </section>
         <section>
-          <h3>复制、移动、导出与删除</h3>
+          <h3>复制、移动与删除</h3>
           <PathField label="目标目录" value={destination} onChange={setDestination} />
           <div className="transfer-options"><label>复制 UUID <select value={identity} onChange={(event) => setIdentity(event.target.value as "preserve" | "regenerate")}><option value="regenerate">生成新的</option><option value="preserve">保留</option></select></label><CheckRow checked={mcs} onChange={setMcs} label="目标为 MCS 分类目录" /></div>
-          <div className="transfer-buttons"><button className="button secondary" disabled={!!busy} onClick={() => needDestination() && void run("copy", () => api.copy({ component_id: component.id, destination, mcs_compatible: mcs, identity_policy: identity }), "组件已复制")}><Copy size={16} />复制</button><button className="button secondary" disabled={!!busy} onClick={() => needDestination() && window.confirm("移动完成后原目录将被移除，是否继续？") && void run("move", () => api.move({ component_id: component.id, destination, mcs_compatible: mcs }), "组件已移动")}><FolderCog size={16} />移动</button><button className="button secondary" disabled={!!busy} onClick={() => needDestination() && void run("export-clean", () => api.export({ component_id: component.id, destination, content_mode: "clean" }), "游戏 ZIP 已导出", false)}><Archive size={16} />{busy === "export-clean" ? "导出中…" : "导出游戏 ZIP"}</button><button className="button secondary" disabled={!!busy} title="保留点号项、MCS 配置和开发辅助文件" onClick={() => needDestination() && void run("export-full", () => api.export({ component_id: component.id, destination, content_mode: "full" }), "完整 ZIP 已导出", false)}><Archive size={16} />{busy === "export-full" ? "导出中…" : "导出完整 ZIP"}</button><button className="button danger" disabled={!!busy} onClick={remove}><Trash2 size={16} />删除</button></div>
+          <div className="transfer-buttons"><button className="button secondary" disabled={!!busy} onClick={() => needDestination() && void run("copy", () => api.copy({ component_id: component.id, destination, mcs_compatible: mcs, identity_policy: identity }), "组件已复制")}><Copy size={16} />复制</button><button className="button secondary" disabled={!!busy} onClick={() => needDestination() && window.confirm("移动完成后原目录将被移除，是否继续？") && void run("move", () => api.move({ component_id: component.id, destination, mcs_compatible: mcs }), "组件已移动")}><FolderCog size={16} />移动</button><button className="button danger" disabled={!!busy} onClick={remove}><Trash2 size={16} />删除</button></div>
+          <h3 className="export-heading">导出</h3>
+          <PathField label="导出目录" value={exportDestination} onChange={(value) => { setExportDestination(value); setExportConflict(null); }} />
+          <p className="export-hint">成功导出后会记住此目录，下次自动填写。</p>
+          <div className="transfer-buttons"><button className="button secondary" disabled={!!busy} onClick={() => void runExport("clean")}><Archive size={16} />{busy === "export-clean" ? "导出中…" : "导出游戏 ZIP"}</button><button className="button secondary" disabled={!!busy} title="保留点号项、MCS 配置和开发辅助文件" onClick={() => void runExport("full")}><Archive size={16} />{busy === "export-full" ? "导出中…" : "导出完整 ZIP"}</button></div>
+          {exportConflict && <div className="export-conflict" role="alert"><div><strong>导出文件已存在</strong><p title={exportConflict.path}>{exportConflict.path}</p></div><div className="export-conflict-actions"><button className="button secondary" disabled={!!busy} onClick={() => setExportConflict(null)}>取消</button><button className="button secondary" disabled={!!busy} onClick={() => void runExport(exportConflict.contentMode, "rename", exportConflict.destination)}>添加后缀</button><button className="button danger" disabled={!!busy} onClick={() => void runExport(exportConflict.contentMode, "overwrite", exportConflict.destination)}>覆盖原文件</button></div></div>}
         </section>
       </div>
     </Modal>
@@ -681,5 +710,21 @@ function readIgnoredWarningKeys() {
 function writeIgnoredWarningKeys(keys: Set<string>) {
   if (typeof window === "undefined") return;
   try { window.localStorage.setItem(IGNORED_WARNINGS_STORAGE_KEY, JSON.stringify([...keys].sort())); } catch { /* Storage can be unavailable in restricted WebViews. */ }
+}
+function readLastExportDestination() {
+  if (typeof window === "undefined") return "";
+  try { return window.localStorage.getItem(LAST_EXPORT_DESTINATION_STORAGE_KEY) ?? ""; } catch { return ""; }
+}
+function writeLastExportDestination(destination: string) {
+  if (typeof window === "undefined") return;
+  try { window.localStorage.setItem(LAST_EXPORT_DESTINATION_STORAGE_KEY, destination); } catch { /* Storage can be unavailable in restricted WebViews. */ }
+}
+function destinationExistsPath(error: unknown): string | undefined {
+  let payload = error;
+  if (typeof payload === "string") {
+    try { payload = JSON.parse(payload); } catch { return undefined; }
+  }
+  if (!payload || typeof payload !== "object" || !("code" in payload) || payload.code !== "destination_exists") return undefined;
+  return "path" in payload && typeof payload.path === "string" ? payload.path : "导出目录中的同名 ZIP";
 }
 function setsEqual(left: Set<string>, right: Set<string>) { return left.size === right.size && [...left].every((value) => right.has(value)); }

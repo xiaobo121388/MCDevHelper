@@ -5,6 +5,7 @@ import type {
   ComponentSummary,
   ContentMode,
   DiscoveryResult,
+  ExportConflictPolicy,
   IdentityPolicy,
   OperationResult,
   SourceRecord,
@@ -48,7 +49,7 @@ export const api = {
   }) => invoke<OperationResult>("copy_component", { request }),
   move: (request: { component_id: string; destination: string; mcs_compatible: boolean }) =>
     invoke<OperationResult>("move_component", { request }),
-  export: (request: { component_id: string; destination: string; content_mode: ContentMode }) =>
+  export: (request: { component_id: string; destination: string; content_mode: ContentMode; conflict_policy: ExportConflictPolicy }) =>
     invoke<OperationResult>("export_component", { request }),
   delete: (componentId: string) =>
     invoke<OperationResult>("delete_component", { componentId }),

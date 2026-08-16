@@ -23,8 +23,8 @@ use crate::path_utils::canonicalize;
 use crate::{
     BumpManifestVersionRequest, ComponentKind, ComponentOrigin, ComponentSummary, ContentMode,
     CopyComponentRequest, CoreError, CreateComponentRequest, DiscoveryService,
-    ExportComponentRequest, IdentityPolicy, ImportComponentRequest, LocalIndex,
-    McsTemplateIdentity, MoveComponentRequest, OperationResult, Result,
+    ExportComponentRequest, ExportConflictPolicy, IdentityPolicy, ImportComponentRequest,
+    LocalIndex, McsTemplateIdentity, MoveComponentRequest, OperationResult, Result,
     SetComponentMetadataRequest, SetComponentTagsRequest, TemplateRequest, TemplateService,
     VersionPart, VsCodeStatus,
 };
@@ -336,7 +336,19 @@ impl ComponentService {
             ContentMode::Clean => component_name.clone(),
             ContentMode::Full => format!("{component_name} 完整"),
         };
-        let archive_path = unique_archive_path(&destination, &sanitize_file_name(&archive_name));
+        let archive_base_name = sanitize_file_name(&archive_name);
+        let requested_archive_path = destination.join(format!("{archive_base_name}.zip"));
+        let archive_path = match request.conflict_policy {
+            ExportConflictPolicy::Rename => unique_archive_path(&destination, &archive_base_name),
+            ExportConflictPolicy::Overwrite => requested_archive_path,
+            ExportConflictPolicy::Error => match fs::symlink_metadata(&requested_archive_path) {
+                Ok(_) => return Err(CoreError::DestinationExists(requested_archive_path)),
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                    requested_archive_path
+                }
+                Err(error) => return Err(CoreError::io(&requested_archive_path, error)),
+            },
+        };
         let temporary = temporary_zip_path(&destination);
         let write_result = match request.content_mode {
             ContentMode::Clean => {
@@ -367,7 +379,13 @@ impl ComponentService {
             let _ = fs::remove_file(&temporary);
             return Err(error);
         }
-        if let Err(error) = fs::rename(&temporary, &archive_path) {
+        let persist_result = match request.conflict_policy {
+            ExportConflictPolicy::Overwrite => replace_file(&temporary, &archive_path),
+            ExportConflictPolicy::Rename | ExportConflictPolicy::Error => {
+                fs::rename(&temporary, &archive_path)
+            }
+        };
+        if let Err(error) = persist_result {
             let _ = fs::remove_file(&temporary);
             return Err(CoreError::io(&archive_path, error));
         }
@@ -1839,7 +1857,7 @@ mod tests {
     }
 
     #[test]
-    fn imports_nested_mcaddon_and_exports_a_clean_numbered_zip() {
+    fn imports_nested_mcaddon_and_handles_export_name_conflicts() {
         let temp = tempfile::tempdir().unwrap();
         let index = LocalIndex::open(temp.path().join("state/mcdh.db")).unwrap();
         let library = temp.path().join("组件库");
@@ -1893,17 +1911,41 @@ mod tests {
             .unwrap()
             .components
             .remove(0);
-        fs::write(exports.join("组合包.zip"), b"existing").unwrap();
+        let original_archive = exports.join("组合包.zip");
+        fs::write(&original_archive, b"existing").unwrap();
+        let conflict = service
+            .export_component(&ExportComponentRequest {
+                component_id: component.id.clone(),
+                destination: exports.clone(),
+                content_mode: ContentMode::Clean,
+                conflict_policy: ExportConflictPolicy::Error,
+            })
+            .unwrap_err();
+        assert_eq!(conflict.code(), "destination_exists");
+        assert_eq!(conflict.path(), Some(original_archive.as_path()));
+        assert_eq!(fs::read(&original_archive).unwrap(), b"existing");
+
         let exported = service
             .export_component(&ExportComponentRequest {
-                component_id: component.id,
-                destination: exports,
+                component_id: component.id.clone(),
+                destination: exports.clone(),
                 content_mode: ContentMode::Clean,
+                conflict_policy: ExportConflictPolicy::Rename,
             })
             .unwrap();
         assert!(exported.actual_path.ends_with("组合包 (2).zip"));
 
-        let file = fs::File::open(exported.actual_path).unwrap();
+        let overwritten = service
+            .export_component(&ExportComponentRequest {
+                component_id: component.id,
+                destination: exports,
+                content_mode: ContentMode::Clean,
+                conflict_policy: ExportConflictPolicy::Overwrite,
+            })
+            .unwrap();
+        assert_eq!(overwritten.actual_path, original_archive);
+
+        let file = fs::File::open(overwritten.actual_path).unwrap();
         let mut archive = ZipArchive::new(file).unwrap();
         let mut names = Vec::new();
         for index in 0..archive.len() {
@@ -1956,6 +1998,7 @@ mod tests {
                 component_id: component.id.clone(),
                 destination: exports.clone(),
                 content_mode: ContentMode::Clean,
+                conflict_policy: ExportConflictPolicy::Rename,
             })
             .unwrap();
         let full = service
@@ -1963,6 +2006,7 @@ mod tests {
                 component_id: component.id,
                 destination: exports,
                 content_mode: ContentMode::Full,
+                conflict_policy: ExportConflictPolicy::Rename,
             })
             .unwrap();
         assert!(!map.join(METADATA_FILE_NAME).exists());
@@ -2094,6 +2138,7 @@ mod tests {
                 component_id: component.id,
                 destination: output,
                 content_mode: ContentMode::Clean,
+                conflict_policy: ExportConflictPolicy::Rename,
             })
             .unwrap();
         assert!(exported.component.is_none());
@@ -2544,6 +2589,7 @@ mod tests {
                     component_id: component.id,
                     destination: output.clone(),
                     content_mode: ContentMode::Clean,
+                    conflict_policy: ExportConflictPolicy::Rename,
                 })
                 .unwrap();
             let file = fs::File::open(result.actual_path).unwrap();

@@ -16,10 +16,10 @@ pub use index::{LocalIndex, MutationGuard};
 pub use model::{
     AppSettings, BumpManifestVersionRequest, ComponentKind, ComponentMetadata, ComponentOrigin,
     ComponentSummary, ContentMode, CopyComponentRequest, CreateComponentRequest, DiscoveryResult,
-    DiscoveryWarning, ExportComponentRequest, IdentityPolicy, ImportComponentRequest,
-    ManifestSummary, McsInfo, McsTemplateIdentity, MoveComponentRequest, OperationResult,
-    SetComponentMetadataRequest, SetComponentTagsRequest, SourceKind, SourceRecord,
-    ThemePreference, VersionPart, VsCodeStatus,
+    DiscoveryWarning, ExportComponentRequest, ExportConflictPolicy, IdentityPolicy,
+    ImportComponentRequest, ManifestSummary, McsInfo, McsTemplateIdentity, MoveComponentRequest,
+    OperationResult, SetComponentMetadataRequest, SetComponentTagsRequest, SourceKind,
+    SourceRecord, ThemePreference, VersionPart, VsCodeStatus,
 };
 pub use operations::ComponentService;
 pub use template::{RenderedFile, RenderedTemplate, TemplateRequest, TemplateService};

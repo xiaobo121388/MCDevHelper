@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use mcdh_core::{
     AppSettings, BumpManifestVersionRequest, ComponentKind, ComponentService, ContentMode,
     CopyComponentRequest, CreateComponentRequest, DiscoveryService, ExportComponentRequest,
-    IdentityPolicy, ImportComponentRequest, LocalIndex, MoveComponentRequest,
+    ExportConflictPolicy, IdentityPolicy, ImportComponentRequest, LocalIndex, MoveComponentRequest,
     SetComponentMetadataRequest, SetComponentTagsRequest, SourceKind, ThemePreference, VersionPart,
 };
 use rmcp::{
@@ -155,12 +155,13 @@ impl McdhServer {
         }))
     }
 
-    #[tool(description = "将组件按清洁白名单导出为 ZIP，同名文件自动追加序号")]
+    #[tool(description = "将组件导出为 ZIP；可在同名文件存在时自动追加序号、覆盖或报错")]
     fn export_component(&self, Parameters(params): Parameters<ExportParams>) -> ToolResult {
         json_result(self.service().export_component(&ExportComponentRequest {
             component_id: params.component_id,
             destination: params.destination,
             content_mode: params.content_mode.into(),
+            conflict_policy: params.conflict_policy.into(),
         }))
     }
 
@@ -338,6 +339,8 @@ struct ExportParams {
     destination: PathBuf,
     #[serde(default)]
     content_mode: McpContentMode,
+    #[serde(default)]
+    conflict_policy: McpExportConflictPolicy,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -435,11 +438,30 @@ enum McpContentMode {
     Full,
 }
 
+#[derive(Debug, Default, Clone, Copy, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+enum McpExportConflictPolicy {
+    #[default]
+    Rename,
+    Overwrite,
+    Error,
+}
+
 impl From<McpContentMode> for ContentMode {
     fn from(value: McpContentMode) -> Self {
         match value {
             McpContentMode::Clean => Self::Clean,
             McpContentMode::Full => Self::Full,
+        }
+    }
+}
+
+impl From<McpExportConflictPolicy> for ExportConflictPolicy {
+    fn from(value: McpExportConflictPolicy) -> Self {
+        match value {
+            McpExportConflictPolicy::Rename => Self::Rename,
+            McpExportConflictPolicy::Overwrite => Self::Overwrite,
+            McpExportConflictPolicy::Error => Self::Error,
         }
     }
 }

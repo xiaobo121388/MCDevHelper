@@ -37,7 +37,7 @@ MCDH 是面向网易《我的世界》中国版 PE 创作者的 Windows 本地�
 3. 设置面板左侧按“路径管理、MCS 身份、外观、开发工具、关于”分类；可配置新建默认目录、开发者身份和跟随系统/亮色/暗色主题。
 4. 使用“新建组件”从已配置目录的下拉框选择目标；启用“MCS 兼容配置”后可填写命名空间，默认是 `mcdh`。
 5. 组件卡片可一键收藏，右下角可打开目录、用 VS Code 打开或进入配置面板；配置面板可修改显示名称、标签和收藏状态。删除需要连续两次确认并会永久移除整个组件目录。
-6. “导出游戏 ZIP”继续生成清洁游戏包：AddOn 根目录只保留检测到的 BP/RP，并递归剔除 `.pyi`、`.pyc`；地图和材质移除点号项、`.mcdh.json` 及 MCS 私有配置。“导出完整 ZIP”保留组件根目录内的全部普通文件和空目录，适合备份和迁移编辑环境。
+6. “导出游戏 ZIP”继续生成清洁游戏包：AddOn 根目录只保留检测到的 BP/RP，并递归剔除 `.pyi`、`.pyc`；地图和材质移除点号项、`.mcdh.json` 及 MCS 私有配置。“导出完整 ZIP”保留组件根目录内的全部普通文件和空目录，适合备份和迁移编辑环境。成功导出后会记住目录，下次自动填写；遇到同名 ZIP 时可选择覆盖原文件或追加序号。
 7. 导入默认按游戏内容清洁处理；启用“完整恢复”后保留点号项、MCS 配置和开发辅助文件。两种导入仍会拒绝路径穿越、绝对路径和符号链接。
 
 主界面出现扫描问题提示时可直接打开详情，逐条查看路径和原因，并选择打开最近可访问的文件夹、移除 MCDH 来源记录或忽略。移除来源和忽略都不会删除磁盘文件；已忽略问题可从筛选栏重新显示。
@@ -83,7 +83,7 @@ MCDH 新建、导入或复制组件时会在根目录生成 `.mcdh.json`；没�
 
 MCP 仅使用 stdio；stdout 只输出协议消息，运行日志写入 stderr。可用工具：
 
-`list_components`、`get_component`、`refresh_components`、`list_sources`、`add_single_component`、`add_library`、`add_mcs_path`、`rescan_mcs_paths`、`remove_source`、`get_settings`、`set_settings`、`create_component`、`import_component`、`copy_component`、`move_component`、`export_component`、`set_component_tags`、`set_component_metadata`、`regenerate_manifest_uuids`、`bump_manifest_version`、`open_component_directory`、`open_component_in_vscode`。`import_component` 和 `export_component` 的 `content_mode` 可选 `clean` 或 `full`，省略时保持 `clean`。
+`list_components`、`get_component`、`refresh_components`、`list_sources`、`add_single_component`、`add_library`、`add_mcs_path`、`rescan_mcs_paths`、`remove_source`、`get_settings`、`set_settings`、`create_component`、`import_component`、`copy_component`、`move_component`、`export_component`、`set_component_tags`、`set_component_metadata`、`regenerate_manifest_uuids`、`bump_manifest_version`、`open_component_directory`、`open_component_in_vscode`。`import_component` 和 `export_component` 的 `content_mode` 可选 `clean` 或 `full`，省略时保持 `clean`。`export_component.conflict_policy` 可选 `rename`（默认追加序号）、`overwrite` 或 `error`。
 
 ## 开发与验证
 
