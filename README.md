@@ -135,7 +135,7 @@ MCDK 原生控制台、离线资源验证命令及人工验收清单见 [MCDK �
 
 - SQLite 使用 WAL、5 秒 busy timeout 和跨进程文件锁。
 - MCS 模板源码仅包含 `mcdh@local.invalid`、`MCDH`、`0` 等中性默认值；用户可在设置中替换这些本地生成信息，模板除 MCS 必需的实际目标路径外不含本机绝对路径。
-- 应用没有账号系统或遥测。MCDH 本体更新仅提示下载入口；MCDK 自动更新请求 `api.github.com` 的公开 Release 元数据，从 `github.com` 及其官方 Release 资产域名下载程序。不会上传组件源码、游戏日志或目录内容。MCDK 的游戏网络与可选调试服务由其自身及项目配置管理。
+- 应用没有账号系统或遥测。MCDH 本体检查更新及 MCDK 自动更新请求 `api.github.com` 的公开 Release 元数据，从 `github.com` 及其官方 Release 资产域名下载程序；MCDH 本体仅在用户点击“立即更新”后开始下载，完成校验后自动安装并重启。不会上传组件源码、游戏日志或目录内容。MCDK 的游戏网络与可选调试服务由其自身及项目配置管理。
 - 设置环境变量 `MCDH_DATA_DIR` 可为自动化测试隔离数据库；设置 `MCDH_DISABLE_MCS_SCAN=1` 可在测试进程中禁用自动 MCS 扫描。
 
 ## 开源参考与许可
