@@ -1,6 +1,7 @@
 //! Shared domain services for MCDevHelper.
 
 mod archive;
+pub mod custom_export;
 mod discovery;
 mod error;
 mod index;
