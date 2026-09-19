@@ -170,6 +170,42 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px s
 .eyebrow { margin: 0 0 5px; color: var(--subtle); font-size: 11px; font-weight: 650; letter-spacing: .14em; text-transform: uppercase; }
 .topbar h1 { margin: 0; font-size: 27px; line-height: 1.15; letter-spacing: -.03em; }
 .top-actions, .source-actions, .transfer-buttons { display: flex; flex-wrap: wrap; gap: 9px; }
+.custom-export-button { max-width: 100%; white-space: normal; overflow-wrap: anywhere; text-align: left; }
+.custom-export-button svg { flex-shrink: 0; }
+.export-config-fields { border: 0; padding: 0; margin: 0; min-width: 0; }
+.export-profile-list { margin-bottom: 20px; border-block: 1px solid var(--border); }
+.export-profile-row { display: grid; grid-template-columns: 18px minmax(0, 1fr) repeat(3, 30px); gap: 4px; align-items: center; padding: 6px 0; border-bottom: 1px solid var(--border); }
+.export-profile-row:last-child { border-bottom: 0; }
+.export-profile-row > input { width: 15px; height: 15px; }
+.export-profile-name { background: none; border: 0; padding: 6px 8px; text-align: left; color: var(--text); overflow-wrap: anywhere; border-radius: 4px; cursor: pointer; }
+.export-profile-name.active { background: var(--accent-soft); color: var(--accent); }
+.export-icon { display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; flex-shrink: 0; padding: 0; border: 1px solid var(--border); border-radius: 4px; color: var(--text); background: var(--panel); cursor: pointer; }
+.export-icon:hover:not(:disabled) { background: var(--control-hover); }
+.export-icon svg { flex-shrink: 0; }
+.path-row .export-icon { width: 34px; min-width: 34px; height: 38px; padding: 0; }
+.export-profile-editor { display: grid; gap: 14px; min-width: 0; }
+.export-profile-editor .field { margin: 0; min-width: 0; }
+.export-profile-editor .settings-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.export-arguments { display: grid; gap: 7px; }
+.export-arguments input { min-width: 0; width: 100%; }
+.export-field-heading { display: flex; justify-content: space-between; align-items: center; font-size: 12px; }
+.export-kind-options { display: flex; flex-wrap: wrap; gap: 16px; }
+.export-kind-options label, .export-mcp-option { display: flex; align-items: center; gap: 7px; font-size: 12px; }
+.export-kind-options input, .export-mcp-option input { width: 15px; height: 15px; margin: 0; }
+.export-security-note { color: var(--muted); font-size: 12px; line-height: 1.6; margin: 0; }
+.export-config-footer { display: flex; justify-content: flex-end; margin-top: 20px; }
+.export-task { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--border); min-width: 0; }
+.export-task-heading { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; font-size: 12px; }
+.export-task-heading strong { display: flex; align-items: center; gap: 6px; overflow-wrap: anywhere; min-width: 0; }
+.export-task-heading strong svg { flex-shrink: 0; }
+.export-task-heading > span { color: var(--muted); }
+.export-task-heading > button { margin-left: auto; }
+.export-task-log { height: 200px; overflow: auto; background: var(--panel-soft); border: 1px solid var(--border); border-radius: 4px; padding: 10px; white-space: pre-wrap; overflow-wrap: anywhere; font-family: Consolas, monospace; font-size: 12px; line-height: 1.5; }
+.export-task-log [data-source="stderr"] { color: var(--danger, #b42318); }
+.export-task-log [data-source="system"] { color: var(--muted); }
+.export-result-path, .export-poll-error { overflow-wrap: anywhere; font-size: 12px; }
+.export-poll-error { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+@media (max-width: 640px) { .export-profile-editor .settings-grid { grid-template-columns: minmax(0, 1fr); } }
 .button { display: inline-flex; align-items: center; justify-content: center; gap: 7px; min-height: 37px; padding: 0 14px; border: 1px solid transparent; border-radius: 9px; cursor: pointer; font-size: 13px; font-weight: 600; }
 .button.primary { color: var(--accent-contrast); background: var(--accent); box-shadow: 0 6px 15px rgb(62 106 225 / 20%); }
 .button.primary:hover { background: var(--accent-hover); }
@@ -266,8 +302,8 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px s
 .dialog-form { display: grid; gap: 17px; }
 .field { display: grid; gap: 7px; color: var(--text); font-size: 12px; }
 .field > span { color: var(--muted); font-size: 11px; font-weight: 600; }
-.field input, .field select, .config-row select { width: 100%; height: 38px; padding: 0 10px; border: 1px solid var(--control-border); border-radius: 8px; outline: 0; color: var(--text); background: var(--control-bg); font-size: 12px; }
-.field input:focus, .field select:focus { border-color: var(--accent); }
+.field input, .field select, .config-row select, .export-arguments input { width: 100%; height: 38px; padding: 0 10px; border: 1px solid var(--control-border); border-radius: 8px; outline: 0; color: var(--text); background: var(--control-bg); font-size: 12px; }
+.field input:focus, .field select:focus, .export-arguments input:focus { border-color: var(--accent); }
 .path-row, .inline-action { display: flex; gap: 7px; }
 .path-row input, .inline-action input { min-width: 0; flex: 1; }
 .path-row button, .inline-action button, .config-row button { flex: none; padding: 0 12px; border: 1px solid var(--control-border); border-radius: 8px; background: var(--control-bg); cursor: pointer; font-size: 11px; }

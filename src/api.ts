@@ -15,11 +15,20 @@ import type {
   VersionPart,
   McdkStatus,
   McdkSession,
+  CustomExportProfile,
+  CustomExportTask,
 } from "./types";
 
 export const desktop = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
 export const api = {
+  customExportProfiles: () => invoke<CustomExportProfile[]>("list_custom_export_profiles"),
+  saveCustomExportProfiles: (profiles: CustomExportProfile[]) => invoke<CustomExportProfile[]>("save_custom_export_profiles", { profiles }),
+  startCustomExport: (request: { component_id: string; profile_id: string; destination: string; conflict_policy: ExportConflictPolicy }) => invoke<CustomExportTask>("start_custom_export", { request }),
+  customExportTask: (taskId: string, cursor = 0) => invoke<CustomExportTask>("get_custom_export_task", { taskId, cursor }),
+  customExportTasks: () => invoke<CustomExportTask[]>("list_custom_export_tasks"),
+  cancelCustomExport: (taskId: string) => invoke<CustomExportTask>("cancel_custom_export", { taskId }),
+  resolveCustomExportConflict: (taskId: string, conflictPolicy: Exclude<ExportConflictPolicy, "error">) => invoke<CustomExportTask>("resolve_custom_export_conflict", { taskId, conflictPolicy }),
   mcdkStatus: () => invoke<McdkStatus>("mcdk_status"),
   onMcdkStatus: (handler: (status: McdkStatus) => void) => listen<McdkStatus>("mcdk-status-changed", (event) => handler(event.payload)),
   setMcdkAutoUpdate: (enabled: boolean) => invoke<McdkStatus>("set_mcdk_auto_update", { enabled }),

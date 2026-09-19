@@ -7,6 +7,8 @@ const mocks = vi.hoisted(() => ({
   setSettings: vi.fn(),
   delete: vi.fn(),
   export: vi.fn(),
+  customExportProfiles: vi.fn(),
+  customExportTasks: vi.fn(),
   import: vi.fn(),
   metadata: vi.fn(),
   regenerateUuids: vi.fn(),
@@ -40,6 +42,8 @@ vi.mock("./api", () => ({
     setSettings: mocks.setSettings,
     delete: mocks.delete,
     export: mocks.export,
+    customExportProfiles: mocks.customExportProfiles,
+    customExportTasks: mocks.customExportTasks,
     import: mocks.import,
     metadata: mocks.metadata,
     regenerateUuids: mocks.regenerateUuids,
@@ -87,6 +91,8 @@ describe("component workspace filters", () => {
     mocks.setSettings.mockReset();
     mocks.delete.mockReset().mockResolvedValue({ actual_path: "", modified_files: [], warnings: [] });
     mocks.export.mockReset();
+    mocks.customExportProfiles.mockReset().mockResolvedValue([]);
+    mocks.customExportTasks.mockReset().mockResolvedValue([]);
     mocks.import.mockReset();
     mocks.metadata.mockReset();
     mocks.regenerateUuids.mockReset();

@@ -9,12 +9,15 @@ use mcdh_core::{
     SourceRecord, VsCodeStatus,
 };
 use serde::{Deserialize, Serialize};
-use tauri::State;
+use tauri::{Manager, State};
+use mcdh_core::custom_export::CustomExportService;
 
 mod mcdk_manager;
 mod mcdk_release;
 mod mcdk_launch;
 mod app_update;
+mod custom_export;
+use custom_export::*;
 use app_update::{install_app_update, app_update_error};
 use mcdk_launch::launch_component_game;
 use mcdk_manager::{mcdk_status, set_mcdk_auto_update, check_mcdk_update, install_mcdk_update};
@@ -27,12 +30,15 @@ type CommandResult<T> = std::result::Result<T, ErrorPayload>;
 
 struct AppState {
     index: LocalIndex,
+    exports: CustomExportService,
 }
 
 impl AppState {
     fn open() -> mcdh_core::Result<Self> {
+        let index = LocalIndex::open_default()?;
         Ok(Self {
-            index: LocalIndex::open_default()?,
+            exports: CustomExportService::new(index.clone())?,
+            index,
         })
     }
 
@@ -387,6 +393,13 @@ pub fn run() {
             copy_component,
             move_component,
             export_component,
+            list_custom_export_profiles,
+            save_custom_export_profiles,
+            start_custom_export,
+            get_custom_export_task,
+            list_custom_export_tasks,
+            cancel_custom_export,
+            resolve_custom_export_conflict,
             delete_component,
             set_component_tags,
             set_component_metadata,
@@ -398,8 +411,13 @@ pub fn run() {
             vscode_status,
             set_vscode_path,
         ])
-        .run(tauri::generate_context!())
-        .expect("failed to run MCDH");
+        .build(tauri::generate_context!())
+        .expect("failed to build MCDH")
+        .run(|app, event| {
+            if matches!(event, tauri::RunEvent::Exit) {
+                app.state::<AppState>().exports.shutdown();
+            }
+        });
 }
 
 #[cfg(test)]

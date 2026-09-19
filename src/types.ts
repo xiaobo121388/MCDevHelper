@@ -6,6 +6,38 @@ export type ContentMode = "clean" | "full";
 export type ExportConflictPolicy = "rename" | "overwrite" | "error";
 export type ThemePreference = "light" | "dark" | "system";
 
+export interface CustomExportProfile {
+  id: string;
+  name: string;
+  enabled: boolean;
+  executable: string;
+  arguments: string[];
+  input_mode: "snapshot" | "source";
+  working_directory: string | null;
+  component_kinds: ComponentKind[];
+  timeout_seconds: number;
+  log_encoding: "utf8" | "gb18030";
+  allow_mcp: boolean;
+}
+
+export type CustomExportStatus = "preparing" | "running" | "validating" | "awaiting_conflict" | "publishing" | "succeeded" | "failed" | "cancelled";
+export interface ExportLog { sequence: number; source: string; text: string }
+export interface CustomExportTask {
+  id: string;
+  component_id: string;
+  profile_id: string;
+  profile_name: string;
+  destination: string;
+  status: CustomExportStatus;
+  cancel_requested: boolean;
+  conflict_path: string | null;
+  result: OperationResult | null;
+  error: { code: string; message: string; exit_code: number | null } | null;
+  logs: ExportLog[];
+  next_cursor: number;
+  logs_truncated: boolean;
+}
+
 export interface AppSettings {
   developer_nickname: string;
   developer_account: string;

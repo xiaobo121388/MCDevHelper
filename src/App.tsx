@@ -41,6 +41,8 @@ import { api, desktop, errorMessage } from "./api";
 import { releaseNotesFor } from "./releaseNotes";
 import { useAppUpdate, UpdateButton, UpdateProgress, type AppUpdater } from "./AppUpdate";
 import { useMcdk, LaunchGameButton, McdkSettings, type McdkController } from "./Mcdk";
+import { CustomExportSettings } from "./CustomExportSettings";
+import { useCustomExport, CustomExportButtons, CustomExportTaskPanel } from "./CustomExport";
 import type {
   AppSettings,
   ComponentKind,
@@ -488,7 +490,7 @@ function ImportDialog({ onClose, onDone }: DialogProps) {
   return <Modal title="导入组件" subtitle="支持文件夹、ZIP、mcpack 和 mcaddon" onClose={onClose}><form onSubmit={submit} className="dialog-form"><Field label="导入来源"><div className="path-row"><input required value={source} onChange={(event) => setSource(event.target.value)} placeholder="选择组件包或文件夹" /><button type="button" onClick={() => void chooseSource(false)}>选文件</button><button type="button" onClick={() => void chooseSource(true)}>选文件夹</button></div></Field><PathField label="存放位置" value={destination} onChange={setDestination} /><Field label="遇到重复 UUID"><select value={policy} onChange={(event) => setPolicy(event.target.value as IdentityPolicy)}><option value="error">停止并提示</option><option value="regenerate">生成全新 UUID</option><option value="preserve">保留原 UUID</option></select></Field><CheckRow checked={full} onChange={setFull} label="完整恢复" hint="保留点号项、MCS 配置和开发辅助文件；关闭时按游戏内容清洁导入" /><CheckRow checked={mcs} onChange={setMcs} label="导入为 MCS 组件" hint="将生成新的 MCS UID 与兼容配置" />{error && <FormError>{error}</FormError>}<DialogActions busy={busy} onClose={onClose} submit="开始导入" /></form></Modal>;
 }
 
-type SettingsSection = "paths" | "identity" | "appearance" | "tools" | "about";
+type SettingsSection = "paths" | "identity" | "appearance" | "tools" | "exports" | "about";
 
 const FEEDBACK_URL = "https://github.com/xiaobo121388/MCDevHelper/issues/new";
 
@@ -605,6 +607,7 @@ function SettingsDialog({ settings: initialSettings, mcdk, updater, onSettings, 
     { id: "identity", label: "MCS 身份", icon: <UserRound size={17} /> },
     { id: "appearance", label: "外观", icon: <Palette size={17} /> },
     { id: "tools", label: "开发工具", icon: <Code2 size={17} /> },
+    { id: "exports", label: "自定义导出", icon: <Archive size={17} /> },
     { id: "about", label: "关于", icon: <Info size={17} /> },
   ];
   return (
@@ -625,6 +628,7 @@ function SettingsDialog({ settings: initialSettings, mcdk, updater, onSettings, 
 
         <div className="settings-panel">
           <div className="settings-panel-body">
+            {section === "exports" && <CustomExportSettings />}
             {section === "paths" && <section>
               <div className="section-heading"><div><h3>路径管理</h3><p>首次无记录时自动发现 MCS；之后只使用这里保存的目录。</p></div><button className="button secondary" disabled={!!busy} onClick={() => void rescanMcs()}><ScanSearch size={16} />重新扫描 MCS</button></div>
               <div className="source-actions"><button className="button secondary" disabled={!!busy} onClick={() => void add("library")}><Folder size={17} />添加组件库</button><button className="button secondary" disabled={!!busy} onClick={() => void add("single")}><Box size={17} />添加单个组件</button><button className="button secondary" disabled={!!busy} onClick={() => void add("mcs")}><Sparkles size={17} />添加 MCS 路径</button></div>
@@ -665,7 +669,7 @@ function SettingsDialog({ settings: initialSettings, mcdk, updater, onSettings, 
               <div className="settings-tool"><div><strong>反馈问题</strong><p>在 GitHub 新建 Issue；提交内容前由你自行确认。</p></div><div className="settings-tool-actions"><button className="button secondary" onClick={() => void openGitHub(FEEDBACK_URL)}><MessageSquare size={16} />打开反馈页面<ExternalLink size={14} /></button></div></div>
             </section>}
           </div>
-          <div className="settings-footer"><button className="button secondary" onClick={close}>关闭</button><button className="button primary" disabled={!!busy} onClick={() => void save()}><Save size={16} />{busy === "save" ? "保存中…" : "保存设置"}</button></div>
+          <div className="settings-footer"><button className="button secondary" onClick={close}>关闭</button>{section !== "exports" && <button className="button primary" disabled={!!busy} onClick={() => void save()}><Save size={16} />{busy === "save" ? "保存中…" : "保存设置"}</button>}</div>
         </div>
       </div>
     </Modal>
@@ -682,7 +686,12 @@ function ComponentDialog({ component, running = false, onClose, onDone, onNotice
   const [mcs, setMcs] = useState(false);
   const [identity, setIdentity] = useState<"preserve" | "regenerate">("regenerate");
   const [part, setPart] = useState<VersionPart>("patch");
-  const [busy, setBusy] = useState("");
+  const [operationBusy, setBusy] = useState("");
+  const customExport = useCustomExport(component, exportDestination, (operation, selectedDestination) => {
+    writeLastExportDestination(selectedDestination);
+    onDone("自定义导出已完成", operation, false);
+  }, onNotice);
+  const busy = operationBusy || (customExport.busy ? "custom-export" : "");
   const run = async (label: string, action: () => Promise<OperationResult>, message: string, refreshAfter = true) => { setBusy(label); try { onDone(message, await action(), refreshAfter); } catch (error) { onNotice(errorMessage(error)); } finally { setBusy(""); } };
   const needDestination = () => { if (destination) return true; onNotice("请先选择目标目录。" ); return false; };
   const runExport = async (contentMode: ContentMode, conflictPolicy: ExportConflictPolicy = "error", selectedDestination = exportDestination) => {
@@ -726,7 +735,8 @@ function ComponentDialog({ component, running = false, onClose, onDone, onNotice
           <h3 className="export-heading">导出</h3>
           <PathField label="导出目录" value={exportDestination} onChange={(value) => { setExportDestination(value); setExportConflict(null); }} />
           <p className="export-hint">成功导出后会记住此目录，下次自动填写。</p>
-          <div className="transfer-buttons"><button className="button secondary" disabled={!!busy} onClick={() => void runExport("clean")}><Archive size={16} />{busy === "export-clean" ? "导出中…" : "导出游戏 ZIP"}</button><button className="button secondary" disabled={!!busy} title="保留点号项、MCS 配置和开发辅助文件" onClick={() => void runExport("full")}><Archive size={16} />{busy === "export-full" ? "导出中…" : "导出完整 ZIP"}</button></div>
+          <div className="transfer-buttons"><button className="button secondary" disabled={!!busy} onClick={() => void runExport("clean")}><Archive size={16} />{busy === "export-clean" ? "导出中…" : "导出游戏 ZIP"}</button><button className="button secondary" disabled={!!busy} title="保留点号项、MCS 配置和开发辅助文件" onClick={() => void runExport("full")}><Archive size={16} />{busy === "export-full" ? "导出中…" : "导出完整 ZIP"}</button><CustomExportButtons controller={customExport} disabled={!!busy} gameRunning={running} /></div>
+          <CustomExportTaskPanel controller={customExport} />
           {exportConflict && <div className="export-conflict" role="alert"><div><strong>导出文件已存在</strong><p title={exportConflict.path}>{exportConflict.path}</p></div><div className="export-conflict-actions"><button className="button secondary" disabled={!!busy} onClick={() => setExportConflict(null)}>取消</button><button className="button secondary" disabled={!!busy} onClick={() => void runExport(exportConflict.contentMode, "rename", exportConflict.destination)}>添加后缀</button><button className="button danger" disabled={!!busy} onClick={() => void runExport(exportConflict.contentMode, "overwrite", exportConflict.destination)}>覆盖原文件</button></div></div>}
         </section>
       </div>
