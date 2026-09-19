@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
@@ -18,6 +18,12 @@ const mocks = vi.hoisted(() => ({
   version: vi.fn(),
   checkForUpdates: vi.fn(),
   openUrl: vi.fn(),
+  mcdkStatus: vi.fn(),
+  onMcdkStatus: vi.fn(),
+  launchGame: vi.fn(),
+  setMcdkAutoUpdate: vi.fn(),
+  checkMcdkUpdate: vi.fn(),
+  installMcdkUpdate: vi.fn(),
 }));
 
 vi.mock("@tauri-apps/plugin-opener", () => ({
@@ -42,11 +48,23 @@ vi.mock("./api", () => ({
     vscodeStatus: mocks.vscodeStatus,
     version: mocks.version,
     checkForUpdates: mocks.checkForUpdates,
+    mcdkStatus: mocks.mcdkStatus,
+    onMcdkStatus: mocks.onMcdkStatus,
+    launchGame: mocks.launchGame,
+    setMcdkAutoUpdate: mocks.setMcdkAutoUpdate,
+    checkMcdkUpdate: mocks.checkMcdkUpdate,
+    installMcdkUpdate: mocks.installMcdkUpdate,
   },
   errorMessage: (error: unknown) => String(error),
 }));
 
 import { App } from "./App";
+import type { McdkStatus } from "./types";
+
+const mcdkReady: McdkStatus = {
+  available: true, current_version: "1.6.1", auto_update: true, phase: "idle", latest_version: null,
+  last_checked_at: null, error: null, downloaded_bytes: 0, download_size: null, session: null, last_exit: null,
+};
 
 describe("component workspace filters", () => {
   afterEach(cleanup);
@@ -81,6 +99,77 @@ describe("component workspace filters", () => {
       no_release: false,
     });
     mocks.openUrl.mockReset().mockResolvedValue(undefined);
+    mocks.mcdkStatus.mockReset().mockResolvedValue(mcdkReady);
+    mocks.onMcdkStatus.mockReset().mockResolvedValue(() => undefined);
+    mocks.launchGame.mockReset();
+    mocks.setMcdkAutoUpdate.mockReset().mockResolvedValue({ ...mcdkReady, auto_update: false });
+    mocks.checkMcdkUpdate.mockReset().mockResolvedValue(mcdkReady);
+    mocks.installMcdkUpdate.mockReset().mockResolvedValue(mcdkReady);
+  });
+
+  it("places launch before open directory and prevents repeated launch requests", async () => {
+    mocks.refresh.mockResolvedValue({ components: [{ id: "game", name: "测试模组", kind: "addon", path: "D:\\作品", origin: { kind: "single" }, manifests: [], tags: [], size_bytes: 1 }], sources: [], warnings: [] });
+    let complete!: (value: unknown) => void;
+    mocks.launchGame.mockReturnValue(new Promise((resolve) => { complete = resolve; }));
+    render(<App />);
+    const launch = await screen.findByRole("button", { name: "启动游戏 测试模组" });
+    await waitFor(() => expect(launch).toBeEnabled());
+    expect(launch.nextElementSibling).toHaveAttribute("title", "打开目录");
+    fireEvent.click(launch);
+    fireEvent.click(launch);
+    expect(mocks.launchGame).toHaveBeenCalledTimes(1);
+    expect(mocks.launchGame).toHaveBeenCalledWith("game");
+    expect(launch).toBeDisabled();
+    complete({ component_id: "game", pid: 100, version: "1.6.1" });
+    expect(await screen.findByText("已打开 MCDK 启动器")).toBeInTheDocument();
+  });
+
+  it("persists the MCDK switch independently and supports explicit manual installation", async () => {
+    mocks.refresh.mockResolvedValue({ components: [], sources: [], warnings: [] });
+    mocks.checkMcdkUpdate.mockResolvedValue({ ...mcdkReady, auto_update: false, phase: "available", latest_version: "1.7.0" });
+    mocks.installMcdkUpdate.mockResolvedValue({ ...mcdkReady, auto_update: false, phase: "updated", current_version: "1.7.0" });
+    render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: /设置/ }));
+    fireEvent.click(within(screen.getByRole("navigation", { name: "设置分类" })).getByRole("button", { name: "开发工具" }));
+    const toggle = await screen.findByRole("switch", { name: "MCDK 自动更新" });
+    await waitFor(() => expect(toggle).toBeEnabled());
+    fireEvent.click(toggle);
+    await waitFor(() => expect(toggle).not.toBeChecked());
+    expect(mocks.setMcdkAutoUpdate).toHaveBeenCalledWith(false);
+    expect(mocks.setSettings).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "检查更新" }));
+    fireEvent.click(await screen.findByRole("button", { name: "立即更新" }));
+    await waitFor(() => expect(mocks.installMcdkUpdate).toHaveBeenCalledTimes(1));
+    expect(await screen.findByText("v1.7.0")).toBeInTheDocument();
+  });
+
+  it("restores running sessions and disables destructive component controls", async () => {
+    mocks.refresh.mockResolvedValue({ components: [{ id: "game", name: "运行模组", kind: "addon", path: "D:\\作品", origin: { kind: "single" }, manifests: [], tags: [], size_bytes: 1 }], sources: [], warnings: [] });
+    mocks.mcdkStatus.mockResolvedValue({ ...mcdkReady, session: { component_id: "game", pid: 100, version: "1.6.1" } });
+    render(<App />);
+    const launch = await screen.findByRole("button", { name: "启动游戏 运行模组" });
+    await waitFor(() => expect(launch).toHaveAttribute("title", "MCDK 会话运行中"));
+    expect(launch).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "配置 运行模组" }));
+    for (const name of ["删除", "移动", "随机重生", "提升版本"]) expect(screen.getByRole("button", { name })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "复制" })).toBeEnabled();
+  });
+
+  it("reports launcher failures and cleans up the status subscription", async () => {
+    mocks.refresh.mockResolvedValue({ components: [{ id: "game", name: "失败测试", kind: "addon", path: "D:\\作品", origin: { kind: "single" }, manifests: [], tags: [], size_bytes: 1 }], sources: [], warnings: [] });
+    const stop = vi.fn();
+    let receive!: (status: McdkStatus) => void;
+    mocks.onMcdkStatus.mockImplementation(async (callback) => { receive = callback; return stop; });
+    mocks.launchGame.mockRejectedValue("游戏启动路径不可用");
+    const view = render(<App />);
+    const button = await screen.findByRole("button", { name: "启动游戏 失败测试" });
+    await waitFor(() => expect(button).toBeEnabled());
+    fireEvent.click(button);
+    expect(await screen.findByText("游戏启动路径不可用")).toBeInTheDocument();
+    act(() => receive({ ...mcdkReady, last_exit: { id: "100:created", component_id: "game", exit_code: 7 } }));
+    expect(await screen.findByText(/MCDK 启动器异常退出（代码 7）/)).toBeInTheDocument();
+    view.unmount();
+    expect(stop).toHaveBeenCalledTimes(1);
   });
 
   it("filters discovered cards by category, search text, and tag", async () => {

@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import type {
   AppSettings,
   ComponentKind,
@@ -11,11 +12,19 @@ import type {
   SourceRecord,
   UpdateCheckResult,
   VersionPart,
+  McdkStatus,
+  McdkSession,
 } from "./types";
 
 export const desktop = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
 export const api = {
+  mcdkStatus: () => invoke<McdkStatus>("mcdk_status"),
+  onMcdkStatus: (handler: (status: McdkStatus) => void) => listen<McdkStatus>("mcdk-status-changed", (event) => handler(event.payload)),
+  setMcdkAutoUpdate: (enabled: boolean) => invoke<McdkStatus>("set_mcdk_auto_update", { enabled }),
+  checkMcdkUpdate: () => invoke<McdkStatus>("check_mcdk_update"),
+  installMcdkUpdate: () => invoke<McdkStatus>("install_mcdk_update"),
+  launchGame: (componentId: string) => invoke<McdkSession>("launch_component_game", { componentId }),
   version: () => invoke<string>("app_version"),
   checkForUpdates: () => invoke<UpdateCheckResult>("check_for_updates"),
   refresh: () => invoke<DiscoveryResult>("refresh_components"),

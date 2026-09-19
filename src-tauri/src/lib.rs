@@ -14,6 +14,8 @@ use tauri::State;
 
 mod mcdk_manager;
 mod mcdk_release;
+mod mcdk_launch;
+use mcdk_launch::launch_component_game;
 use mcdk_manager::{mcdk_status, set_mcdk_auto_update, check_mcdk_update, install_mcdk_update};
 
 const LATEST_RELEASE_API: &str =
@@ -382,6 +384,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             app_version,
             mcdk_status,
+            launch_component_game,
             set_mcdk_auto_update,
             check_mcdk_update,
             install_mcdk_update,

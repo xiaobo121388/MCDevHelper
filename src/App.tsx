@@ -39,6 +39,7 @@ import {
 import { FormEvent, ReactNode, useCallback, useEffect, useMemo, useState } from "react";
 import { api, desktop, errorMessage } from "./api";
 import { releaseNotesFor } from "./releaseNotes";
+import { useMcdk, LaunchGameButton, McdkSettings, type McdkController } from "./Mcdk";
 import type {
   AppSettings,
   ComponentKind,
@@ -83,6 +84,7 @@ export function App() {
   const [modal, setModal] = useState<"create" | "import" | "settings" | "warnings" | null>(null);
   const [selected, setSelected] = useState<ComponentSummary | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const mcdk = useMcdk(setNotice);
   const [ignoredWarningKeys, setIgnoredWarningKeys] = useState<Set<string>>(readIgnoredWarningKeys);
   const [startupDialogs, setStartupDialogs] = useState<StartupDialog[]>([]);
 
@@ -233,7 +235,7 @@ export function App() {
           <NavItem active={kind === "favorites"} icon={<Star />} label="收藏" count={result.components.filter((component) => component.favorite).length} onClick={() => setKind("favorites")} />
         </nav>
         <div className="sidebar-spacer" />
-        <button className="sidebar-action" onClick={() => setModal("settings")}>
+        <button className="sidebar-action" aria-label="设置" title="设置" onClick={() => setModal("settings")}>
           <Settings size={18} /><span>设置</span><ChevronRight size={15} />
         </button>
         <div className="offline-badge"><span /> 本地优先 · 启动检查更新</div>
@@ -264,7 +266,7 @@ export function App() {
         {visibleWarnings.length > 0 && <button className="warning-line" onClick={() => setModal("warnings")}><TriangleAlert size={17} /><span>有 {visibleWarnings.length} 个扫描问题，点击查看具体原因并处理。</span><ChevronRight size={16} /></button>}
 
         <section className="component-grid" aria-live="polite">
-          {components.map((component) => <ComponentCard key={component.id} component={component} onOpen={() => setSelected(component)} onUpdate={(updated, message) => {
+          {components.map((component) => <ComponentCard key={component.id} component={component} mcdk={mcdk} onOpen={() => setSelected(component)} onUpdate={(updated, message) => {
             setResult((current) => ({
               ...current,
               components: current.components.map((item) => item.id === updated.id ? updated : item),
@@ -284,9 +286,9 @@ export function App() {
 
       {modal === "create" && <CreateDialog sources={result.sources} settings={settings} onConfigurePaths={() => setModal("settings")} onClose={() => setModal(null)} onDone={(message) => { setModal(null); void done(message); }} />}
       {modal === "import" && <ImportDialog onClose={() => setModal(null)} onDone={(message) => { setModal(null); void done(message); }} />}
-      {modal === "settings" && <SettingsDialog settings={settings} onSettings={setSettings} onClose={() => setModal(null)} onChanged={() => void refresh()} onNotice={setNotice} />}
+      {modal === "settings" && <SettingsDialog mcdk={mcdk} settings={settings} onSettings={setSettings} onClose={() => setModal(null)} onChanged={() => void refresh()} onNotice={setNotice} />}
       {modal === "warnings" && <WarningsDialog warnings={result.warnings} sources={result.sources} ignoredKeys={ignoredWarningKeys} onIgnore={setWarningIgnored} onRemoveSource={removeWarningSource} onClose={() => setModal(null)} onNotice={setNotice} />}
-      {selected && <ComponentDialog component={selected} onClose={() => setSelected(null)} onDone={(message, operation, refreshAfter) => {
+      {selected && <ComponentDialog component={selected} running={mcdk.status?.session?.component_id === selected.id} onClose={() => setSelected(null)} onDone={(message, operation, refreshAfter) => {
         setSelected(null);
         const updated = operation.component;
         if (!refreshAfter) {
@@ -393,7 +395,7 @@ function WarningsDialog({ warnings, sources, ignoredKeys, onIgnore, onRemoveSour
   );
 }
 
-function ComponentCard({ component, onOpen, onUpdate, onNotice }: { component: ComponentSummary; onOpen: () => void; onUpdate: (component: ComponentSummary, message: string) => void; onNotice: (text: string) => void }) {
+function ComponentCard({ component, mcdk, onOpen, onUpdate, onNotice }: { component: ComponentSummary; mcdk: McdkController; onOpen: () => void; onUpdate: (component: ComponentSummary, message: string) => void; onNotice: (text: string) => void }) {
   const [favoriteBusy, setFavoriteBusy] = useState(false);
   const icon = component.kind === "addon" ? <Box /> : component.kind === "material" ? <Palette /> : <Map />;
   const openDirectory = async () => {
@@ -430,7 +432,7 @@ function ComponentCard({ component, onOpen, onUpdate, onNotice }: { component: C
       <div className="tag-row">{component.tags.length ? component.tags.map((value) => <span key={value}><Hash size={11} />{value}</span>) : <em>暂无标签</em>}</div>
       <footer>
         <span>{formatDate(component.modified_at)} · {formatBytes(component.size_bytes)}</span>
-        <div><button title="打开目录" onClick={() => void openDirectory()}><FolderOpen size={16} /></button><button title="用 VS Code 打开" onClick={() => void openCode()}><Code2 size={16} /></button><button title="配置组件" onClick={onOpen}><Settings2 size={16} /></button></div>
+        <div><LaunchGameButton componentId={component.id} name={component.name} mcdk={mcdk} /><button title="打开目录" onClick={() => void openDirectory()}><FolderOpen size={16} /></button><button title="用 VS Code 打开" onClick={() => void openCode()}><Code2 size={16} /></button><button title="配置组件" onClick={onOpen}><Settings2 size={16} /></button></div>
       </footer>
     </article>
   );
@@ -499,7 +501,7 @@ type SettingsSection = "paths" | "identity" | "appearance" | "tools" | "about";
 
 const FEEDBACK_URL = "https://github.com/xiaobo121388/MCDevHelper/issues/new";
 
-function SettingsDialog({ settings: initialSettings, onSettings, onClose, onChanged, onNotice }: { settings: AppSettings; onSettings: (settings: AppSettings) => void; onClose: () => void; onChanged: () => void; onNotice: (message: string) => void }) {
+function SettingsDialog({ settings: initialSettings, mcdk, onSettings, onClose, onChanged, onNotice }: { settings: AppSettings; mcdk: McdkController; onSettings: (settings: AppSettings) => void; onClose: () => void; onChanged: () => void; onNotice: (message: string) => void }) {
   const [sources, setSources] = useState<SourceRecord[]>([]);
   const [settings, setSettings] = useState(initialSettings);
   const [vscode, setVscode] = useState<{ available: boolean; path?: string; custom: boolean } | null>(null);
@@ -651,6 +653,7 @@ function SettingsDialog({ settings: initialSettings, onSettings, onClose, onChan
 
             {section === "tools" && <section>
               <div className="section-heading"><div><h3>开发工具</h3><p>配置编辑器，以及供 AI 使用的本地 MCP 服务。</p></div><Code2 size={19} /></div>
+              <McdkSettings mcdk={mcdk} />
               <div className="settings-tool"><div><strong>Visual Studio Code</strong><p>{vscode?.available ? vscode.path : "未检测到 Code.exe，可手动指定。"}</p></div><div className="settings-tool-actions"><button className="button secondary" onClick={() => void chooseVsCode()}>选择程序</button>{vscode?.custom && <button className="button secondary" onClick={() => void clearVsCode()}>恢复自动检测</button>}</div></div>
               <div className="settings-tool"><div><strong>AI / MCP</strong><p>独立 stdio 服务，只读写本机组件，不监听网络端口。</p></div><div className="settings-tool-actions"><button className="button secondary" onClick={() => void copyMcpConfig()}>复制客户端配置</button></div></div>
             </section>}
@@ -678,7 +681,7 @@ function SettingsDialog({ settings: initialSettings, onSettings, onClose, onChan
   );
 }
 
-function ComponentDialog({ component, onClose, onDone, onNotice }: { component: ComponentSummary; onClose: () => void; onDone: (message: string, operation: OperationResult, refreshAfter: boolean) => void; onNotice: (message: string) => void }) {
+function ComponentDialog({ component, running = false, onClose, onDone, onNotice }: { component: ComponentSummary; running?: boolean; onClose: () => void; onDone: (message: string, operation: OperationResult, refreshAfter: boolean) => void; onNotice: (message: string) => void }) {
   const [displayName, setDisplayName] = useState(component.name);
   const [tags, setTags] = useState(component.tags.join(", "));
   const [favorite, setFavorite] = useState(component.favorite);
@@ -720,15 +723,15 @@ function ComponentDialog({ component, onClose, onDone, onNotice }: { component: 
       <div className="component-dialog">
         <section>
           <h3>快捷配置</h3>
-          <div className="metadata-editor"><Field label="显示名称"><input required value={displayName} onChange={(event) => setDisplayName(event.target.value)} placeholder="组件显示名称" /></Field><Field label="标签（使用逗号分隔）"><input value={tags} onChange={(event) => setTags(event.target.value)} placeholder="开发, 测试" /></Field><CheckRow checked={favorite} onChange={setFavorite} label="收藏组件" hint="收藏后可从左侧收藏视图快速找到" /><div className="metadata-actions"><button className="button secondary" disabled={!!busy || !displayName.trim()} onClick={() => void run("metadata", () => api.metadata(component.id, displayName, tags.split(/[,，]/), favorite), "组件信息已保存", false)}><Save size={15} />{busy === "metadata" ? "保存中…" : "保存组件信息"}</button></div></div>
-          <div className="config-row"><div><strong>Manifest UUID</strong><p>重生 header、module，并同步内部依赖和地图清单；保留 JSONC 注释。</p></div><button disabled={!!busy} onClick={() => { if (window.confirm("确定重生所有已识别 manifest UUID？")) void run("uuid", () => api.regenerateUuids(component.id), "UUID 已重新生成", false); }}>随机重生</button></div>
-          <div className="config-row"><div><strong>包版本</strong><p>同步 header、module、依赖和地图包清单；保留 JSONC 注释。</p></div><select value={part} onChange={(event) => setPart(event.target.value as VersionPart)}><option value="patch">Patch</option><option value="minor">Minor</option><option value="major">Major</option></select><button disabled={!!busy} onClick={() => void run("version", () => api.bumpVersion(component.id, part), "版本已提升", false)}>提升版本</button></div>
+          <div className="metadata-editor"><Field label="显示名称"><input required value={displayName} onChange={(event) => setDisplayName(event.target.value)} placeholder="组件显示名称" /></Field><Field label="标签（使用逗号分隔）"><input value={tags} onChange={(event) => setTags(event.target.value)} placeholder="开发, 测试" /></Field><CheckRow checked={favorite} onChange={setFavorite} label="收藏组件" hint="收藏后可从左侧收藏视图快速找到" /><div className="metadata-actions"><button className="button secondary" disabled={!!busy || !displayName.trim() || (running && !!component.mcs)} onClick={() => void run("metadata", () => api.metadata(component.id, displayName, tags.split(/[,，]/), favorite), "组件信息已保存", false)}><Save size={15} />{busy === "metadata" ? "保存中…" : "保存组件信息"}</button></div></div>
+          <div className="config-row"><div><strong>Manifest UUID</strong><p>重生 header、module，并同步内部依赖和地图清单；保留 JSONC 注释。</p></div><button disabled={!!busy || running} onClick={() => { if (window.confirm("确定重生所有已识别 manifest UUID？")) void run("uuid", () => api.regenerateUuids(component.id), "UUID 已重新生成", false); }}>随机重生</button></div>
+          <div className="config-row"><div><strong>包版本</strong><p>同步 header、module、依赖和地图包清单；保留 JSONC 注释。</p></div><select value={part} onChange={(event) => setPart(event.target.value as VersionPart)}><option value="patch">Patch</option><option value="minor">Minor</option><option value="major">Major</option></select><button disabled={!!busy || running} onClick={() => void run("version", () => api.bumpVersion(component.id, part), "版本已提升", false)}>提升版本</button></div>
         </section>
         <section>
           <h3>复制、移动与删除</h3>
           <PathField label="目标目录" value={destination} onChange={setDestination} />
           <div className="transfer-options"><label>复制 UUID <select value={identity} onChange={(event) => setIdentity(event.target.value as "preserve" | "regenerate")}><option value="regenerate">生成新的</option><option value="preserve">保留</option></select></label><CheckRow checked={mcs} onChange={setMcs} label="目标为 MCS 分类目录" /></div>
-          <div className="transfer-buttons"><button className="button secondary" disabled={!!busy} onClick={() => needDestination() && void run("copy", () => api.copy({ component_id: component.id, destination, mcs_compatible: mcs, identity_policy: identity }), "组件已复制")}><Copy size={16} />复制</button><button className="button secondary" disabled={!!busy} onClick={() => needDestination() && window.confirm("移动完成后原目录将被移除，是否继续？") && void run("move", () => api.move({ component_id: component.id, destination, mcs_compatible: mcs }), "组件已移动")}><FolderCog size={16} />移动</button><button className="button danger" disabled={!!busy} onClick={remove}><Trash2 size={16} />删除</button></div>
+          <div className="transfer-buttons"><button className="button secondary" disabled={!!busy} onClick={() => needDestination() && void run("copy", () => api.copy({ component_id: component.id, destination, mcs_compatible: mcs, identity_policy: identity }), "组件已复制")}><Copy size={16} />复制</button><button className="button secondary" disabled={!!busy || running} onClick={() => needDestination() && window.confirm("移动完成后原目录将被移除，是否继续？") && void run("move", () => api.move({ component_id: component.id, destination, mcs_compatible: mcs }), "组件已移动")}><FolderCog size={16} />移动</button><button className="button danger" disabled={!!busy || running} onClick={remove}><Trash2 size={16} />删除</button></div>
           <h3 className="export-heading">导出</h3>
           <PathField label="导出目录" value={exportDestination} onChange={(value) => { setExportDestination(value); setExportConflict(null); }} />
           <p className="export-hint">成功导出后会记住此目录，下次自动填写。</p>

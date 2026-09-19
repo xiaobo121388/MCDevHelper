@@ -26,5 +26,5 @@ thiserror = "2"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 uuid = { version = "1", features = ["serde", "v4", "v5"] }
 walkdir = "2"
-windows-sys = { version = "0.61", features = ["Win32_Storage_FileSystem"] }
+windows-sys = { version = "0.61", features = ["Win32_Storage_FileSystem", "Win32_Foundation", "Win32_System_Threading", "Win32_Security"] }
 zip = { version = "8.2.0", default-features = false, features = ["deflate-flate2-zlib-rs"] }

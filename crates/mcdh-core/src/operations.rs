@@ -158,6 +158,7 @@ impl ComponentService {
     pub fn move_component(&self, request: &MoveComponentRequest) -> Result<OperationResult> {
         let _guard = self.index.try_lock_mutations()?;
         let component = self.find_component(&request.component_id)?;
+        crate::mcdk_session::assert_component_idle(&self.index, &component.path)?;
         let destination = existing_directory(&request.destination)?;
         ensure_not_inside(&component.path, &destination)?;
         let source_is_mcs = component.mcs.is_some();
@@ -400,6 +401,7 @@ impl ComponentService {
     pub fn delete_component(&self, component_id: &str) -> Result<OperationResult> {
         let _guard = self.index.try_lock_mutations()?;
         let component = self.find_component(component_id)?;
+        crate::mcdk_session::assert_component_idle(&self.index, &component.path)?;
         let path = canonicalize(&component.path)?;
         if !path.is_dir() || path.parent().is_none() || path.file_name().is_none() {
             return Err(CoreError::InvalidInput(
@@ -440,6 +442,7 @@ impl ComponentService {
         let mut modified_files = Vec::new();
         let work_config = component.path.join("work.mcscfg");
         if component.mcs.is_some() && work_config.is_file() {
+            crate::mcdk_session::assert_component_idle(&self.index, &component.path)?;
             let tags = metadata
                 .tags
                 .iter()
@@ -463,6 +466,7 @@ impl ComponentService {
     pub fn regenerate_manifest_uuids(&self, component_id: &str) -> Result<OperationResult> {
         let _guard = self.index.try_lock_mutations()?;
         let path = self.indexed_component_path(component_id)?;
+        crate::mcdk_session::assert_component_idle(&self.index, &path)?;
         let modified_files = regenerate_manifest_identifiers(&path)?;
         let updated = self.discovery.get_indexed(component_id)?;
         Ok(OperationResult {
@@ -479,6 +483,7 @@ impl ComponentService {
     ) -> Result<OperationResult> {
         let _guard = self.index.try_lock_mutations()?;
         let path = self.indexed_component_path(&request.component_id)?;
+        crate::mcdk_session::assert_component_idle(&self.index, &path)?;
         let modified_files = bump_manifest_versions(&path, request.part)?;
         let updated = self.discovery.get_indexed(&request.component_id)?;
         Ok(OperationResult {
@@ -1689,6 +1694,32 @@ mod tests {
         );
         assert!(mcs.actual_path.join("work.mcscfg").is_file());
         assert!(mcs.actual_path.join(METADATA_FILE_NAME).is_file());
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn running_component_rejects_move_delete_and_manifest_mutation() {
+        use crate::mcdk_session::{McdkSession, SessionState, SESSION_KEY, inspect_process};
+        let temp = tempfile::tempdir().unwrap();
+        let index = LocalIndex::open(temp.path().join("state/db")).unwrap();
+        index.add_source(SourceKind::Library, temp.path()).unwrap();
+        let service = ComponentService::new(index.clone()).with_mcs_work_roots(Vec::new());
+        let created = service.create_component(&CreateComponentRequest {
+            name: "running".into(), kind: ComponentKind::Addon, destination: temp.path().into(),
+            mcs_compatible: false, namespace: None,
+        }).unwrap();
+        let id = index.component_id(&created.actual_path).unwrap();
+        let component = service.get_component(&id).unwrap();
+        let process = inspect_process(std::process::id()).unwrap().unwrap();
+        crate::mcdk::McdkStore::new(index).write(SESSION_KEY, &SessionState { session: Some(McdkSession {
+            component_id: component.id.clone(), component_path: component.path.clone(), executable: process.executable,
+            version: "1.6.1".into(), pid: std::process::id(), created_at: process.created_at,
+        }), last_exit: None }).unwrap();
+        assert!(service.delete_component(&component.id).is_err());
+        assert!(service.move_component(&MoveComponentRequest { component_id: component.id.clone(), destination: temp.path().into(), mcs_compatible: false }).is_err());
+        assert!(service.regenerate_manifest_uuids(&component.id).is_err());
+        assert!(service.bump_manifest_version(&BumpManifestVersionRequest { component_id: component.id.clone(), part: VersionPart::Patch }).is_err());
+        assert!(component.path.is_dir());
     }
 
     #[test]

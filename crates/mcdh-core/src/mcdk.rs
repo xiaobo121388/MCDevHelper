@@ -154,6 +154,10 @@ impl McdkStore {
         self.read("mcdk.installed")
     }
 
+    pub fn launch_target(&self, component_id: &str) -> Result<crate::ComponentSummary> {
+        crate::DiscoveryService::new(self.index.clone()).get_indexed(component_id)
+    }
+
     pub fn executable(&self, version: &McdkVersion) -> Result<PathBuf> {
         version.validate()?;
         Ok(self

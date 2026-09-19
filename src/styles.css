@@ -229,6 +229,26 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px s
 .component-card footer div { display: flex; gap: 2px; }
 .component-card footer button { display: grid; width: 27px; height: 27px; place-items: center; border: 0; border-radius: 7px; color: var(--muted); background: transparent; cursor: pointer; }
 .component-card footer button:hover { color: var(--accent); background: var(--accent-soft); }
+.component-card footer > span { min-width: 0; overflow-wrap: anywhere; }
+.component-card footer > div { flex-shrink: 0; }
+.component-card footer button:disabled { cursor: default; opacity: .45; }
+.component-card footer button.launch-game.active { color: var(--accent); opacity: 1; background: var(--accent-soft); }
+.mcdk-spin { animation: mcdk-spin 1s linear infinite; }
+@keyframes mcdk-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .mcdk-spin { animation: none; } }
+.mcdk-settings { display: grid; gap: 10px; padding: 0 0 18px; border-bottom: 1px solid var(--border); }
+.mcdk-heading { display: flex; align-items: baseline; gap: 10px; }
+.mcdk-heading strong { font-size: 14px; }
+.mcdk-heading span { color: var(--muted); font-size: 12px; }
+.mcdk-status { font-size: 12px; }
+.mcdk-settings p { margin: 0; font-size: 11px; line-height: 1.5; overflow-wrap: anywhere; }
+.mcdk-checked { color: var(--muted); }
+.mcdk-settings .mcdk-error { color: var(--danger, #bd3434); }
+.mcdk-settings progress { width: 100%; height: 6px; accent-color: var(--accent); }
+.mcdk-actions { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.mcdk-actions > div { display: flex; gap: 7px; flex-wrap: wrap; }
+.mcdk-toggle { display: flex; align-items: center; gap: 8px; font-size: 12px; cursor: pointer; }
+.mcdk-toggle input { width: 16px; height: 16px; accent-color: var(--accent); margin: 0; }
 .empty-state { grid-column: 1 / -1; display: flex; min-height: 390px; align-items: center; justify-content: center; flex-direction: column; text-align: center; }
 .empty-state > span { display: grid; width: 62px; height: 62px; place-items: center; border-radius: 18px; color: var(--muted); background: var(--panel); box-shadow: var(--shadow); }
 .empty-state h2 { margin: 20px 0 7px; font-size: 17px; }

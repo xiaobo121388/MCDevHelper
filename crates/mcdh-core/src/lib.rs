@@ -7,6 +7,7 @@ mod index;
 mod json;
 mod metadata;
 pub mod mcdk;
+pub mod mcdk_session;
 mod model;
 mod operations;
 mod path_utils;

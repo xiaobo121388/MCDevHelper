@@ -81,3 +81,26 @@ export interface CoreError {
   path?: string;
   details?: unknown;
 }
+
+export interface McdkSession {
+  component_id: string;
+  component_path: string;
+  executable: string;
+  version: string;
+  pid: number;
+  created_at: string;
+}
+
+export interface McdkStatus {
+  current_version: string | null;
+  available: boolean;
+  auto_update: boolean;
+  phase: "idle" | "checking" | "downloading" | "available" | "updated" | "error";
+  latest_version: string | null;
+  last_checked_at: string | null;
+  error: string | null;
+  downloaded_bytes: number;
+  download_size: number | null;
+  session: McdkSession | null;
+  last_exit: { id: string; component_id: string; exit_code: number | null } | null;
+}

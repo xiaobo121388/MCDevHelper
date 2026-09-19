@@ -15,7 +15,7 @@ use crate::{CommandResult, mcdk_release::Release};
 const EVENT: &str = "mcdk-status-changed";
 const UPDATE_KEY: &str = "mcdk.update";
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum UpdatePhase {
     #[default]
@@ -36,8 +36,10 @@ struct UpdateState {
     downloaded_bytes: u64,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct McdkStatus {
+    pub session: Option<mcdh_core::mcdk_session::McdkSession>,
+    pub last_exit: Option<mcdh_core::mcdk_session::McdkExit>,
     pub current_version: Option<String>,
     pub available: bool,
     pub auto_update: bool,
@@ -51,6 +53,7 @@ pub struct McdkStatus {
 
 #[derive(Clone)]
 pub struct McdkManager {
+    pub index: LocalIndex,
     pub store: McdkStore,
     pub bundled_binary: PathBuf,
 }
@@ -58,7 +61,8 @@ pub struct McdkManager {
 impl McdkManager {
     pub fn new(index: LocalIndex, bundled_binary: PathBuf) -> Self {
         Self {
-            store: McdkStore::new(index),
+            store: McdkStore::new(index.clone()),
+            index,
             bundled_binary,
         }
     }
@@ -83,7 +87,11 @@ impl McdkManager {
             .current
             .filter(|v| self.store.executable(v).is_ok_and(|p| p.is_file()))
             .or_else(|| self.bundled_binary.is_file().then(McdkVersion::bundled));
+        let session: mcdh_core::mcdk_session::SessionState =
+            self.store.read(mcdh_core::mcdk_session::SESSION_KEY)?;
         Ok(McdkStatus {
+            session: session.session,
+            last_exit: session.last_exit,
             current_version: version.as_ref().map(|v| v.version.clone()),
             available: version.is_some(),
             auto_update: preferences.auto_update,
@@ -425,6 +433,7 @@ pub fn setup(app: &mut tauri::App) -> std::result::Result<(), Box<dyn std::error
     let manager = McdkManager::new(app.state::<crate::AppState>().index.clone(), binary);
     app.manage(manager.clone());
     let handle = app.handle().clone();
+    tauri::async_runtime::spawn(crate::mcdk_launch::monitor(handle.clone(), manager.clone()));
     tauri::async_runtime::spawn(async move {
         manager.initialize(&handle).await;
     });
