@@ -12,7 +12,7 @@ try {
     if ($LASTEXITCODE -ne 0) {
         throw "Could not read Cargo dependency metadata."
     }
-    $nodeLicenses = (pnpm licenses list --prod --json | ConvertFrom-Json)
+    $nodeLicenses = (pnpm.cmd licenses list --prod --json | ConvertFrom-Json)
     if ($LASTEXITCODE -ne 0) {
         throw "Could not read pnpm dependency licenses."
     }
@@ -59,7 +59,9 @@ foreach ($row in $nodeRows) {
 $lines.Add("")
 $lines.Add("## Notes")
 $lines.Add("")
-$lines.Add("- MCDH does not ship official Minecraft trademark assets and does not copy MCDevTool or BDSAddonManager source code.")
+$mcdk = Get-Content -Encoding UTF8 -Raw -LiteralPath (Join-Path $repoRoot "assets\mcdk\bundled.json") | ConvertFrom-Json
+$lines.Add("- MCDH bundles MCDevTool MCDK $($mcdk.version) (BSD-3-Clause) as an unmodified executable from https://github.com/GitHub-Zero123/MCDevTool. See the accompanying mcdk/licenses directory for the full upstream and third-party notices (cpp-mcp, NBT, BinaryStream, zlib, nlohmann/json, cpp-httplib and CLI11).")
+$lines.Add("- MCDH does not bundle the Minecraft game executable. It does not copy BDSAddonManager source code.")
 $lines.Add("- Windows WebView2 is supplied by the operating system and is not redistributed in the portable package.")
 $lines.Add("- Regenerate and review this manifest whenever a dependency lockfile changes.")
 

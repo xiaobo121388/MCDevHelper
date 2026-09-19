@@ -398,6 +398,7 @@ Generation command: `pnpm license-report`
 
 ## Notes
 
-- MCDH does not ship official Minecraft trademark assets and does not copy MCDevTool or BDSAddonManager source code.
+- MCDH bundles MCDevTool MCDK 1.6.1 (BSD-3-Clause) as an unmodified executable from https://github.com/GitHub-Zero123/MCDevTool. See the accompanying mcdk/licenses directory for the full upstream and third-party notices (cpp-mcp, NBT, BinaryStream, zlib, nlohmann/json, cpp-httplib and CLI11).
+- MCDH does not bundle the Minecraft game executable. It does not copy BDSAddonManager source code.
 - Windows WebView2 is supplied by the operating system and is not redistributed in the portable package.
 - Regenerate and review this manifest whenever a dependency lockfile changes.

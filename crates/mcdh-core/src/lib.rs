@@ -6,6 +6,7 @@ mod error;
 mod index;
 mod json;
 mod metadata;
+pub mod mcdk;
 mod model;
 mod operations;
 mod path_utils;

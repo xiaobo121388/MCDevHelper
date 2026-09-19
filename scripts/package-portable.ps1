@@ -1,6 +1,7 @@
 $ErrorActionPreference = "Stop"
 
 $repoRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "..")).Path
+& (Join-Path $PSScriptRoot "prepare-mcdk.ps1") -VerifyOnly
 $config = Get-Content -Encoding UTF8 -Raw -LiteralPath (Join-Path $repoRoot "src-tauri\tauri.conf.json") | ConvertFrom-Json
 $version = [string]$config.version
 $releaseRoot = Join-Path $repoRoot "release"
@@ -23,6 +24,7 @@ Copy-Item -LiteralPath (Join-Path $repoRoot "target\release\mcdh-mcp.exe") -Dest
 Copy-Item -LiteralPath (Join-Path $repoRoot "LICENSE") -Destination $stagingFull
 Copy-Item -LiteralPath (Join-Path $repoRoot "README.md") -Destination $stagingFull
 Copy-Item -LiteralPath (Join-Path $repoRoot "THIRD_PARTY_LICENSES.md") -Destination $stagingFull
+Copy-Item -LiteralPath (Join-Path $repoRoot "src-tauri\release-resources\mcdk") -Destination (Join-Path $stagingFull "mcdk") -Recurse
 
 $portableArchive = Join-Path $releaseRoot "MCDH-$version-windows-x64-portable.zip"
 if (Test-Path -LiteralPath $portableArchive) {

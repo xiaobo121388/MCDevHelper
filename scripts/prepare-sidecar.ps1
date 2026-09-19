@@ -1,6 +1,7 @@
 $ErrorActionPreference = "Stop"
 
 $repoRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "..")).Path
+& (Join-Path $PSScriptRoot "prepare-mcdk.ps1")
 $cargoPath = Join-Path $env:USERPROFILE ".cargo\bin\cargo.exe"
 $rustcPath = Join-Path $env:USERPROFILE ".cargo\bin\rustc.exe"
 if (-not (Test-Path -LiteralPath $cargoPath -PathType Leaf)) {
