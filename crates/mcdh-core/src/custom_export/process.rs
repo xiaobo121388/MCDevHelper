@@ -104,13 +104,16 @@ mod windows {
     }
 
     impl Attributes {
-        fn new(handles: &mut [*mut std::ffi::c_void]) -> Result<Self> {
+        fn new(
+            handles: &mut [*mut std::ffi::c_void],
+            jobs: &mut [*mut std::ffi::c_void],
+        ) -> Result<Self> {
             let mut bytes = 0;
             unsafe {
-                InitializeProcThreadAttributeList(null_mut(), 1, 0, &mut bytes);
+                InitializeProcThreadAttributeList(null_mut(), 2, 0, &mut bytes);
                 let mut storage = vec![0usize; bytes.div_ceil(size_of::<usize>())];
                 let pointer = storage.as_mut_ptr().cast();
-                if InitializeProcThreadAttributeList(pointer, 1, 0, &mut bytes) == 0 {
+                if InitializeProcThreadAttributeList(pointer, 2, 0, &mut bytes) == 0 {
                     return Err(last_error());
                 }
                 let attributes = Self {
@@ -129,8 +132,42 @@ mod windows {
                 {
                     return Err(last_error());
                 }
+                if UpdateProcThreadAttribute(
+                    pointer,
+                    0,
+                    PROC_THREAD_ATTRIBUTE_JOB_LIST as usize,
+                    jobs.as_mut_ptr().cast(),
+                    std::mem::size_of_val(jobs),
+                    null_mut(),
+                    null(),
+                ) == 0
+                {
+                    return Err(last_error());
+                }
                 Ok(attributes)
             }
+        }
+    }
+
+    fn create_job() -> Result<OwnedHandle> {
+        unsafe {
+            let raw_job = CreateJobObjectW(null(), null());
+            if raw_job.is_null() {
+                return Err(last_error());
+            }
+            let job = OwnedHandle::from_raw_handle(raw_job);
+            let mut limits: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = zeroed();
+            limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+            if SetInformationJobObject(
+                job.as_raw_handle(),
+                JobObjectExtendedLimitInformation,
+                (&limits as *const JOBOBJECT_EXTENDED_LIMIT_INFORMATION).cast(),
+                size_of_val(&limits) as u32,
+            ) == 0
+            {
+                return Err(last_error());
+            }
+            Ok(job)
         }
     }
 
@@ -148,6 +185,7 @@ mod windows {
             cwd: &Path,
             variables: &[(String, String)],
         ) -> Result<Self> {
+            let job = create_job()?;
             let (out_read, out_write) = pipe()?;
             let (err_read, err_write) = pipe()?;
             let (in_read, in_write) = pipe()?;
@@ -164,7 +202,8 @@ mod windows {
                 err_write.as_raw_handle(),
                 in_read.as_raw_handle(),
             ];
-            let attributes = Attributes::new(&mut handles)?;
+            let mut jobs = [job.as_raw_handle()];
+            let attributes = Attributes::new(&mut handles, &mut jobs)?;
             let mut environment = BTreeMap::new();
             for (key, value) in std::env::vars_os() {
                 environment.insert(key.to_string_lossy().to_uppercase(), (key, value));
@@ -191,24 +230,8 @@ mod windows {
             }
             let executable = wide(executable.as_os_str());
             let cwd = wide(cwd.as_os_str());
-            // No user code runs until job assignment succeeds. Only the three pipe handles inherit.
+            // Atomic job assignment prevents host crashes from stranding a suspended child.
             unsafe {
-                let raw_job = CreateJobObjectW(null(), null());
-                if raw_job.is_null() {
-                    return Err(last_error());
-                }
-                let job = OwnedHandle::from_raw_handle(raw_job);
-                let mut limits: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = zeroed();
-                limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
-                if SetInformationJobObject(
-                    job.as_raw_handle(),
-                    JobObjectExtendedLimitInformation,
-                    (&limits as *const JOBOBJECT_EXTENDED_LIMIT_INFORMATION).cast(),
-                    size_of_val(&limits) as u32,
-                ) == 0
-                {
-                    return Err(last_error());
-                }
                 let mut startup: STARTUPINFOEXW = zeroed();
                 startup.StartupInfo.cb = size_of::<STARTUPINFOEXW>() as u32;
                 startup.StartupInfo.dwFlags = STARTF_USESTDHANDLES;
@@ -237,12 +260,6 @@ mod windows {
                 }
                 let process = OwnedHandle::from_raw_handle(info.hProcess);
                 let thread = OwnedHandle::from_raw_handle(info.hThread);
-                if AssignProcessToJobObject(job.as_raw_handle(), process.as_raw_handle()) == 0 {
-                    let error = last_error();
-                    TerminateProcess(process.as_raw_handle(), 1);
-                    WaitForSingleObject(process.as_raw_handle(), INFINITE);
-                    return Err(error);
-                }
                 let result = Self {
                     job,
                     process,

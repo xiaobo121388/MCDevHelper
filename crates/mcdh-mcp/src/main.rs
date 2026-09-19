@@ -1,3 +1,4 @@
+use mcdh_core::custom_export::{Caller, CustomExportService, StartCustomExportRequest};
 use std::path::PathBuf;
 
 use mcdh_core::{
@@ -19,6 +20,7 @@ use serde_json::Value;
 #[derive(Clone)]
 struct McdhServer {
     index: LocalIndex,
+    exports: CustomExportService,
     tool_router: ToolRouter<Self>,
 }
 
@@ -33,8 +35,10 @@ impl ServerHandler for McdhServer {}
 #[tool_router(router = tool_router)]
 impl McdhServer {
     fn open() -> mcdh_core::Result<Self> {
+        let index = LocalIndex::open_default()?;
         Ok(Self {
-            index: LocalIndex::open_default()?,
+            exports: CustomExportService::new(index.clone())?,
+            index,
             tool_router: Self::tool_router(),
         })
     }
@@ -163,6 +167,68 @@ impl McdhServer {
             content_mode: params.content_mode.into(),
             conflict_policy: params.conflict_policy.into(),
         }))
+    }
+
+    #[tool(
+        description = "列出用户在桌面端启用且明确授权 MCP 执行的自定义导出方案；不能通过 MCP 修改方案或授权"
+    )]
+    fn list_custom_export_profiles(&self, Parameters(_): Parameters<EmptyParams>) -> ToolResult {
+        json_result(self.exports.profiles(Caller::Mcp))
+    }
+
+    #[tool(
+        description = "按已授权方案 ID 启动自定义导出，返回任务 ID；不得临时覆盖程序或参数。随后用 get_custom_export_task 查询状态及日志"
+    )]
+    fn start_custom_export(
+        &self,
+        Parameters(params): Parameters<CustomExportParams>,
+    ) -> ToolResult {
+        json_result(self.exports.start(
+            Caller::Mcp,
+            StartCustomExportRequest {
+                component_id: params.component_id,
+                profile_id: params.profile_id,
+                destination: params.destination,
+                conflict_policy: params.conflict_policy.into(),
+            },
+        ))
+    }
+
+    #[tool(
+        description = "查询本 MCP 宿主内的导出任务；cursor 使用上次 next_cursor，默认 0。日志仅通过结果返回，建议每 500ms 或更慢查询"
+    )]
+    fn get_custom_export_task(
+        &self,
+        Parameters(params): Parameters<CustomExportQueryParams>,
+    ) -> ToolResult {
+        json_result(
+            self.exports
+                .get(Caller::Mcp, &params.task_id, params.cursor),
+        )
+    }
+
+    #[tool(
+        description = "取消本 MCP 宿主内的自定义导出并终止其进程树；重复取消安全，已提交的成功产物不会撤销"
+    )]
+    fn cancel_custom_export(
+        &self,
+        Parameters(params): Parameters<CustomExportTaskParams>,
+    ) -> ToolResult {
+        json_result(self.exports.cancel(Caller::Mcp, &params.task_id))
+    }
+
+    #[tool(
+        description = "为等待重名处理的任务选择 rename 或 overwrite；复用本次产物，不重新运行打包程序。放弃产物请调用 cancel_custom_export"
+    )]
+    fn resolve_custom_export_conflict(
+        &self,
+        Parameters(params): Parameters<CustomExportConflictParams>,
+    ) -> ToolResult {
+        json_result(self.exports.resolve_conflict(
+            Caller::Mcp,
+            &params.task_id,
+            params.conflict_policy.into(),
+        ))
     }
 
     #[tool(description = "设置组件标签；MCS 组件会同时同步 work.mcscfg.CustomTags")]
@@ -345,6 +411,57 @@ struct ExportParams {
 
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
+struct CustomExportParams {
+    component_id: String,
+    profile_id: String,
+    destination: PathBuf,
+    #[serde(default = "custom_conflict_default")]
+    conflict_policy: McpExportConflictPolicy,
+}
+
+fn custom_conflict_default() -> McpExportConflictPolicy {
+    McpExportConflictPolicy::Error
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct CustomExportTaskParams {
+    task_id: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct CustomExportQueryParams {
+    task_id: String,
+    #[serde(default)]
+    cursor: u64,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct CustomExportConflictParams {
+    task_id: String,
+    conflict_policy: McpResolvePolicy,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+enum McpResolvePolicy {
+    Rename,
+    Overwrite,
+}
+
+impl From<McpResolvePolicy> for ExportConflictPolicy {
+    fn from(value: McpResolvePolicy) -> Self {
+        match value {
+            McpResolvePolicy::Rename => Self::Rename,
+            McpResolvePolicy::Overwrite => Self::Overwrite,
+        }
+    }
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 struct TagsParams {
     component_id: String,
     tags: Vec<String>,
@@ -502,8 +619,11 @@ struct ActionCompleted {
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let server = McdhServer::open()?;
+    let exports = server.exports.clone();
     eprintln!("MCDH MCP {} started on stdio", mcdh_core::VERSION);
     let service = server.serve(stdio()).await?;
-    service.waiting().await?;
+    let result = service.waiting().await;
+    exports.shutdown();
+    result?;
     Ok(())
 }

@@ -14,7 +14,8 @@ MCDH 是面向网易《我的世界》中国版 PE 创作者的 Windows 本地�
 - 安全导入：支持文件夹、ZIP、mcpack、mcaddon 和内嵌包，拒绝路径穿越、绝对路径与符号链接条目。
 - JSONC 兼容：组件文件、MCS 配置、世界包清单、内置模板和本地 JSON 设置均支持 `//`、`/* ... */` 注释与尾随逗号。
 - MCS 兼容：识别 Type 1/3/4/7；可配置本地开发者身份和命名空间，并生成兼容的 `studio.json` 与 `work.mcscfg`。
-- AI 接口：`mcdh-mcp.exe` 使用标准输入输出，提供 22 个严格 JSON Schema 工具，不提供删除组件工具。
+- 自定义导出：可接入本机 EXE 或解释器脚本，新增独立导出按钮，支持实时日志、取消进程树、重名处理和按方案授权 MCP。
+- AI 接口：`mcdh-mcp.exe` 使用标准输入输出，提供 27 个严格 JSON Schema 工具，不提供删除组件或修改导出方案的工具。
 
 ## 系统要求
 
@@ -46,6 +47,10 @@ MCDH 是面向网易《我的世界》中国版 PE 创作者的 Windows 本地�
 复制组件时可选择保留或重生 manifest UUID；复制到 MCS 时总会生成新的 MCS UID。移动默认保留 manifest UUID。重要作品建议先自行备份。
 
 UUID 重生、版本提升和标签同步会在原 JSONC 文本中定点更新并原子写回，保留已有注释、缩进、尾随逗号和 UTF-8 BOM。UUID 与版本快捷操作通过本地索引直接定位单个组件，不会额外扫描全部来源；MCP 的 JSON-RPC 消息仍须使用标准 JSON。
+
+## 自定义导出
+
+自定义打包程序可在“设置 > 自定义导出”配置。内置游戏 ZIP 和完整 ZIP 不受影响；每个启用的方案会在旁边新增按钮，由程序自行决定最终文件名和格式。默认传入完整临时副本，也可选择原目录模式。完整参数、MCP 工作流和安全边界见 [自定义导出接入协议](docs/custom-export.md)，可运行示例位于 [pack.py](examples/custom-export/pack.py)。外部程序具有当前用户权限，临时副本不是沙箱，仅运行可信程序。
 
 ## 组件元数据
 
@@ -107,6 +112,8 @@ MCDH 每次启动会查询 GitHub 官方最新正式 Release，也可在“设�
 MCP 仅使用 stdio；stdout 只输出协议消息，运行日志写入 stderr。可用工具：
 
 `list_components`、`get_component`、`refresh_components`、`list_sources`、`add_single_component`、`add_library`、`add_mcs_path`、`rescan_mcs_paths`、`remove_source`、`get_settings`、`set_settings`、`create_component`、`import_component`、`copy_component`、`move_component`、`export_component`、`set_component_tags`、`set_component_metadata`、`regenerate_manifest_uuids`、`bump_manifest_version`、`open_component_directory`、`open_component_in_vscode`。`import_component` 和 `export_component` 的 `content_mode` 可选 `clean` 或 `full`，省略时保持 `clean`。`export_component.conflict_policy` 可选 `rename`（默认追加序号）、`overwrite` 或 `error`。
+
+自定义导出新增五个 MCP 工具：`list_custom_export_profiles`、`start_custom_export`、`get_custom_export_task`、`cancel_custom_export`、`resolve_custom_export_conflict`。只允许执行桌面端明确授权的已保存方案，不能通过 MCP 修改程序、参数或授权。任务日志通过工具结果返回，不写入协议 stdout；自定义导出的重名策略默认 `error`，进入等待选择状态，不改变内置 ZIP 导出的默认策略。
 
 ## 开发与验证
 

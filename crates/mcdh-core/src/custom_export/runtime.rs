@@ -18,6 +18,7 @@ const RETENTION: Duration = Duration::from_secs(1800);
 const LOG_LIMIT: usize = 1024 * 1024;
 
 struct TaskState {
+    created: Instant,
     view: CustomExportTask,
     logs: VecDeque<ExportLog>,
     log_bytes: usize,
@@ -212,6 +213,7 @@ impl CustomExportService {
             caller,
             changed: Condvar::new(),
             state: Mutex::new(TaskState {
+                created: Instant::now(),
                 view: CustomExportTask {
                     id: id.clone(),
                     component_id: request.component_id.clone(),
@@ -290,14 +292,24 @@ impl CustomExportService {
     }
 
     pub fn list_tasks(&self, caller: Caller) -> Vec<CustomExportTask> {
-        self.0
+        let tasks: Vec<_> = self
+            .0
             .tasks
             .lock()
             .unwrap()
             .values()
             .filter(|task| task.caller == caller)
-            .map(|task| task.snapshot(u64::MAX))
-            .collect()
+            .cloned()
+            .collect();
+        let mut ordered: Vec<_> = tasks
+            .iter()
+            .map(|task| {
+                let created = task.state.lock().unwrap().created;
+                (created, task.snapshot(u64::MAX))
+            })
+            .collect();
+        ordered.sort_by_key(|(created, _)| *created);
+        ordered.into_iter().map(|(_, view)| view).collect()
     }
 
     pub fn cancel(&self, caller: Caller, id: &str) -> Result<CustomExportTask> {

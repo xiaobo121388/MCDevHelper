@@ -105,6 +105,12 @@ export function CustomExportButtons({ controller, disabled, gameRunning }: { con
 
 export function CustomExportTaskPanel({ controller }: { controller: CustomExportController }) {
   const { task, logs, truncated, pending, pollError } = controller;
+  const logPane = useRef<HTMLPreElement>(null);
+  const followLogs = useRef(true);
+  useEffect(() => { followLogs.current = true; }, [task?.id]);
+  useEffect(() => {
+    if (followLogs.current && logPane.current) logPane.current.scrollTop = logPane.current.scrollHeight;
+  }, [logs]);
   if (!task) return null;
   return <section className="export-task" aria-label="自定义导出任务">
     <div className="export-task-heading"><strong><Terminal size={16} />{task.profile_name}</strong><span role="status">{task.cancel_requested && !exportTerminal(task.status) ? "正在取消…" : statusText[task.status]}</span>
@@ -114,7 +120,10 @@ export function CustomExportTaskPanel({ controller }: { controller: CustomExport
     {task.error && <p className="form-error" role="alert">{task.error.message}{task.error.exit_code != null && '（退出码 ' + task.error.exit_code + '）'}</p>}
     {task.result && <p className="export-result-path" title={task.result.actual_path}>{task.result.actual_path}</p>}
     {truncated && <p className="export-security-note">日志已截断，仅保留最近 1 MiB。</p>}
-    <pre className="export-task-log" aria-label="导出日志">{logs.map((log) => <span key={log.sequence} data-source={log.source}>{log.text}</span>)}</pre>
+    <pre ref={logPane} className="export-task-log" aria-label="导出日志" onScroll={(event) => {
+      const element = event.currentTarget;
+      followLogs.current = element.scrollHeight - element.scrollTop - element.clientHeight < 24;
+    }}>{logs.map((log) => <span key={log.sequence} data-source={log.source}>{log.text}</span>)}</pre>
     {pollError && <div role="alert" className="export-poll-error"><span>{pollError}</span><button className="button secondary" onClick={controller.retry}><RefreshCw size={14} />重新连接</button></div>}
   </section>;
 }

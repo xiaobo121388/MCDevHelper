@@ -198,6 +198,8 @@ fn cancellation_timeout_and_source_lock() {
         fixture.index.try_lock_mutations(),
         Err(CoreError::Busy)
     ));
+    let other_host = CustomExportService::new(fixture.index.clone()).unwrap();
+    assert!(other_host.list_tasks(Caller::Desktop).is_empty());
     fixture.service.cancel(Caller::Desktop, &task.id).unwrap();
     fixture.service.cancel(Caller::Desktop, &task.id).unwrap();
     assert_eq!(
@@ -407,4 +409,122 @@ fn fixture_long() {
     if std::env::var_os("MCDH_OUTPUT_DIR").is_some() {
         thread::sleep(Duration::from_secs(60));
     }
+}
+
+#[test]
+#[cfg(windows)]
+fn links_are_skipped_and_failed_publication_preserves_existing_file() {
+    let fixture = Fixture::new();
+    let outside = fixture._root.path().join("outside");
+    fs::create_dir(&outside).unwrap();
+    fs::write(outside.join("private.txt"), "not part of component").unwrap();
+    let junction = fixture.source.join("junction");
+    let linked = std::process::Command::new("cmd.exe")
+        .args(["/d", "/c", "mklink", "/J"])
+        .arg(&junction)
+        .arg(&outside)
+        .output()
+        .unwrap();
+    assert!(
+        linked.status.success(),
+        "{}",
+        String::from_utf8_lossy(&linked.stderr)
+    );
+    let copy = fixture._root.path().join("snapshot");
+    files::copy_snapshot(&fixture.source, &copy, &|| Ok(())).unwrap();
+    assert!(!copy.join("junction").exists());
+    assert!(copy.join(".empty").is_dir());
+    assert_eq!(
+        fs::read_to_string(outside.join("private.txt")).unwrap(),
+        "not part of component"
+    );
+    let profile = fixture.profile("fixture_success");
+    let target = fixture.destination.join("中文 artifact.custom");
+    fs::write(&target, "old").unwrap();
+    let task = fixture.start(&profile);
+    fixture.wait(&task.id, |s| s == TaskStatus::AwaitingConflict);
+    use std::os::windows::fs::OpenOptionsExt;
+    let _locked = fs::OpenOptions::new()
+        .read(true)
+        .share_mode(0)
+        .open(&target)
+        .unwrap();
+    fixture
+        .service
+        .resolve_conflict(Caller::Desktop, &task.id, ExportConflictPolicy::Overwrite)
+        .unwrap();
+    let result = fixture.wait(&task.id, TaskStatus::terminal);
+    assert_eq!(result.error.unwrap().code, "publish_failed");
+    drop(_locked);
+    assert_eq!(fs::read_to_string(target).unwrap(), "old");
+    assert!(!fs::read_dir(&fixture.destination).unwrap().any(|entry| {
+        entry
+            .unwrap()
+            .file_name()
+            .to_string_lossy()
+            .starts_with(".mcdh-export-")
+    }));
+}
+
+#[test]
+#[cfg(windows)]
+fn native_argv_preserves_empty_unicode_quotes_and_trailing_slashes() {
+    let temp = tempfile::tempdir().unwrap();
+    let source = temp.path().join("fixture.rs");
+    let executable = temp.path().join("参数 fixture.exe");
+    let output = temp.path().join("args.txt");
+    fs::write(&source, r#"fn main() { std::fs::write(std::env::var("ARG_RESULT").unwrap(), format!("{:?}", std::env::args().skip(1).collect::<Vec<_>>())).unwrap(); }"#).unwrap();
+    let compiled = std::process::Command::new("rustc")
+        .arg(&source)
+        .arg("-o")
+        .arg(&executable)
+        .output()
+        .unwrap();
+    assert!(
+        compiled.status.success(),
+        "{}",
+        String::from_utf8_lossy(&compiled.stderr)
+    );
+    let arguments: Vec<String> = [
+        "",
+        "a b",
+        "quote\"tail\\",
+        "汉字 & % ! ^ {output_dir}",
+        "\\\\server\\path\\",
+    ]
+    .into_iter()
+    .map(String::from)
+    .collect();
+    let process = ExportProcess::start(
+        &executable,
+        &arguments,
+        temp.path(),
+        &[("ARG_RESULT".into(), output.to_string_lossy().into_owned())],
+    )
+    .unwrap();
+    let begin = Instant::now();
+    while process.poll().unwrap().is_none() {
+        assert!(begin.elapsed().as_secs() < 10);
+        thread::sleep(Duration::from_millis(20));
+    }
+    assert_eq!(
+        fs::read_to_string(output).unwrap(),
+        format!("{arguments:?}")
+    );
+}
+
+#[test]
+#[cfg(windows)]
+fn publishes_through_destination_volume() {
+    let mut fixture = Fixture::new();
+    let output = tempfile::tempdir_in(env!("CARGO_MANIFEST_DIR")).unwrap();
+    fixture.destination = output.path().to_path_buf();
+    let profile = fixture.profile("fixture_success");
+    let task = fixture.start(&profile);
+    let finished = fixture.wait(&task.id, TaskStatus::terminal);
+    assert_eq!(finished.status, TaskStatus::Succeeded, "{finished:?}");
+    assert_eq!(
+        fs::read_to_string(finished.result.unwrap().actual_path).unwrap(),
+        "artifact"
+    );
 }

@@ -13,6 +13,24 @@ struct McpClient {
 }
 
 impl McpClient {
+    fn initialize(&mut self) {
+        self.request("initialize", json!({"protocolVersion":"2025-11-25", "capabilities":{}, "clientInfo":{"name":"export-test","version":"1"}}));
+        self.notify("notifications/initialized");
+    }
+
+    fn wait_export(&mut self, id: &str, target: &str) -> Value {
+        let begin = std::time::Instant::now();
+        loop {
+            let task = self.call("get_custom_export_task", json!({"task_id": id}));
+            if task["status"] == target {
+                return task;
+            }
+            assert_ne!(task["status"], "failed", "{task}");
+            assert!(begin.elapsed().as_secs() < 20, "task timed out: {task}");
+            std::thread::sleep(std::time::Duration::from_millis(40));
+        }
+    }
+
     fn start(data_directory: &Path) -> Self {
         let mut child = Command::new(env!("CARGO_BIN_EXE_mcdh-mcp"))
             .env("MCDH_DATA_DIR", data_directory)
@@ -93,6 +111,139 @@ impl McpClient {
 }
 
 #[test]
+#[cfg(windows)]
+fn custom_export_authorization_logs_conflicts_and_host_shutdown() {
+    use mcdh_core::{
+        LocalIndex,
+        custom_export::{CustomExportProfile, InputMode, ProfileStore},
+    };
+    let temp = tempfile::tempdir().unwrap();
+    let state = temp.path().join("state");
+    let index = LocalIndex::open(state.join("mcdh.db")).unwrap();
+    let source = temp.path().join("中文 source");
+    let output = temp.path().join("output");
+    std::fs::create_dir_all(&source).unwrap();
+    std::fs::create_dir_all(&output).unwrap();
+    std::fs::write(source.join("level.dat"), "source").unwrap();
+    let id = index.component_id(&source).unwrap();
+    let script = temp.path().join("export test.ps1");
+    std::fs::write(
+        &script,
+        r#"param([string]$InputPath, [string]$OutputPath, [string]$Mode)
+$ErrorActionPreference = 'Stop'
+[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
+if ($InputPath -ne $env:MCDH_INPUT_DIR -or $OutputPath -ne $env:MCDH_OUTPUT_DIR) { exit 9 }
+if ($Mode -eq 'wait') {
+    [IO.File]::WriteAllText((Join-Path $InputPath 'running.pid'), [string]$PID)
+    Start-Sleep -Seconds 60
+} else {
+    Write-Output 'PACKER LOG - not JSON-RPC'
+    [IO.File]::WriteAllText((Join-Path $OutputPath 'release.custom'), 'custom artifact')
+}
+"#,
+    )
+    .unwrap();
+    let store = ProfileStore::new(index.clone());
+    let mut profile = store
+        .save(vec![CustomExportProfile {
+            name: "MCP exporter".into(),
+            executable: std::path::PathBuf::from(std::env::var_os("SystemRoot").unwrap())
+                .join("System32/WindowsPowerShell/v1.0/powershell.exe"),
+            arguments: vec![
+                "-NoProfile".into(),
+                "-NonInteractive".into(),
+                "-ExecutionPolicy".into(),
+                "Bypass".into(),
+                "-File".into(),
+                script.to_string_lossy().into_owned(),
+                "{input_dir}".into(),
+                "{output_dir}".into(),
+            ],
+            ..Default::default()
+        }])
+        .unwrap()
+        .remove(0);
+    let request = json!({"component_id":id, "profile_id":profile.id, "destination":output});
+    let mut client = McpClient::start(&state);
+    client.initialize();
+    assert_eq!(
+        client.call("list_custom_export_profiles", json!({})),
+        json!([])
+    );
+    client.call_error("start_custom_export", request.clone());
+    profile.allow_mcp = true;
+    profile = store.save(vec![profile]).unwrap().remove(0);
+    assert_eq!(
+        client.call("list_custom_export_profiles", json!({}))[0]["id"],
+        profile.id
+    );
+    let mut injection = request.clone();
+    injection["executable"] = json!("C:/unapproved.exe");
+    let refused = client.request(
+        "tools/call",
+        json!({"name":"start_custom_export","arguments":injection}),
+    );
+    assert!(refused["result"]["isError"] == true || refused.get("error").is_some());
+    std::fs::write(output.join("release.custom"), "old").unwrap();
+    let task = client.call("start_custom_export", request.clone());
+    let task_id = task["id"].as_str().unwrap();
+    let waiting = client.wait_export(task_id, "awaiting_conflict");
+    assert!(
+        waiting["logs"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|log| log["text"].as_str().unwrap().contains("PACKER LOG"))
+    );
+    let delta = client.call(
+        "get_custom_export_task",
+        json!({"task_id":task_id, "cursor":waiting["next_cursor"]}),
+    );
+    assert!(delta["logs"].as_array().unwrap().is_empty());
+    client.call(
+        "resolve_custom_export_conflict",
+        json!({"task_id":task_id,"conflict_policy":"rename"}),
+    );
+    let finished = client.wait_export(task_id, "succeeded");
+    assert!(
+        finished["result"]["actual_path"]
+            .as_str()
+            .unwrap()
+            .ends_with("release (2).custom")
+    );
+    assert_eq!(
+        std::fs::read_to_string(output.join("release.custom")).unwrap(),
+        "old"
+    );
+    client.call("cancel_custom_export", json!({"task_id":task_id}));
+    profile.arguments.push("wait".into());
+    profile.input_mode = InputMode::Source;
+    profile = store.save(vec![profile]).unwrap().remove(0);
+    assert!(!profile.allow_mcp);
+    client.call_error("start_custom_export", request.clone());
+    profile.allow_mcp = true;
+    store.save(vec![profile]).unwrap();
+    let long = client.call("start_custom_export", request);
+    client.wait_export(long["id"].as_str().unwrap(), "running");
+    let began = std::time::Instant::now();
+    while !source.join("running.pid").exists() {
+        assert!(began.elapsed().as_secs() < 10);
+        std::thread::sleep(std::time::Duration::from_millis(30));
+    }
+    let pid: u32 = std::fs::read_to_string(source.join("running.pid"))
+        .unwrap()
+        .parse()
+        .unwrap();
+    client.finish();
+    assert!(
+        mcdh_core::mcdk_session::inspect_process(pid)
+            .unwrap()
+            .is_none_or(|p| p.exit_code.is_some())
+    );
+    assert!(index.try_lock_mutations().is_ok());
+}
+
+#[test]
 fn initializes_lists_strict_schemas_and_calls_every_tool() {
     let temp = tempfile::tempdir().unwrap();
     let library = temp.path().join("组件库");
@@ -141,6 +292,11 @@ fn initializes_lists_strict_schemas_and_calls_every_tool() {
         "copy_component",
         "move_component",
         "export_component",
+        "list_custom_export_profiles",
+        "start_custom_export",
+        "get_custom_export_task",
+        "cancel_custom_export",
+        "resolve_custom_export_conflict",
         "set_component_tags",
         "set_component_metadata",
         "regenerate_manifest_uuids",
@@ -149,6 +305,17 @@ fn initializes_lists_strict_schemas_and_calls_every_tool() {
         "open_component_in_vscode",
     ]);
     assert_eq!(names, expected);
+    assert_eq!(
+        client.call("list_custom_export_profiles", json!({})),
+        json!([])
+    );
+    client.call_error("start_custom_export", json!({"component_id":"missing", "profile_id":"missing", "destination": path_text(&exports)}));
+    client.call_error("get_custom_export_task", json!({"task_id":"missing"}));
+    client.call_error("cancel_custom_export", json!({"task_id":"missing"}));
+    client.call_error(
+        "resolve_custom_export_conflict",
+        json!({"task_id":"missing", "conflict_policy":"rename"}),
+    );
     assert!(
         tools
             .iter()

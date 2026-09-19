@@ -3,7 +3,7 @@ use fs2::FileExt;
 use std::fs::{self, File, Metadata, OpenOptions};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
-use tempfile::{NamedTempFile, TempDir};
+use tempfile::NamedTempFile;
 use walkdir::WalkDir;
 
 pub(super) fn failure(code: &'static str, message: impl Into<String>) -> CoreError {
@@ -50,15 +50,58 @@ pub(super) fn outside(source: &Path, destination: &Path) -> Result<()> {
 }
 
 pub(super) struct HostWorkspace {
-    pub root: TempDir,
+    pub root: WorkspaceRoot,
     _owner: File,
+}
+
+pub(super) struct WorkspaceRoot(PathBuf);
+
+impl WorkspaceRoot {
+    pub fn path(&self) -> &Path {
+        &self.0
+    }
+}
+
+// Keep the lease marker until every task has been removed, so partial cleanup is retryable.
+fn remove_workspace(root: &Path) -> std::io::Result<()> {
+    for entry in fs::read_dir(root)? {
+        let entry = entry?;
+        if entry.file_name() == "owner.lock" {
+            continue;
+        }
+        let metadata = fs::symlink_metadata(entry.path())?;
+        if metadata.is_dir() || is_link(&metadata) {
+            fs::remove_dir_all(entry.path())?;
+        } else {
+            fs::remove_file(entry.path())?;
+        }
+    }
+    fs::remove_file(root.join("owner.lock"))?;
+    fs::remove_dir(root)
+}
+
+impl Drop for HostWorkspace {
+    fn drop(&mut self) {
+        let _ = remove_workspace(self.root.path());
+    }
 }
 
 impl HostWorkspace {
     pub fn create(index: &crate::LocalIndex) -> Result<Self> {
-        let _guard = index.try_lock_mutations()?;
         let parent = index.path().parent().unwrap().join("custom-export-jobs");
         fs::create_dir_all(&parent).map_err(|e| CoreError::io(&parent, e))?;
+        // Workspace registration must not fail while another host exports a source directory.
+        let registry_path = parent.join("workspace.lock");
+        let registry = OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .read(true)
+            .write(true)
+            .open(&registry_path)
+            .map_err(|e| CoreError::io(&registry_path, e))?;
+        registry
+            .lock_exclusive()
+            .map_err(|e| CoreError::io(&registry_path, e))?;
         // The exclusive lease survives every worker. Only dead owners' directories are reclaimed.
         for entry in fs::read_dir(&parent)
             .map_err(|e| CoreError::io(&parent, e))?
@@ -78,7 +121,7 @@ impl HostWorkspace {
             if let Ok(file) = OpenOptions::new().read(true).write(true).open(&lease)
                 && file.try_lock_exclusive().is_ok()
             {
-                let _ = fs::remove_dir_all(&path);
+                let _ = remove_workspace(&path);
             }
         }
         let root = tempfile::Builder::new()
@@ -96,7 +139,7 @@ impl HostWorkspace {
             .lock_exclusive()
             .map_err(|e| CoreError::io(&lease, e))?;
         Ok(Self {
-            root,
+            root: WorkspaceRoot(root.keep()),
             _owner: owner,
         })
     }
@@ -220,7 +263,13 @@ pub(super) fn prepare_publish(
         .tempfile_in(destination)
         .map_err(|e| failure("publish_failed", e.to_string()))?;
     let mut input = File::open(artifact).map_err(|e| failure("publish_failed", e.to_string()))?;
-    copy_checked(&mut input, temporary.as_file_mut(), check)?;
+    copy_checked(&mut input, temporary.as_file_mut(), check).map_err(|error| {
+        if error.code() == "cancelled" {
+            error
+        } else {
+            failure("publish_failed", error.to_string())
+        }
+    })?;
     temporary
         .as_file()
         .sync_all()
@@ -231,6 +280,28 @@ pub(super) fn prepare_publish(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[cfg(windows)]
+    fn failed_workspace_cleanup_keeps_lease_for_retry() {
+        use std::os::windows::fs::OpenOptionsExt;
+        let temp = tempfile::tempdir().unwrap();
+        let index = crate::LocalIndex::open(temp.path().join("db")).unwrap();
+        let host = HostWorkspace::create(&index).unwrap();
+        let path = host.root.path().to_path_buf();
+        let file = path.join("locked");
+        fs::write(&file, "locked").unwrap();
+        let locked = OpenOptions::new()
+            .read(true)
+            .share_mode(0)
+            .open(&file)
+            .unwrap();
+        drop(host);
+        assert!(path.join("owner.lock").exists());
+        drop(locked);
+        let _host = HostWorkspace::create(&index).unwrap();
+        assert!(!path.exists());
+    }
     #[test]
     fn filenames_and_single_artifacts() {
         for name in ["NUL.zip", "COM1", "LPT¹.x", "bad.", "a:b", "a/b", "x "] {
