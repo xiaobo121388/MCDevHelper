@@ -196,10 +196,10 @@ impl McdkStore {
     pub fn activate(&self, version: &McdkVersion) -> Result<()> {
         verify_binary(&self.executable(version)?, version)?;
         let mut installed = self.installed()?;
-        if let Some(current) = &installed.current {
-            if current.validate()? >= version.validate()? {
-                return Ok(());
-            }
+        if let Some(current) = &installed.current
+            && current.validate()? >= version.validate()?
+        {
+            return Ok(());
         }
         installed.previous = installed.current.take();
         installed.current = Some(version.clone());

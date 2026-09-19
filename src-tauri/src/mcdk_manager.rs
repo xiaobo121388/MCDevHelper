@@ -498,7 +498,7 @@ mod tests {
             let server = std::thread::spawn(move || {
                 let (mut stream, _) = listener.accept().unwrap();
                 let mut request = [0u8; 2048];
-                stream.read(&mut request).unwrap();
+                assert!(stream.read(&mut request).unwrap() > 0);
                 write!(
                     stream,
                     "HTTP/1.1 {status}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",

@@ -97,13 +97,12 @@ pub async fn monitor(app: tauri::AppHandle, manager: McdkManager) {
             refresh_session(&copy.store)
         })
         .await;
-        if result.is_ok() {
-            if let Ok(status) = manager.status() {
-                if previous.as_ref() != Some(&status) {
-                    manager.emit(&app);
-                    previous = Some(status);
-                }
-            }
+        if result.is_ok()
+            && let Ok(status) = manager.status()
+            && previous.as_ref() != Some(&status)
+        {
+            manager.emit(&app);
+            previous = Some(status);
         }
         tokio::time::sleep(std::time::Duration::from_secs(1)).await;
     }
