@@ -2214,6 +2214,7 @@ dependencies = [
 name = "mcdh-desktop"
 version = "1.1.0"
 dependencies = [
+ "chrono",
  "mcdh-core",
  "reqwest",
  "semver",
@@ -2224,6 +2225,8 @@ dependencies = [
  "tauri-plugin-dialog",
  "tauri-plugin-opener",
  "tauri-plugin-shell",
+ "tempfile",
+ "tokio",
 ]
 
 [[package]]

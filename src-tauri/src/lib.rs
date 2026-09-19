@@ -12,6 +12,10 @@ use mcdh_core::{
 use serde::{Deserialize, Serialize};
 use tauri::State;
 
+mod mcdk_manager;
+mod mcdk_release;
+use mcdk_manager::{mcdk_status, set_mcdk_auto_update, check_mcdk_update, install_mcdk_update};
+
 const LATEST_RELEASE_API: &str =
     "https://api.github.com/repos/xiaobo121388/MCDevHelper/releases/latest";
 const GITHUB_API_VERSION: &str = "2026-03-10";
@@ -371,11 +375,16 @@ pub fn run() {
     let state = AppState::open().expect("failed to open MCDH local index");
     tauri::Builder::default()
         .manage(state)
+        .setup(mcdk_manager::setup)
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_shell::init())
         .invoke_handler(tauri::generate_handler![
             app_version,
+            mcdk_status,
+            set_mcdk_auto_update,
+            check_mcdk_update,
+            install_mcdk_update,
             check_for_updates,
             mcp_client_config,
             refresh_components,

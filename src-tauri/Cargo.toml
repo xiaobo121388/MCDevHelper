@@ -17,6 +17,9 @@ reqwest.workspace = true
 semver.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+chrono.workspace = true
+tempfile.workspace = true
+tokio = { workspace = true, features = ["time", "sync"] }
 tauri = { version = "2", features = [] }
 tauri-plugin-dialog = "2"
 tauri-plugin-opener = "2"

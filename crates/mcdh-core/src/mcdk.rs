@@ -226,6 +226,13 @@ impl McdkStore {
         // A damaged managed copy must not prevent using the read-only bundled fallback.
         if self.stage(&bundled, bundled_binary).is_err() {
             verify_binary(bundled_binary, &bundled)?;
+            self.write(
+                "mcdk.installed",
+                &InstalledVersions {
+                    current: Some(bundled.clone()),
+                    previous: None,
+                },
+            )?;
             return Ok(bundled);
         }
         self.write(
