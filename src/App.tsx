@@ -39,6 +39,7 @@ import {
 import { FormEvent, ReactNode, useCallback, useEffect, useMemo, useState } from "react";
 import { api, desktop, errorMessage } from "./api";
 import { releaseNotesFor } from "./releaseNotes";
+import { useAppUpdate, UpdateButton, UpdateProgress, type AppUpdater } from "./AppUpdate";
 import { useMcdk, LaunchGameButton, McdkSettings, type McdkController } from "./Mcdk";
 import type {
   AppSettings,
@@ -85,6 +86,7 @@ export function App() {
   const [selected, setSelected] = useState<ComponentSummary | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const mcdk = useMcdk(setNotice);
+  const updater = useAppUpdate();
   const [ignoredWarningKeys, setIgnoredWarningKeys] = useState<Set<string>>(readIgnoredWarningKeys);
   const [startupDialogs, setStartupDialogs] = useState<StartupDialog[]>([]);
 
@@ -207,21 +209,9 @@ export function App() {
   };
 
   const dismissStartupDialog = () => setStartupDialogs((current) => current.slice(1));
-  const openStartupRelease = async (url: string) => {
-    if (!isOfficialMcdhUrl(url)) {
-      setNotice("拒绝打开非官方 MCDH 链接。");
-      return;
-    }
-    try {
-      await openUrl(url);
-      dismissStartupDialog();
-    } catch (error) {
-      setNotice(errorMessage(error));
-    }
-  };
 
   return (
-    <div className="app-shell">
+    <><div className="app-shell" inert={updater.progress ? true : undefined}>
       <aside className="sidebar">
         <div className="brand">
           <span className="brand-mark"><Boxes size={20} /></span>
@@ -286,7 +276,7 @@ export function App() {
 
       {modal === "create" && <CreateDialog sources={result.sources} settings={settings} onConfigurePaths={() => setModal("settings")} onClose={() => setModal(null)} onDone={(message) => { setModal(null); void done(message); }} />}
       {modal === "import" && <ImportDialog onClose={() => setModal(null)} onDone={(message) => { setModal(null); void done(message); }} />}
-      {modal === "settings" && <SettingsDialog mcdk={mcdk} settings={settings} onSettings={setSettings} onClose={() => setModal(null)} onChanged={() => void refresh()} onNotice={setNotice} />}
+      {modal === "settings" && <SettingsDialog updater={updater} mcdk={mcdk} settings={settings} onSettings={setSettings} onClose={() => setModal(null)} onChanged={() => void refresh()} onNotice={setNotice} />}
       {modal === "warnings" && <WarningsDialog warnings={result.warnings} sources={result.sources} ignoredKeys={ignoredWarningKeys} onIgnore={setWarningIgnored} onRemoveSource={removeWarningSource} onClose={() => setModal(null)} onNotice={setNotice} />}
       {selected && <ComponentDialog component={selected} running={mcdk.status?.session?.component_id === selected.id} onClose={() => setSelected(null)} onDone={(message, operation, refreshAfter) => {
         setSelected(null);
@@ -303,13 +293,14 @@ export function App() {
           void done(message);
         }
       }} onNotice={setNotice} />}
-      {startupDialogs[0] && <StartupUpdateDialog dialog={startupDialogs[0]} onClose={dismissStartupDialog} onOpenRelease={(url) => void openStartupRelease(url)} />}
+      {startupDialogs[0] && !updater.progress && <StartupUpdateDialog updater={updater} dialog={startupDialogs[0]} onClose={dismissStartupDialog} />}
+      {updater.error && <div className="app-update-error" role="alert"><strong>更新未完成</strong><p>{updater.error}</p><button className="button secondary" onClick={updater.clearError}>知道了</button></div>}
       {notice && <div className="toast" role="status">{notice}</div>}
-    </div>
+    </div>{updater.progress && <UpdateProgress progress={updater.progress} />}</>
   );
 }
 
-function StartupUpdateDialog({ dialog, onClose, onOpenRelease }: { dialog: StartupDialog; onClose: () => void; onOpenRelease: (url: string) => void }) {
+function StartupUpdateDialog({ dialog, onClose, updater }: { dialog: StartupDialog; onClose: () => void; updater: AppUpdater }) {
   if (dialog.kind === "updated") {
     return (
       <Modal title={`已更新至 ${displayVersion(dialog.currentVersion)}`} subtitle="首次启动更新日志" onClose={onClose}>
@@ -328,8 +319,8 @@ function StartupUpdateDialog({ dialog, onClose, onOpenRelease }: { dialog: Start
       <div className="release-dialog">
         <div className="release-heading available"><Sparkles size={21} /><div><strong>{update.release_name || update.latest_version}</strong><p>{update.published_at ? `发布于 ${formatDate(update.published_at)}` : "GitHub 已发布新的正式版本。"}</p></div></div>
         {update.release_notes && <p className="remote-release-notes">{update.release_notes}</p>}
-        <p className="release-download-note">MCDH 不会自动下载安装包，点击后将使用系统浏览器打开官方 Release 页面。</p>
-        <div className="dialog-actions"><button className="button secondary" onClick={onClose}>稍后提醒</button>{update.release_url && <button className="button primary" onClick={() => onOpenRelease(update.release_url!)}>前往下载<ExternalLink size={14} /></button>}</div>
+        <p className="release-download-note">更新包下载并校验完成后，将自动安装并重启 MCDH，无需操作安装向导。</p>
+        <div className="dialog-actions"><button className="button secondary" onClick={onClose}>稍后提醒</button><UpdateButton updater={updater} version={update.latest_version} /></div>
       </div>
     </Modal>
   );
@@ -501,7 +492,7 @@ type SettingsSection = "paths" | "identity" | "appearance" | "tools" | "about";
 
 const FEEDBACK_URL = "https://github.com/xiaobo121388/MCDevHelper/issues/new";
 
-function SettingsDialog({ settings: initialSettings, mcdk, onSettings, onClose, onChanged, onNotice }: { settings: AppSettings; mcdk: McdkController; onSettings: (settings: AppSettings) => void; onClose: () => void; onChanged: () => void; onNotice: (message: string) => void }) {
+function SettingsDialog({ settings: initialSettings, mcdk, updater, onSettings, onClose, onChanged, onNotice }: { settings: AppSettings; mcdk: McdkController; updater: AppUpdater; onSettings: (settings: AppSettings) => void; onClose: () => void; onChanged: () => void; onNotice: (message: string) => void }) {
   const [sources, setSources] = useState<SourceRecord[]>([]);
   const [settings, setSettings] = useState(initialSettings);
   const [vscode, setVscode] = useState<{ available: boolean; path?: string; custom: boolean } | null>(null);
@@ -660,7 +651,7 @@ function SettingsDialog({ settings: initialSettings, mcdk, onSettings, onClose, 
 
             {section === "about" && <section>
               <div className="about-product"><span className="brand-mark"><Boxes size={21} /></span><div><h3>MCDH · MCDevHelper</h3><p>网易中国版 PE 创作者的本地组件管理工具</p></div><strong>v{appVersion || "…"}</strong></div>
-              <div className="about-note"><Info size={17} /><p>每次启动会向 GitHub Releases API 查询一次最新版本；不会自动下载或安装。反馈会交给系统浏览器打开 GitHub Issue 页面。</p></div>
+              <div className="about-note"><Info size={17} /><p>启动时检查正式版本。确认更新后在应用内下载，校验完成后自动安装并重启，保留现有设置和组件。</p></div>
               <div className="settings-tool"><div><strong>检查更新</strong><p>启动时会自动检查，也可以在这里立即重新查询最新正式 Release。</p></div><div className="settings-tool-actions"><button className="button primary" disabled={busy === "update"} onClick={() => void checkForUpdates()}><RefreshCw className={busy === "update" ? "spin" : ""} size={16} />{busy === "update" ? "检查中…" : "检查更新"}</button></div></div>
               {updateError && <div className="update-result error"><TriangleAlert size={17} /><div><strong>检查失败</strong><p>{updateError}</p></div></div>}
               {updateResult && <div className={`update-result ${updateResult.update_available ? "available" : "current"}`}>
@@ -669,7 +660,7 @@ function SettingsDialog({ settings: initialSettings, mcdk, onSettings, onClose, 
                   <strong>{updateResult.no_release ? "未找到公开 Release" : updateResult.update_available ? `发现新版本 ${updateResult.latest_version}` : "当前已是最新版本"}</strong>
                   <p>{updateResult.no_release ? "仓库可能尚未发布正式版本，或当前未公开。" : `${updateResult.release_name || updateResult.latest_version}${updateResult.published_at ? ` · ${formatDate(updateResult.published_at)}` : ""}`}</p>
                 </div>
-                {updateResult.release_url && <button className="button secondary" onClick={() => void openGitHub(updateResult.release_url!)}>查看 Release<ExternalLink size={14} /></button>}
+                <div className="settings-tool-actions">{updateResult.update_available && <UpdateButton updater={updater} version={updateResult.latest_version} />}{updateResult.release_url && <button className="button secondary" onClick={() => void openGitHub(updateResult.release_url!)}>查看 Release<ExternalLink size={14} /></button>}</div>
               </div>}
               <div className="settings-tool"><div><strong>反馈问题</strong><p>在 GitHub 新建 Issue；提交内容前由你自行确认。</p></div><div className="settings-tool-actions"><button className="button secondary" onClick={() => void openGitHub(FEEDBACK_URL)}><MessageSquare size={16} />打开反馈页面<ExternalLink size={14} /></button></div></div>
             </section>}

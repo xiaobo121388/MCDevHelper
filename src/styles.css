@@ -344,6 +344,14 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px s
 .remote-release-notes { overflow: auto; max-height: 230px; margin: 0; padding: 12px; border: 1px solid var(--border); border-radius: 9px; color: var(--text); background: var(--panel-soft); white-space: pre-wrap; overflow-wrap: anywhere; font-size: 10px; line-height: 1.6; }
 .release-download-note { margin: 0; color: var(--muted); font-size: 10px; line-height: 1.55; }
 .spin { animation: spin .8s linear infinite; }
+.app-update-overlay { z-index: 60; }
+.app-update-progress { display: grid; gap: 12px; }
+.app-update-progress progress { appearance: none; display: block; width: 100%; height: 8px; border: 0; border-radius: 4px; background: var(--panel-soft); accent-color: var(--accent); }
+.app-update-progress progress::-webkit-progress-bar { border-radius: 4px; background: var(--panel-soft); }
+.app-update-progress progress::-webkit-progress-value { border-radius: 4px; background: var(--accent); }
+.app-update-progress p { margin: 0; font-size: 12px; line-height: 1.6; color: var(--muted); }
+.app-update-error { position: fixed; z-index: 70; right: 24px; bottom: 24px; width: min(430px, calc(100vw - 48px)); max-height: 60vh; overflow: auto; padding: 16px; border: 1px solid var(--warning-border); border-radius: 8px; background: var(--panel); box-shadow: var(--shadow); font-size: 12px; }
+.app-update-error p { overflow-wrap: anywhere; line-height: 1.6; }
 @keyframes spin { to { transform: rotate(360deg); } }
 .warnings-dialog { display: grid; gap: 16px; }
 .warnings-help { display: flex; align-items: flex-start; gap: 10px; padding: 11px 12px; border: 1px solid var(--warning-border); border-radius: 9px; color: var(--warning-text); background: var(--warning-bg); }

@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { Channel, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import type {
   AppSettings,
@@ -11,6 +11,7 @@ import type {
   OperationResult,
   SourceRecord,
   UpdateCheckResult,
+  AppUpdateProgress,
   VersionPart,
   McdkStatus,
   McdkSession,
@@ -27,6 +28,12 @@ export const api = {
   launchGame: (componentId: string) => invoke<McdkSession>("launch_component_game", { componentId }),
   version: () => invoke<string>("app_version"),
   checkForUpdates: () => invoke<UpdateCheckResult>("check_for_updates"),
+  appUpdateError: (clear = false) => invoke<string | null>("app_update_error", { clear }),
+  installAppUpdate: (version: string, handler: (progress: AppUpdateProgress) => void) => {
+    const onProgress = new Channel<AppUpdateProgress>();
+    onProgress.onmessage = handler;
+    return invoke<void>("install_app_update", { version, onProgress });
+  },
   refresh: () => invoke<DiscoveryResult>("refresh_components"),
   sources: () => invoke<SourceRecord[]>("list_sources"),
   addSingle: (path: string) => invoke<SourceRecord>("add_single_component", { path }),

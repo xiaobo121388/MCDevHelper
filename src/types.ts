@@ -75,6 +75,12 @@ export interface UpdateCheckResult {
   no_release: boolean;
 }
 
+export interface AppUpdateProgress {
+  phase: "checking" | "downloading" | "verifying" | "installing";
+  downloaded_bytes: number;
+  total_bytes: number;
+}
+
 export interface CoreError {
   code: string;
   message: string;

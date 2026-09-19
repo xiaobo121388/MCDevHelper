@@ -1,6 +1,5 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::time::Duration;
 
 use mcdh_core::{
     AppSettings, BumpManifestVersionRequest, ComponentService, ComponentSummary,
@@ -15,6 +14,8 @@ use tauri::State;
 mod mcdk_manager;
 mod mcdk_release;
 mod mcdk_launch;
+mod app_update;
+use app_update::{install_app_update, app_update_error};
 use mcdk_launch::launch_component_game;
 use mcdk_manager::{mcdk_status, set_mcdk_auto_update, check_mcdk_update, install_mcdk_update};
 
@@ -52,6 +53,12 @@ struct GitHubRelease {
     html_url: String,
     published_at: Option<String>,
     body: Option<String>,
+    #[serde(default)]
+    draft: bool,
+    #[serde(default)]
+    prerelease: bool,
+    #[serde(default)]
+    assets: Vec<app_update::Asset>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -83,7 +90,8 @@ impl UpdateCheckResult {
     fn from_release(release: GitHubRelease) -> Self {
         Self {
             current_version: mcdh_core::VERSION.into(),
-            update_available: release_is_newer(mcdh_core::VERSION, &release.tag_name),
+            update_available: !release.draft && !release.prerelease
+                && release_is_newer(mcdh_core::VERSION, &release.tag_name),
             latest_version: Some(release.tag_name),
             release_name: release.name,
             release_url: Some(release.html_url),
@@ -96,36 +104,8 @@ impl UpdateCheckResult {
 
 #[tauri::command]
 async fn check_for_updates() -> CommandResult<UpdateCheckResult> {
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(12))
-        .build()
-        .map_err(|error| update_error(format!("无法初始化更新检查：{error}")))?;
-    let response = client
-        .get(LATEST_RELEASE_API)
-        .header(reqwest::header::ACCEPT, "application/vnd.github+json")
-        .header("X-GitHub-Api-Version", GITHUB_API_VERSION)
-        .header(
-            reqwest::header::USER_AGENT,
-            format!("MCDH/{}", mcdh_core::VERSION),
-        )
-        .send()
-        .await
-        .map_err(|error| update_error(format!("无法连接 GitHub：{error}")))?;
-
-    if response.status() == reqwest::StatusCode::NOT_FOUND {
-        return Ok(UpdateCheckResult::no_release());
-    }
-    if !response.status().is_success() {
-        return Err(update_error(format!(
-            "GitHub 返回 HTTP {}，请稍后重试",
-            response.status().as_u16()
-        )));
-    }
-    let release = response
-        .json::<GitHubRelease>()
-        .await
-        .map_err(|error| update_error(format!("GitHub Release 数据无法读取：{error}")))?;
-    Ok(UpdateCheckResult::from_release(release))
+    Ok(app_update::latest_release().await.map_err(update_error)?
+        .map(UpdateCheckResult::from_release).unwrap_or_else(UpdateCheckResult::no_release))
 }
 
 fn release_is_newer(current: &str, candidate: &str) -> bool {
@@ -135,8 +115,8 @@ fn release_is_newer(current: &str, candidate: &str) -> bool {
         semver::Version::parse(current),
         semver::Version::parse(candidate),
     ) {
-        (Ok(current), Ok(candidate)) => candidate > current,
-        _ => candidate != current,
+        (Ok(current), Ok(candidate)) => candidate.pre.is_empty() && candidate.build.is_empty() && candidate > current,
+        _ => false,
     }
 }
 
@@ -389,6 +369,8 @@ pub fn run() {
             check_mcdk_update,
             install_mcdk_update,
             check_for_updates,
+            install_app_update,
+            app_update_error,
             mcp_client_config,
             refresh_components,
             get_component,
@@ -439,6 +421,8 @@ mod tests {
         assert!(release_is_newer("0.1.0", "v0.2.0"));
         assert!(!release_is_newer("0.1.0", "v0.1.0"));
         assert!(!release_is_newer("0.1.0", "v0.0.9"));
+        assert!(!release_is_newer("0.1.0", "invalid"));
+        assert!(!release_is_newer("0.1.0", "v9.0.0-beta.1"));
     }
 
     #[test]
@@ -449,6 +433,9 @@ mod tests {
             html_url: "https://github.com/xiaobo121388/MCDevHelper/releases/tag/v1.2.0".into(),
             published_at: Some("2026-08-10T12:00:00Z".into()),
             body: Some("新增自动更新提示".into()),
+            draft: false,
+            prerelease: false,
+            assets: vec![],
         });
         assert!(result.update_available);
         assert_eq!(result.latest_version.as_deref(), Some("v1.2.0"));

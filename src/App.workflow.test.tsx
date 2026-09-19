@@ -17,6 +17,8 @@ const mocks = vi.hoisted(() => ({
   vscodeStatus: vi.fn(),
   version: vi.fn(),
   checkForUpdates: vi.fn(),
+  installAppUpdate: vi.fn(),
+  appUpdateError: vi.fn(),
   openUrl: vi.fn(),
   mcdkStatus: vi.fn(),
   onMcdkStatus: vi.fn(),
@@ -48,6 +50,8 @@ vi.mock("./api", () => ({
     vscodeStatus: mocks.vscodeStatus,
     version: mocks.version,
     checkForUpdates: mocks.checkForUpdates,
+    installAppUpdate: mocks.installAppUpdate,
+    appUpdateError: mocks.appUpdateError,
     mcdkStatus: mocks.mcdkStatus,
     onMcdkStatus: mocks.onMcdkStatus,
     launchGame: mocks.launchGame,
@@ -60,6 +64,7 @@ vi.mock("./api", () => ({
 
 import { App } from "./App";
 import type { McdkStatus } from "./types";
+import type { AppUpdateProgress } from "./types";
 
 const mcdkReady: McdkStatus = {
   available: true, current_version: "1.6.1", auto_update: true, phase: "idle", latest_version: null,
@@ -99,6 +104,8 @@ describe("component workspace filters", () => {
       no_release: false,
     });
     mocks.openUrl.mockReset().mockResolvedValue(undefined);
+    mocks.installAppUpdate.mockReset().mockResolvedValue(undefined);
+    mocks.appUpdateError.mockReset().mockResolvedValue(null);
     mocks.mcdkStatus.mockReset().mockResolvedValue(mcdkReady);
     mocks.onMcdkStatus.mockReset().mockResolvedValue(() => undefined);
     mocks.launchGame.mockReset();
@@ -372,6 +379,8 @@ describe("component workspace filters", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /打开反馈页面/ }));
     await waitFor(() => expect(mocks.openUrl).toHaveBeenCalledWith("https://github.com/xiaobo121388/MCDevHelper/issues/new"));
+    fireEvent.click(screen.getByRole("button", { name: "立即更新" }));
+    await waitFor(() => expect(mocks.installAppUpdate).toHaveBeenCalledWith("v1.2.0", expect.any(Function)));
   });
 
   it("automatically reports a newer GitHub release on startup", async () => {
@@ -392,8 +401,11 @@ describe("component workspace filters", () => {
     expect(screen.getByText(/新增批量管理功能/)).toBeInTheDocument();
     expect(mocks.checkForUpdates).toHaveBeenCalledTimes(1);
 
-    fireEvent.click(screen.getByRole("button", { name: /前往下载/ }));
-    await waitFor(() => expect(mocks.openUrl).toHaveBeenCalledWith("https://github.com/xiaobo121388/MCDevHelper/releases/tag/v1.2.0"));
+    expect(mocks.installAppUpdate).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "立即更新" }));
+    await waitFor(() => expect(mocks.installAppUpdate).toHaveBeenCalledWith("v1.2.0", expect.any(Function)));
+    expect(mocks.openUrl).not.toHaveBeenCalled();
+    expect(await screen.findByRole("heading", { name: "正在安装，即将自动重启" })).toBeInTheDocument();
     await waitFor(() => expect(screen.queryByRole("heading", { name: "发现新版本 v1.2.0" })).not.toBeInTheDocument());
   });
 
@@ -429,6 +441,43 @@ describe("component workspace filters", () => {
     render(<App />);
     await waitFor(() => expect(mocks.checkForUpdates).toHaveBeenCalledTimes(2));
     expect(screen.queryByRole("heading", { name: "已更新至 v1.1.0" })).not.toBeInTheDocument();
+  });
+
+  it("shows download progress, prevents duplicate installs, and permits retry after a failure", async () => {
+    mocks.refresh.mockResolvedValue({ components: [], sources: [], warnings: [] });
+    mocks.checkForUpdates.mockResolvedValue({ current_version: "1.1.0", latest_version: "v1.2.0", update_available: true, no_release: false });
+    let report!: (progress: AppUpdateProgress) => void;
+    let fail!: (reason: Error) => void;
+    mocks.installAppUpdate.mockImplementationOnce((_version, handler) => {
+      report = handler;
+      return new Promise((_resolve, reject) => { fail = reject; });
+    });
+    render(<App />);
+    const install = await screen.findByRole("button", { name: "立即更新" });
+    fireEvent.click(install);
+    fireEvent.click(install);
+    expect(mocks.installAppUpdate).toHaveBeenCalledTimes(1);
+    act(() => report({ phase: "downloading", downloaded_bytes: 40, total_bytes: 100 }));
+    expect(screen.getByRole("heading", { name: "正在下载更新" })).toBeInTheDocument();
+    expect(screen.getByRole("progressbar", { name: "更新下载进度" })).toHaveAttribute("value", "40");
+    expect(screen.queryByRole("button", { name: "立即更新" })).not.toBeInTheDocument();
+    await act(async () => fail(new Error("SHA-256 校验失败")));
+    expect(await screen.findByRole("alert")).toHaveTextContent("SHA-256 校验失败");
+    fireEvent.click(screen.getByRole("button", { name: "立即更新" }));
+    await waitFor(() => expect(mocks.installAppUpdate).toHaveBeenCalledTimes(2));
+    expect(await screen.findByRole("heading", { name: "正在安装，即将自动重启" })).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(mocks.openUrl).not.toHaveBeenCalled();
+  });
+
+  it("persists installation failure feedback until explicitly dismissed", async () => {
+    mocks.refresh.mockResolvedValue({ components: [], sources: [], warnings: [] });
+    mocks.appUpdateError.mockResolvedValue("Silent installer failed; original application files restored.");
+    render(<App />);
+    expect(await screen.findByRole("alert")).toHaveTextContent("original application files restored");
+    fireEvent.click(within(screen.getByRole("alert")).getByRole("button", { name: "知道了" }));
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(mocks.appUpdateError).toHaveBeenLastCalledWith(true);
   });
 
   it("requires two confirmations before deleting a component", async () => {
