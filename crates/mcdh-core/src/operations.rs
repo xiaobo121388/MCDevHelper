@@ -993,7 +993,7 @@ fn inspect_import(root: &Path, source: &Path) -> Result<(ComponentKind, String)>
     Err(CoreError::InvalidComponent(root.to_path_buf()))
 }
 
-fn inspect_export(root: &Path) -> Result<(ComponentKind, String)> {
+pub(crate) fn inspect_export(root: &Path) -> Result<(ComponentKind, String)> {
     let (kind, mut name) = inspect_import(root, root)?;
     if kind == ComponentKind::Addon
         && !root.join("work.mcscfg").is_file()
