@@ -58,6 +58,40 @@ describe("custom export", () => {
     expect(api.startCustomExport).not.toHaveBeenCalled();
   });
 
+  it("restores completed exports without replaying completion after remount and permits a new export", async () => {
+    const result = { actual_path: "D:\\output\\result.bin", modified_files: [], warnings: [] };
+    const history: CustomExportTask = { ...baseTask, status: "succeeded", result, logs: [{ sequence: 1, source: "stdout", text: "previous export log" }], next_cursor: 1 };
+    vi.mocked(api.customExportTasks).mockResolvedValue([{ ...history, logs: [] }]);
+    vi.mocked(api.customExportTask).mockResolvedValue(history);
+    const first = render(<ExportHarness />);
+    expect(await screen.findByText("previous export log")).toBeInTheDocument();
+    expect(done).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "发布测试包" })).toBeEnabled();
+    first.unmount();
+
+    render(<ExportHarness />);
+    expect(await screen.findByText("previous export log")).toBeInTheDocument();
+    expect(done).not.toHaveBeenCalled();
+    const nextResult = { ...result, actual_path: "D:\\output\\result (2).bin" };
+    vi.mocked(api.startCustomExport).mockResolvedValue({ ...baseTask, id: "new-task" });
+    vi.mocked(api.customExportTask).mockResolvedValue({ ...baseTask, id: "new-task", status: "succeeded", result: nextResult });
+    fireEvent.click(screen.getByRole("button", { name: "发布测试包" }));
+    await waitFor(() => expect(done).toHaveBeenCalledTimes(1));
+    expect(done).toHaveBeenCalledWith(nextResult, "D:\\output");
+    expect(api.customExportTask).toHaveBeenLastCalledWith("new-task", 0);
+    expect(screen.queryByText("previous export log")).not.toBeInTheDocument();
+  });
+
+  it("still reports completion when a recovered running export finishes", async () => {
+    const result = { actual_path: "D:\\output\\finished.bin", modified_files: [], warnings: [] };
+    vi.mocked(api.customExportTasks).mockResolvedValue([baseTask]);
+    vi.mocked(api.customExportTask).mockResolvedValue({ ...baseTask, status: "succeeded", result });
+    render(<ExportHarness />);
+    await waitFor(() => expect(done).toHaveBeenCalledTimes(1));
+    expect(done).toHaveBeenCalledWith(result, "D:\\output");
+    expect(api.startCustomExport).not.toHaveBeenCalled();
+  });
+
   it("streams logs and resolves conflicts without rerunning the program", async () => {
     const waiting: CustomExportTask = { ...baseTask, status: "awaiting_conflict", conflict_path: "D:\\output\\result.bin", logs: [{ sequence: 1, source: "stdout", text: "packing complete" }], next_cursor: 1 };
     vi.mocked(api.customExportTask).mockResolvedValue(waiting);

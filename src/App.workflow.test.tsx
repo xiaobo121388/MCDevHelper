@@ -9,6 +9,8 @@ const mocks = vi.hoisted(() => ({
   export: vi.fn(),
   customExportProfiles: vi.fn(),
   customExportTasks: vi.fn(),
+  startCustomExport: vi.fn(),
+  customExportTask: vi.fn(),
   import: vi.fn(),
   metadata: vi.fn(),
   regenerateUuids: vi.fn(),
@@ -44,6 +46,8 @@ vi.mock("./api", () => ({
     export: mocks.export,
     customExportProfiles: mocks.customExportProfiles,
     customExportTasks: mocks.customExportTasks,
+    startCustomExport: mocks.startCustomExport,
+    customExportTask: mocks.customExportTask,
     import: mocks.import,
     metadata: mocks.metadata,
     regenerateUuids: mocks.regenerateUuids,
@@ -93,6 +97,8 @@ describe("component workspace filters", () => {
     mocks.export.mockReset();
     mocks.customExportProfiles.mockReset().mockResolvedValue([]);
     mocks.customExportTasks.mockReset().mockResolvedValue([]);
+    mocks.startCustomExport.mockReset();
+    mocks.customExportTask.mockReset();
     mocks.import.mockReset();
     mocks.metadata.mockReset();
     mocks.regenerateUuids.mockReset();
@@ -500,6 +506,38 @@ describe("component workspace filters", () => {
     await waitFor(() => expect(mocks.delete).toHaveBeenCalledWith("delete-me"));
     expect(confirm).toHaveBeenCalledTimes(2);
     confirm.mockRestore();
+  });
+
+  it("keeps component configuration open when reopening after a successful custom export", async () => {
+    const component = { id: "exported", name: "导出后的模组", kind: "addon", path: "D:\\项目", origin: { kind: "single" }, manifests: [], tags: [], favorite: false, size_bytes: 1 };
+    mocks.refresh.mockResolvedValue({ components: [component], sources: [], warnings: [] });
+    mocks.customExportProfiles.mockResolvedValue([{ id: "packer", name: "测试打包", enabled: true, component_kinds: ["addon"], input_mode: "snapshot" }]);
+    const succeeded = {
+      id: "completed-export", component_id: component.id, profile_id: "packer", profile_name: "测试打包", destination: "D:\\导出",
+      status: "succeeded", cancel_requested: false, conflict_path: null, error: null,
+      result: { actual_path: "D:\\导出\\test.zip", modified_files: [], warnings: [] },
+      logs: [{ sequence: 1, source: "stdout", text: "历史打包日志" }], next_cursor: 1, logs_truncated: false,
+    };
+    mocks.startCustomExport.mockResolvedValue({ ...succeeded, status: "preparing", result: null, logs: [], next_cursor: 0 });
+    mocks.customExportTask.mockResolvedValue(succeeded);
+    window.localStorage.setItem("mcdh.last-export-destination", "D:\\导出");
+    render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: "配置 导出后的模组" }));
+    fireEvent.click(await screen.findByRole("button", { name: "测试打包" }));
+    expect(await screen.findByText("自定义导出已完成")).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    mocks.customExportTasks.mockResolvedValue([{ ...succeeded, logs: [] }]);
+
+    for (let attempt = 0; attempt < 2; attempt++) {
+      fireEvent.click(screen.getByRole("button", { name: "配置 导出后的模组" }));
+      expect(await screen.findByText("历史打包日志")).toBeInTheDocument();
+      expect(screen.getByRole("dialog", { name: "导出后的模组" })).toBeInTheDocument();
+      expect(screen.getByLabelText("显示名称")).toHaveValue(component.name);
+      expect(screen.getByRole("button", { name: "测试打包" })).toBeEnabled();
+      fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "关闭" }));
+    }
+    expect(mocks.startCustomExport).toHaveBeenCalledTimes(1);
+    expect(mocks.refresh).toHaveBeenCalledTimes(1);
   });
 
   it("updates UUID and version results without rescanning every source", async () => {

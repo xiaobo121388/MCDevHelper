@@ -32,7 +32,12 @@ export function useCustomExport(component: ComponentSummary, destination: string
       setProfiles(nextProfiles.filter((profile) => profile.enabled && profile.component_kinds.includes(component.kind)));
       const matching = tasks.filter((item) => item.component_id === component.id);
       const existing = matching.find((item) => !exportTerminal(item.status)) ?? matching.at(-1);
-      if (existing) { cursor.current = 0; setTask(existing); }
+      if (existing) {
+        // Restored terminal tasks are history, not new completion events.
+        if (exportTerminal(existing.status)) completed.current.add(existing.id);
+        cursor.current = 0;
+        setTask(existing);
+      }
     }).catch((error) => { if (active) callbacks.current.onError(errorMessage(error)); });
     return () => { active = false; };
   }, [component.id, component.kind]);
