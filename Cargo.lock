@@ -2191,7 +2191,7 @@ dependencies = [
 
 [[package]]
 name = "mcdh-core"
-version = "1.1.0"
+version = "1.2.0"
 dependencies = [
  "chrono",
  "directories",
@@ -2213,7 +2213,7 @@ dependencies = [
 
 [[package]]
 name = "mcdh-desktop"
-version = "1.1.0"
+version = "1.2.0"
 dependencies = [
  "chrono",
  "mcdh-core",
@@ -2235,7 +2235,7 @@ dependencies = [
 
 [[package]]
 name = "mcdh-mcp"
-version = "1.1.0"
+version = "1.2.0"
 dependencies = [
  "anyhow",
  "mcdh-core",
