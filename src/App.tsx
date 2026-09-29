@@ -21,8 +21,6 @@ import {
   Map,
   MessageSquare,
   MoreHorizontal,
-  Monitor,
-  Moon,
   PackagePlus,
   Palette,
   RefreshCw,
@@ -33,19 +31,20 @@ import {
   Settings2,
   Sparkles,
   Star,
-  Sun,
   Tag,
   Trash2,
   TriangleAlert,
   UserRound,
   X,
 } from "lucide-react";
-import { FormEvent, ReactNode, useCallback, useEffect, useMemo, useState } from "react";
+import { FormEvent, ReactNode, useCallback, useEffect, useLayoutEffect, useMemo, useState } from "react";
 import { api, desktop, errorMessage } from "./api";
 import { releaseNotesFor } from "./releaseNotes";
 import { useAppUpdate, UpdateButton, UpdateProgress, type AppUpdater } from "./AppUpdate";
 import { useMcdk, LaunchGameButton, McdkSettings, type McdkController } from "./Mcdk";
 import { CustomExportSettings } from "./CustomExportSettings";
+import { AppearanceSettings } from "./AppearanceSettings";
+import { applyAppearance } from "./appearance";
 import { WindowChrome } from "./WindowChrome";
 import appIcon from "../src-tauri/icons/128x128.png";
 import { DialogLauncher } from "./DialogLauncher";
@@ -75,6 +74,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   developer_account: "mcdh@local.invalid",
   developer_user_id: "0",
   theme: "system",
+  color_preset: "fluent",
 };
 const kindText: Record<ComponentKind, string> = { addon: "模组", material: "材质", map: "地图" };
 type SortKey = "updated" | "name" | "modified" | "created" | "size";
@@ -183,9 +183,9 @@ export function App() {
     return () => { active = false; };
   }, []);
 
-  useEffect(() => {
-    document.documentElement.dataset.theme = settings.theme;
-  }, [settings.theme]);
+  useLayoutEffect(() => {
+    applyAppearance(settings);
+  }, [settings.theme, settings.color_preset]);
 
   useEffect(() => {
     if (!notice) return;
@@ -632,7 +632,7 @@ export function SettingsDialog({ settings: initialSettings, mcdk, updater, onSet
       onNotice(errorMessage(error));
     }
   };
-  const close = () => { document.documentElement.dataset.theme = initialSettings.theme; onClose(); };
+  const close = () => { applyAppearance(initialSettings); onClose(); };
   const destinationSources = sources.filter((source) => source.kind !== "single");
   const settingsNavigation: { id: SettingsSection; label: string; icon: ReactNode }[] = [
     { id: "paths", label: "路径管理", icon: <FolderCog size={17} /> },
@@ -673,10 +673,10 @@ export function SettingsDialog({ settings: initialSettings, mcdk, updater, onSet
               <div className="settings-grid"><Field label="开发者昵称"><input value={settings.developer_nickname} onChange={(event) => setSettings((value) => ({ ...value, developer_nickname: event.target.value }))} /></Field><Field label="开发者账号"><input value={settings.developer_account} onChange={(event) => setSettings((value) => ({ ...value, developer_account: event.target.value }))} /></Field><Field label="用户 ID"><input value={settings.developer_user_id} onChange={(event) => setSettings((value) => ({ ...value, developer_user_id: event.target.value }))} /></Field></div>
             </section>}
 
-            {section === "appearance" && <section>
-              <div className="section-heading"><div><h3>外观</h3><p>选择亮色、暗色，或跟随 Windows 系统设置。</p></div><Palette size={19} /></div>
-              <div className="theme-picker" role="radiogroup" aria-label="界面颜色">{([{ value: "system", label: "跟随系统", icon: Monitor }, { value: "light", label: "浅色", icon: Sun }, { value: "dark", label: "深色", icon: Moon }] as const).map(({ value, label, icon: Icon }) => <label key={value} className={settings.theme === value ? "selected" : ""}><input type="radio" name="theme" value={value} checked={settings.theme === value} onChange={() => { setSettings((current) => ({ ...current, theme: value })); document.documentElement.dataset.theme = value; }} /><Icon size={18} /><span>{label}</span></label>)}</div>
-            </section>}
+            {section === "appearance" && <AppearanceSettings value={settings} disabled={!!busy} onChange={(appearance) => {
+              setSettings((current) => ({ ...current, ...appearance }));
+              applyAppearance(appearance);
+            }} />}
 
             {section === "tools" && <section>
               <div className="section-heading"><div><h3>开发工具</h3><p>配置编辑器，以及供 AI 使用的本地 MCP 服务。</p></div><Code2 size={19} /></div>

@@ -16,7 +16,7 @@ import { DialogApp } from "./DialogApp";
 describe("standalone dialog application", () => {
   beforeEach(() => {
     vi.resetAllMocks();
-    mocks.settings.mockResolvedValue({ developer_nickname: "MCDH", developer_account: "local", developer_user_id: "0", theme: "dark" });
+    mocks.settings.mockResolvedValue({ developer_nickname: "MCDH", developer_account: "local", developer_user_id: "0", theme: "dark", color_preset: "graphite" });
     mocks.sources.mockResolvedValue([{ id: "library", kind: "library", path: "D:/TestLibrary" }]);
     mocks.create.mockResolvedValue({ actual_path: "D:/TestLibrary/New" });
     mocks.notify.mockResolvedValue(undefined); mocks.close.mockResolvedValue(undefined); mocks.open.mockResolvedValue(undefined);
@@ -30,7 +30,8 @@ describe("standalone dialog application", () => {
     expect(container.querySelector(".standalone-modal")).toBeInTheDocument();
     expect(container.querySelector(".modal-backdrop")).toBeNull();
     expect(container.querySelector(".app-shell")).toBeNull();
-    expect(document.documentElement.dataset.theme).toBe("dark");
+    await waitFor(() => expect(document.documentElement.dataset.theme).toBe("dark"));
+    expect(document.documentElement.dataset.colorPreset).toBe("graphite");
     expect(mocks.show).toHaveBeenCalledOnce();
   });
 
@@ -53,6 +54,17 @@ describe("standalone dialog application", () => {
     const handler = mocks.listen.mock.calls.find(([name]) => name === "workspace")![1];
     await act(async () => handler());
     expect(await screen.findByRole("combobox", { name: "生成位置" })).toHaveValue("D:/TestLibrary");
+  });
+
+  it("updates an existing dialog when a saved palette changes in another window", async () => {
+    render(<DialogApp request={{ kind: "create" }} />);
+    await screen.findByRole("textbox", { name: "组件名称" });
+    mocks.settings.mockResolvedValue({ developer_nickname: "MCDH", developer_account: "local", developer_user_id: "0", theme: "light", color_preset: "rose" });
+    const handler = mocks.listen.mock.calls.find(([name]) => name === "settings")![1];
+    await act(async () => handler());
+    await waitFor(() => expect(document.documentElement.dataset.colorPreset).toBe("rose"));
+    expect(document.documentElement.dataset.theme).toBe("light");
+    expect(document.documentElement.style.getPropertyValue("--preset-accent-light")).toBe("#b23d70");
   });
 
   it("keeps load failures visible and supports retry", async () => {

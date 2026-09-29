@@ -17,7 +17,7 @@ mod template;
 pub use error::{CoreError, ErrorPayload, Result};
 pub use index::{LocalIndex, MutationGuard};
 pub use model::{
-    AppSettings, BumpManifestVersionRequest, ComponentKind, ComponentMetadata, ComponentOrigin,
+    AppSettings, BumpManifestVersionRequest, ColorPreset, ComponentKind, ComponentMetadata, ComponentOrigin,
     ComponentSummary, ContentMode, CopyComponentRequest, CreateComponentRequest, DiscoveryResult,
     DiscoveryWarning, ExportComponentRequest, ExportConflictPolicy, IdentityPolicy,
     ImportComponentRequest, ManifestSummary, McsInfo, McsTemplateIdentity, MoveComponentRequest,

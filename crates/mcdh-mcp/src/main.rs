@@ -105,12 +105,17 @@ impl McdhServer {
 
     #[tool(description = "保存本地开发者身份、默认新建目录和界面主题设置")]
     fn set_settings(&self, Parameters(params): Parameters<SettingsParams>) -> ToolResult {
+        let current = match self.index.app_settings() {
+            Ok(settings) => settings,
+            Err(error) => return json_result::<AppSettings>(Err(error)),
+        };
         json_result(self.index.set_app_settings(&AppSettings {
             developer_nickname: params.developer_nickname,
             developer_account: params.developer_account,
             developer_user_id: params.developer_user_id,
             default_destination: params.default_destination,
             theme: params.theme.into(),
+            ..current
         }))
     }
 

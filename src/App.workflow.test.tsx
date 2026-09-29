@@ -303,6 +303,53 @@ describe("component workspace filters", () => {
     expect(mocks.refresh).toHaveBeenCalledTimes(1);
   });
 
+  it("previews a palette and restores saved appearance when settings are dismissed", async () => {
+    mocks.refresh.mockResolvedValue({ components: [], sources: [], warnings: [] });
+    render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: "设置" }));
+    fireEvent.click(within(await screen.findByRole("navigation", { name: "设置分类" })).getByRole("button", { name: "外观" }));
+    fireEvent.click(await screen.findByRole("radio", { name: "石墨灰" }));
+    fireEvent.click(screen.getByRole("radio", { name: "深色" }));
+    expect(document.documentElement.dataset.colorPreset).toBe("graphite");
+    expect(document.documentElement.dataset.theme).toBe("dark");
+    expect(mocks.setSettings).not.toHaveBeenCalled();
+    fireEvent.click(screen.getAllByRole("button", { name: "关闭" })[0]);
+    expect(document.documentElement.dataset.colorPreset).toBe("fluent");
+    expect(document.documentElement.dataset.theme).toBe("system");
+  });
+
+  it("persists a selected palette and keeps it after reopening settings", async () => {
+    mocks.refresh.mockResolvedValue({ components: [], sources: [], warnings: [] });
+    mocks.setSettings.mockImplementation(async (settings) => { mocks.settings.mockResolvedValue(settings); return settings; });
+    render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: "设置" }));
+    fireEvent.click(within(await screen.findByRole("navigation", { name: "设置分类" })).getByRole("button", { name: "外观" }));
+    fireEvent.click(await screen.findByRole("radio", { name: "macOS 蓝" }));
+    fireEvent.click(screen.getByRole("radio", { name: "浅色" }));
+    fireEvent.click(screen.getByRole("button", { name: "保存设置" }));
+    await waitFor(() => expect(mocks.setSettings).toHaveBeenCalledWith(expect.objectContaining({ color_preset: "cupertino", theme: "light", developer_nickname: "MCDH" })));
+    await screen.findByText("设置已保存。");
+    fireEvent.click(screen.getAllByRole("button", { name: "关闭" })[0]);
+    expect(document.documentElement.dataset.colorPreset).toBe("cupertino");
+    fireEvent.click(screen.getByRole("button", { name: "设置" }));
+    fireEvent.click(within(await screen.findByRole("navigation", { name: "设置分类" })).getByRole("button", { name: "外观" }));
+    expect(await screen.findByRole("radio", { name: "macOS 蓝" })).toBeChecked();
+    expect(screen.getByRole("radio", { name: "浅色" })).toBeChecked();
+  });
+
+  it("does not change saved appearance when saving a preview fails", async () => {
+    mocks.refresh.mockResolvedValue({ components: [], sources: [], warnings: [] });
+    mocks.setSettings.mockRejectedValue(new Error("write failed"));
+    render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: "设置" }));
+    fireEvent.click(within(await screen.findByRole("navigation", { name: "设置分类" })).getByRole("button", { name: "外观" }));
+    fireEvent.click(await screen.findByRole("radio", { name: "鸢尾紫" }));
+    fireEvent.click(screen.getByRole("button", { name: "保存设置" }));
+    await screen.findByText("Error: write failed");
+    fireEvent.click(screen.getAllByRole("button", { name: "关闭" })[0]);
+    expect(document.documentElement.dataset.colorPreset).toBe("fluent");
+  });
+
   it("does not rescan when the window regains focus", async () => {
     mocks.refresh.mockResolvedValue({ components: [], sources: [], warnings: [] });
     render(<App />);

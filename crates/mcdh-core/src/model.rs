@@ -69,6 +69,21 @@ pub struct AppSettings {
     pub developer_user_id: String,
     pub default_destination: Option<PathBuf>,
     pub theme: ThemePreference,
+    pub color_preset: ColorPreset,
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ColorPreset {
+    #[default]
+    Fluent,
+    Cupertino,
+    Graphite,
+    Violet,
+    Rose,
+    Amber,
+    Cyan,
+    Coral,
 }
 
 impl Default for AppSettings {
@@ -79,6 +94,7 @@ impl Default for AppSettings {
             developer_user_id: "0".into(),
             default_destination: None,
             theme: ThemePreference::System,
+            color_preset: ColorPreset::Fluent,
         }
     }
 }

@@ -463,6 +463,7 @@ mod tests {
                 developer_user_id: " 42 ".into(),
                 default_destination: Some(default_destination.clone()),
                 theme: crate::ThemePreference::Dark,
+                color_preset: crate::ColorPreset::Graphite,
             })
             .unwrap();
         assert_eq!(saved.developer_nickname, "开发者");
@@ -471,6 +472,7 @@ mod tests {
             Some(default_destination.as_path())
         );
         assert_eq!(index.app_settings().unwrap(), saved);
+        assert_eq!(saved.color_preset, crate::ColorPreset::Graphite);
 
         index
             .set_setting(
@@ -485,6 +487,28 @@ mod tests {
         let jsonc_settings = index.app_settings().unwrap();
         assert_eq!(jsonc_settings.developer_nickname, "JSONC 开发者");
         assert_eq!(jsonc_settings.theme, crate::ThemePreference::Light);
+        assert_eq!(jsonc_settings.color_preset, crate::ColorPreset::Fluent);
+    }
+
+    #[test]
+    fn persists_all_color_presets_and_rejects_unknown_presets() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("mcdh.db");
+        let index = LocalIndex::open(&path).unwrap();
+        for preset in [
+            "fluent", "cupertino", "graphite", "violet", "rose", "amber", "cyan", "coral",
+        ] {
+            let settings: AppSettings = serde_json::from_value(serde_json::json!({
+                "theme": "dark", "color_preset": preset
+            }))
+            .unwrap();
+            index.set_app_settings(&settings).unwrap();
+            assert_eq!(
+                LocalIndex::open(&path).unwrap().app_settings().unwrap(),
+                settings
+            );
+        }
+        assert!(serde_json::from_str::<AppSettings>(r#"{"color_preset":"invalid"}"#).is_err());
     }
 
     #[test]

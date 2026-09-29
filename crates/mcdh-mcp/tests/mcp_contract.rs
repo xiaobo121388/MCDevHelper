@@ -329,6 +329,11 @@ fn initializes_lists_strict_schemas_and_calls_every_tool() {
     client.call("rescan_mcs_paths", json!({}));
     let default_settings = client.call("get_settings", json!({}));
     assert_eq!(default_settings["theme"], "system");
+    assert_eq!(default_settings["color_preset"], "fluent");
+    let index = mcdh_core::LocalIndex::open(temp.path().join("state/mcdh.db")).unwrap();
+    let mut appearance = index.app_settings().unwrap();
+    appearance.color_preset = mcdh_core::ColorPreset::Graphite;
+    index.set_app_settings(&appearance).unwrap();
     let saved_settings = client.call(
         "set_settings",
         json!({
@@ -341,6 +346,7 @@ fn initializes_lists_strict_schemas_and_calls_every_tool() {
     );
     assert_eq!(saved_settings["developer_nickname"], "协议开发者");
     assert_eq!(saved_settings["theme"], "dark");
+    assert_eq!(saved_settings["color_preset"], "graphite");
     let created = client.call(
         "create_component",
         json!({

@@ -1,8 +1,9 @@
 import { emitTo, listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { LoaderCircle, TriangleAlert } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useState } from "react";
 import { api, errorMessage } from "./api";
+import { applyAppearance } from "./appearance";
 import { ComponentDialog, CreateDialog, DEFAULT_SETTINGS, ImportDialog, Modal, readIgnoredWarningKeys, SettingsDialog, StartupUpdateDialog, warningKey, WarningsDialog, writeIgnoredWarningKeys } from "./App";
 import { UpdateProgress, useAppUpdate } from "./AppUpdate";
 import { useMcdk } from "./Mcdk";
@@ -38,9 +39,9 @@ export function DialogApp({ request }: { request: DialogRequest }) {
   }, [request]);
 
   useEffect(() => { void load(); }, [load]);
-  useEffect(() => {
-    document.documentElement.dataset.theme = settings.theme;
-  }, [settings.theme]);
+  useLayoutEffect(() => {
+    applyAppearance(settings);
+  }, [settings.theme, settings.color_preset]);
   useEffect(() => {
     if (!nativeWindows) return;
     void getCurrentWindow().show().catch((cause) => setError(errorMessage(cause)));

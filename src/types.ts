@@ -38,12 +38,15 @@ export interface CustomExportTask {
   logs_truncated: boolean;
 }
 
+export type ColorPreset = "fluent" | "cupertino" | "graphite" | "violet" | "rose" | "amber" | "cyan" | "coral";
+
 export interface AppSettings {
   developer_nickname: string;
   developer_account: string;
   developer_user_id: string;
   default_destination?: string;
   theme: ThemePreference;
+  color_preset: ColorPreset;
 }
 
 export interface SourceRecord {
