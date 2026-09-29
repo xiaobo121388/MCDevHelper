@@ -18,6 +18,8 @@
         "minWidth": 900,
         "minHeight": 620,
         "center": true,
+        "decorations": false,
+        "shadow": true,
         "additionalBrowserArgs": "--disable-background-networking --disable-component-update --disable-domain-reliability --disable-sync --no-first-run --proxy-server=http://127.0.0.1:9 --disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection"
       }
     ],

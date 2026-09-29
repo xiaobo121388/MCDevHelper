@@ -17,6 +17,7 @@ mod mcdk_release;
 mod mcdk_launch;
 mod app_update;
 mod custom_export;
+mod windows;
 use custom_export::*;
 use app_update::{install_app_update, app_update_error};
 use mcdk_launch::launch_component_game;
@@ -367,7 +368,18 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_shell::init())
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event
+                && app_update::is_updating()
+            {
+                api.prevent_close();
+            }
+            if window.label() == "main" && matches!(event, tauri::WindowEvent::Destroyed) {
+                window.app_handle().exit(0);
+            }
+        })
         .invoke_handler(tauri::generate_handler![
+            windows::open_dialog_window,
             app_version,
             mcdk_status,
             launch_component_game,
@@ -445,10 +457,14 @@ mod tests {
 
     #[test]
     fn release_payload_preserves_the_official_download_page() {
+        let mut next = semver::Version::parse(mcdh_core::VERSION).unwrap();
+        next.patch += 1;
+        let tag = format!("v{next}");
+        let url = format!("https://github.com/xiaobo121388/MCDevHelper/releases/tag/{tag}");
         let result = UpdateCheckResult::from_release(GitHubRelease {
-            tag_name: "v1.2.0".into(),
-            name: Some("MCDH 1.2.0".into()),
-            html_url: "https://github.com/xiaobo121388/MCDevHelper/releases/tag/v1.2.0".into(),
+            tag_name: tag.clone(),
+            name: Some(format!("MCDH {next}")),
+            html_url: url.clone(),
             published_at: Some("2026-08-10T12:00:00Z".into()),
             body: Some("新增自动更新提示".into()),
             draft: false,
@@ -456,11 +472,11 @@ mod tests {
             assets: vec![],
         });
         assert!(result.update_available);
-        assert_eq!(result.latest_version.as_deref(), Some("v1.2.0"));
+        assert_eq!(result.latest_version.as_deref(), Some(tag.as_str()));
         assert_eq!(result.release_notes.as_deref(), Some("新增自动更新提示"));
         assert_eq!(
             result.release_url.as_deref(),
-            Some("https://github.com/xiaobo121388/MCDevHelper/releases/tag/v1.2.0")
+            Some(url.as_str())
         );
     }
 }

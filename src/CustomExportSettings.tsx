@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { ArrowDown, ArrowUp, FolderOpen, Plus, Save, Trash2, X } from "lucide-react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { api, errorMessage } from "./api";
+import { confirmAction } from "./windows";
 import type { ComponentKind, CustomExportProfile } from "./types";
 
 const kinds: [ComponentKind, string][] = [["addon", "模组"], ["map", "地图"], ["material", "材质"]];
@@ -49,8 +50,8 @@ export function CustomExportSettings() {
     } catch (failure) { setError(errorMessage(failure)); }
   };
   const add = () => { const next = fresh(); setProfiles([...profiles, next]); setSelected(next.id); setMessage(""); };
-  const remove = (item: CustomExportProfile) => {
-    if (!window.confirm('删除导出方案“' + item.name + '”？')) return;
+  const remove = async (item: CustomExportProfile) => {
+    if (!await confirmAction('删除导出方案“' + item.name + '”？')) return;
     const next = profiles.filter((candidate) => candidate.id !== item.id);
     setProfiles(next); if (selected === item.id) setSelected(next[0]?.id ?? ""); setMessage("");
   };
@@ -60,7 +61,7 @@ export function CustomExportSettings() {
   };
   const save = async () => {
     const risky = profiles.some((item) => item.input_mode === "source" && executionChanged(item, saved.find((old) => old.id === item.id)));
-    if (risky && !window.confirm("原目录模式会允许外部程序直接处理项目文件，修改或删除无法撤销。确认保存？")) return;
+    if (risky && !await confirmAction("原目录模式会允许外部程序直接处理项目文件，修改或删除无法撤销。确认保存？")) return;
     setBusy(true); setError(""); setMessage("");
     try {
       const next = await api.saveCustomExportProfiles(profiles);
@@ -93,8 +94,9 @@ export function CustomExportSettings() {
         </div>
         <label className="field"><span>工作目录</span><div className="path-row"><input value={profile.working_directory ?? ""} placeholder="默认使用输入目录" onChange={(event) => update({ working_directory: event.target.value || null })} /><button className="export-icon" title="选择工作目录" type="button" aria-label="选择工作目录" onClick={() => void choosePath(true)}><FolderOpen size={17} /></button></div></label>
         <div className="export-kind-options" role="group" aria-label="适用类型">{kinds.map(([kind, label]) => <label key={kind}><input type="checkbox" checked={profile.component_kinds.includes(kind)} onChange={(event) => update({ component_kinds: event.target.checked ? [...profile.component_kinds, kind] : profile.component_kinds.filter((item) => item !== kind) })} />{label}</label>)}</div>
-        <label className="export-mcp-option"><input type="checkbox" checked={profile.allow_mcp} disabled={executionChanged(profile, original)} onChange={(event) => {
-          if (!event.target.checked || window.confirm("允许 AI/MCP 运行此方案配置的本机程序？程序拥有当前用户权限。")) update({ allow_mcp: event.target.checked });
+        <label className="export-mcp-option"><input type="checkbox" checked={profile.allow_mcp} disabled={executionChanged(profile, original)} onChange={async (event) => {
+          const checked = event.target.checked;
+          if (!checked || await confirmAction("允许 AI/MCP 运行此方案配置的本机程序？程序拥有当前用户权限。")) update({ allow_mcp: checked });
         }} />允许 MCP 执行</label>
         {executionChanged(profile, original) && <p className="export-security-note">执行配置尚未保存，MCP 授权已关闭。</p>}
         {profile.input_mode === "source" && <p className="export-security-note">原目录模式：项目文件可能被修改或删除，无法撤销。</p>}

@@ -17,6 +17,10 @@ const MAX_EXPANDED: u64 = 1024 * 1024 * 1024;
 const WORKER: &str = include_str!("update-worker.ps1");
 static UPDATING: AtomicBool = AtomicBool::new(false);
 
+pub(crate) fn is_updating() -> bool {
+    UPDATING.load(Ordering::SeqCst)
+}
+
 #[derive(Debug, Clone, Deserialize)]
 pub(crate) struct Asset {
     name: String,

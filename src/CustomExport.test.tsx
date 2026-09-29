@@ -156,6 +156,7 @@ describe("custom export", () => {
     fireEvent.change(screen.getByLabelText("程序"), { target: { value: "D:\\pack.exe" } });
     fireEvent.click(screen.getByRole("button", { name: "上移 第二个方案" }));
     fireEvent.click(screen.getByRole("button", { name: "删除 发布测试包" }));
+    await waitFor(() => expect(screen.queryByRole("button", { name: "删除 发布测试包" })).not.toBeInTheDocument());
     fireEvent.click(screen.getByRole("button", { name: "保存导出方案" }));
     await waitFor(() => expect(api.saveCustomExportProfiles).toHaveBeenCalled());
     const saved = vi.mocked(api.saveCustomExportProfiles).mock.calls[0][0];

@@ -1,5 +1,6 @@
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { notifySettings } from "./windows";
 import type {
   AppSettings,
   ComponentKind,
@@ -51,7 +52,11 @@ export const api = {
   rescanMcsPaths: () => invoke<SourceRecord[]>("rescan_mcs_paths"),
   removeSource: (sourceId: string) => invoke<boolean>("remove_source", { sourceId }),
   settings: () => invoke<AppSettings>("get_settings"),
-  setSettings: (settings: AppSettings) => invoke<AppSettings>("set_settings", { settings }),
+  setSettings: async (settings: AppSettings) => {
+    const saved = await invoke<AppSettings>("set_settings", { settings });
+    await notifySettings();
+    return saved;
+  },
   create: (request: {
     name: string;
     kind: ComponentKind;
