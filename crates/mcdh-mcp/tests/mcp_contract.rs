@@ -336,6 +336,7 @@ fn initializes_lists_strict_schemas_and_calls_every_tool() {
     appearance.quick_export.destination = Some(exports.clone());
     appearance.quick_export.regenerate_uuids = false;
     appearance.quick_export.version_part = mcdh_core::VersionPart::Minor;
+    appearance.quick_export.custom_profile_id = Some("desktop-selected-profile".into());
     index.set_app_settings(&appearance).unwrap();
     let saved_settings = client.call(
         "set_settings",
@@ -353,6 +354,7 @@ fn initializes_lists_strict_schemas_and_calls_every_tool() {
     assert_eq!(saved_settings["quick_export"]["destination"], path_text(&exports));
     assert_eq!(saved_settings["quick_export"]["regenerate_uuids"], false);
     assert_eq!(saved_settings["quick_export"]["version_part"], "minor");
+    assert_eq!(saved_settings["quick_export"]["custom_profile_id"], "desktop-selected-profile");
     let created = client.call(
         "create_component",
         json!({

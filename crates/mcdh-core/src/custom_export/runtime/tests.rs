@@ -1,6 +1,11 @@
 use super::*;
 use std::path::PathBuf;
 
+fn read_fixture_json(path: &Path) -> Result<serde_json::Value> {
+    let text = fs::read_to_string(path).map_err(|error| CoreError::io(path, error))?;
+    crate::json::parse_jsonc(&text, path)
+}
+
 struct Fixture {
     _root: tempfile::TempDir,
     index: LocalIndex,
@@ -63,6 +68,51 @@ impl Fixture {
             .unwrap()
     }
 
+    fn prepare_quick(&self, profile: &CustomExportProfile) {
+        let pack = self.source.join("behavior_packs/Test BP");
+        fs::create_dir_all(&pack).unwrap();
+        let manifest = serde_json::json!({
+            "format_version": 2,
+            "header": { "name": "Quick test", "uuid": "11111111-1111-4111-8111-111111111111", "version": [1, 2, 3], "min_engine_version": [1, 20, 0] },
+            "modules": [{ "type": "data", "uuid": "22222222-2222-4222-8222-222222222222", "version": [1, 2, 3] }]
+        });
+        fs::write(
+            pack.join("manifest.json"),
+            format!(
+                "\u{feff}// preserve this comment\r\n{}\r\n",
+                serde_json::to_string_pretty(&manifest).unwrap()
+            ),
+        )
+        .unwrap();
+        fs::write(
+            self.source.join("world_behavior_packs.json"),
+            "[{\"pack_id\":\"11111111-1111-4111-8111-111111111111\",\"version\":[1,2,3]}]\r\n",
+        )
+        .unwrap();
+        self.index
+            .add_source(crate::SourceKind::Single, &self.source)
+            .unwrap();
+        let mut settings = self.index.app_settings().unwrap();
+        settings.quick_export.custom_profile_id = Some(profile.id.clone());
+        settings.quick_export.destination = Some(self.destination.clone());
+        self.index.set_app_settings(&settings).unwrap();
+    }
+
+    fn quick_request(&self) -> crate::QuickExportRequest {
+        crate::QuickExportRequest {
+            component_id: self.id.clone(),
+            destination: self.destination.clone(),
+        }
+    }
+
+    fn quick_originals(&self) -> [Vec<u8>; 2] {
+        [
+            "behavior_packs/Test BP/manifest.json",
+            "world_behavior_packs.json",
+        ]
+        .map(|path| fs::read(self.source.join(path)).unwrap())
+    }
+
     fn wait(&self, id: &str, target: impl Fn(TaskStatus) -> bool) -> CustomExportTask {
         let begin = Instant::now();
         loop {
@@ -77,6 +127,369 @@ impl Fixture {
             thread::sleep(Duration::from_millis(20));
         }
     }
+}
+
+#[test]
+#[cfg(windows)]
+fn quick_custom_export_publishes_updated_snapshot_and_component() {
+    let fixture = Fixture::new();
+    let profile = fixture.profile("fixture_quick");
+    fixture.prepare_quick(&profile);
+    let original = fixture.quick_originals();
+    let task = fixture
+        .service
+        .start_quick_export(fixture.quick_request())
+        .unwrap();
+    let finished = fixture.wait(&task.id, TaskStatus::terminal);
+    assert_eq!(finished.status, TaskStatus::Succeeded, "{finished:?}");
+    assert!(
+        finished
+            .logs
+            .iter()
+            .any(|log| log.text.contains("刷新 UUID"))
+    );
+    let result = finished.result.unwrap();
+    let component = result.component.unwrap();
+    assert_eq!(component.version, Some([1, 2, 4]));
+    let artifact = read_fixture_json(&result.actual_path).unwrap();
+    let manifest =
+        read_fixture_json(&fixture.source.join("behavior_packs/Test BP/manifest.json")).unwrap();
+    assert_eq!(artifact["manifest"], manifest);
+    assert_ne!(
+        manifest["header"]["uuid"],
+        "11111111-1111-4111-8111-111111111111"
+    );
+    assert_ne!(
+        manifest["modules"][0]["uuid"],
+        "22222222-2222-4222-8222-222222222222"
+    );
+    assert_eq!(manifest["header"]["version"], serde_json::json!([1, 2, 4]));
+    assert_eq!(artifact["world"][0]["pack_id"], manifest["header"]["uuid"]);
+    assert_eq!(
+        artifact["world"][0]["version"],
+        manifest["header"]["version"]
+    );
+    assert_ne!(fixture.quick_originals(), original);
+    assert_eq!(
+        fs::read_to_string(fixture.source.join("level.dat")).unwrap(),
+        "original"
+    );
+    assert_eq!(result.modified_files.len(), 3);
+    assert!(!fixture.service.has_active_quick_export());
+    assert!(fixture.index.try_lock_mutations().is_ok());
+}
+
+#[test]
+#[cfg(windows)]
+fn quick_custom_failure_invalid_output_and_conflict_restore_exact_bytes() {
+    for (runner, code) in [
+        ("fixture_failure", "execution_failed"),
+        ("fixture_invalid", "invalid_artifact"),
+        ("fixture_quick", "destination_exists"),
+    ] {
+        let fixture = Fixture::new();
+        let profile = fixture.profile(runner);
+        fixture.prepare_quick(&profile);
+        let original = fixture.quick_originals();
+        let mut settings = fixture.index.app_settings().unwrap();
+        settings.quick_export.conflict_policy = ExportConflictPolicy::Error;
+        fixture.index.set_app_settings(&settings).unwrap();
+        let output = fixture.destination.join("artifact.json");
+        fs::write(&output, "previous artifact").unwrap();
+        let task = fixture
+            .service
+            .start_quick_export(fixture.quick_request())
+            .unwrap();
+        let finished = fixture.wait(&task.id, TaskStatus::terminal);
+        assert_eq!(finished.status, TaskStatus::Failed, "{finished:?}");
+        assert_eq!(finished.error.unwrap().code, code);
+        assert_eq!(fixture.quick_originals(), original);
+        assert_eq!(fs::read_to_string(&output).unwrap(), "previous artifact");
+        assert_eq!(fs::read_dir(&fixture.destination).unwrap().count(), 1);
+        assert!(fixture.index.try_lock_mutations().is_ok());
+    }
+}
+
+#[test]
+#[cfg(windows)]
+fn quick_custom_cancellation_and_timeout_hold_lock_until_rollback() {
+    let fixture = Fixture::new();
+    let mut profile = fixture.profile("fixture_long");
+    fixture.prepare_quick(&profile);
+    let original = fixture.quick_originals();
+    let task = fixture
+        .service
+        .start_quick_export(fixture.quick_request())
+        .unwrap();
+    fixture.wait(&task.id, |status| {
+        status == TaskStatus::Running || status.terminal()
+    });
+    assert_ne!(fixture.quick_originals(), original);
+    assert!(fixture.service.has_active_quick_export());
+    assert!(matches!(
+        fixture.index.try_lock_mutations(),
+        Err(CoreError::Busy)
+    ));
+    fixture.service.cancel(Caller::Desktop, &task.id).unwrap();
+    fixture.service.cancel(Caller::Desktop, &task.id).unwrap();
+    let finished = fixture.wait(&task.id, TaskStatus::terminal);
+    assert_eq!(finished.status, TaskStatus::Cancelled, "{finished:?}");
+    assert_eq!(fixture.quick_originals(), original);
+    assert!(!fixture.service.has_active_quick_export());
+    profile.timeout_seconds = 1;
+    ProfileStore::new(fixture.index.clone())
+        .save(vec![profile])
+        .unwrap();
+    let task = fixture
+        .service
+        .start_quick_export(fixture.quick_request())
+        .unwrap();
+    assert_eq!(
+        fixture
+            .wait(&task.id, TaskStatus::terminal)
+            .error
+            .unwrap()
+            .code,
+        "timed_out"
+    );
+    assert_eq!(fixture.quick_originals(), original);
+    assert!(fs::read_dir(&fixture.destination).unwrap().next().is_none());
+}
+
+#[test]
+#[cfg(windows)]
+fn quick_custom_honors_rename_overwrite_and_saved_manifest_options() {
+    for policy in [
+        ExportConflictPolicy::Rename,
+        ExportConflictPolicy::Overwrite,
+    ] {
+        let fixture = Fixture::new();
+        let profile = fixture.profile("fixture_quick");
+        fixture.prepare_quick(&profile);
+        let mut settings = fixture.index.app_settings().unwrap();
+        settings.quick_export.conflict_policy = policy;
+        settings.quick_export.regenerate_uuids = false;
+        settings.quick_export.version_part = crate::VersionPart::Minor;
+        fixture.index.set_app_settings(&settings).unwrap();
+        let output = fixture.destination.join("artifact.json");
+        fs::write(&output, "previous artifact").unwrap();
+        let task = fixture
+            .service
+            .start_quick_export(fixture.quick_request())
+            .unwrap();
+        let finished = fixture.wait(&task.id, TaskStatus::terminal);
+        assert_eq!(finished.status, TaskStatus::Succeeded, "{finished:?}");
+        let result = finished.result.unwrap();
+        assert_eq!(result.component.unwrap().version, Some([1, 3, 0]));
+        let artifact = read_fixture_json(&result.actual_path).unwrap();
+        assert_eq!(
+            artifact["manifest"]["header"]["uuid"],
+            "11111111-1111-4111-8111-111111111111"
+        );
+        if policy == ExportConflictPolicy::Rename {
+            assert!(result.actual_path.ends_with("artifact (2).json"));
+            assert_eq!(fs::read_to_string(&output).unwrap(), "previous artifact");
+        } else {
+            assert_eq!(result.actual_path, output);
+        }
+        settings.quick_export.bump_version = false;
+        fixture.index.set_app_settings(&settings).unwrap();
+        let original = fixture.quick_originals();
+        let task = fixture
+            .service
+            .start_quick_export(fixture.quick_request())
+            .unwrap();
+        assert_eq!(
+            fixture.wait(&task.id, TaskStatus::terminal).status,
+            TaskStatus::Succeeded
+        );
+        assert_eq!(fixture.quick_originals(), original);
+    }
+}
+
+#[test]
+fn quick_custom_rejects_unavailable_profiles_before_mutation_and_never_falls_back() {
+    for reason in [
+        "missing",
+        "disabled",
+        "incompatible",
+        "executable",
+        "destination",
+    ] {
+        let fixture = Fixture::new();
+        let mut profile = fixture.profile("fixture_quick");
+        fixture.prepare_quick(&profile);
+        let original = fixture.quick_originals();
+        let mut request = fixture.quick_request();
+        match reason {
+            "missing" => {
+                ProfileStore::new(fixture.index.clone())
+                    .save(vec![])
+                    .unwrap();
+            }
+            "disabled" => {
+                profile.enabled = false;
+            }
+            "incompatible" => {
+                profile.component_kinds = vec![crate::ComponentKind::Material];
+            }
+            "executable" => {
+                profile.executable = fixture.source.join("missing.exe");
+            }
+            "destination" => {
+                request.destination = fixture.source.clone();
+            }
+            _ => unreachable!(),
+        }
+        if reason != "missing" {
+            ProfileStore::new(fixture.index.clone())
+                .save(vec![profile])
+                .unwrap();
+        }
+        assert!(
+            fixture.service.start_quick_export(request).is_err(),
+            "{reason}"
+        );
+        assert!(
+            crate::ComponentService::new(fixture.index.clone())
+                .quick_export_component(&fixture.quick_request(), |_| {})
+                .is_err()
+        );
+        assert_eq!(fixture.quick_originals(), original);
+        assert!(fs::read_dir(&fixture.destination).unwrap().next().is_none());
+        assert!(!fixture.service.has_active_quick_export());
+    }
+}
+
+#[test]
+fn quick_publication_waits_for_complete_metadata_and_ignores_late_cancel() {
+    let fixture = Fixture::new();
+    let profile = fixture.profile("fixture_quick");
+    fixture.prepare_quick(&profile);
+    let id = "publication-test";
+    let task = Arc::new(Task {
+        caller: Caller::Desktop,
+        quick_export: true,
+        changed: Condvar::new(),
+        state: Mutex::new(TaskState {
+            created: Instant::now(),
+            logs: VecDeque::new(),
+            log_bytes: 0,
+            decision: None,
+            finished: None,
+            published: false,
+            view: CustomExportTask {
+                id: id.into(),
+                component_id: fixture.id.clone(),
+                profile_id: profile.id,
+                profile_name: profile.name,
+                destination: fixture.destination.clone(),
+                status: TaskStatus::Validating,
+                cancel_requested: false,
+                conflict_path: None,
+                result: None,
+                error: None,
+                logs: vec![],
+                next_cursor: 0,
+                logs_truncated: false,
+            },
+        }),
+    });
+    fixture
+        .service
+        .0
+        .tasks
+        .lock()
+        .unwrap()
+        .insert(id.into(), task.clone());
+    let artifact = fixture._root.path().join("packed.zip");
+    fs::write(&artifact, "artifact").unwrap();
+    let mut result = publish(
+        &task,
+        &artifact,
+        &fixture.destination,
+        ExportConflictPolicy::Error,
+    )
+    .unwrap();
+    assert_eq!(task.snapshot(0).status, TaskStatus::Publishing);
+    assert!(fixture.service.has_active_quick_export());
+    assert!(
+        !fixture
+            .service
+            .cancel(Caller::Desktop, id)
+            .unwrap()
+            .cancel_requested
+    );
+    result.component = Some(
+        crate::DiscoveryService::new(fixture.index.clone())
+            .get_indexed(&fixture.id)
+            .unwrap(),
+    );
+    task.finish(Ok(result));
+    let finished = fixture.service.get(Caller::Desktop, id, 0).unwrap();
+    assert_eq!(finished.status, TaskStatus::Succeeded);
+    assert!(finished.result.unwrap().component.is_some());
+    assert!(!fixture.service.has_active_quick_export());
+}
+
+#[test]
+#[cfg(windows)]
+fn quick_custom_game_allows_pure_snapshot_but_rejects_source_or_manifest_changes() {
+    use crate::mcdk_session::{McdkSession, SESSION_KEY, SessionState, inspect_process};
+    let fixture = Fixture::new();
+    let mut profile = fixture.profile("fixture_quick");
+    fixture.prepare_quick(&profile);
+    let original = fixture.quick_originals();
+    let process = inspect_process(std::process::id()).unwrap().unwrap();
+    crate::mcdk::McdkStore::new(fixture.index.clone())
+        .write(
+            SESSION_KEY,
+            &SessionState {
+                session: Some(McdkSession {
+                    component_id: fixture.id.clone(),
+                    component_path: fixture.source.clone(),
+                    executable: process.executable,
+                    version: "1.6.1".into(),
+                    pid: std::process::id(),
+                    created_at: process.created_at,
+                }),
+                last_exit: None,
+            },
+        )
+        .unwrap();
+    let task = fixture
+        .service
+        .start_quick_export(fixture.quick_request())
+        .unwrap();
+    assert_eq!(
+        fixture.wait(&task.id, TaskStatus::terminal).status,
+        TaskStatus::Failed
+    );
+    let mut settings = fixture.index.app_settings().unwrap();
+    settings.quick_export.regenerate_uuids = false;
+    settings.quick_export.bump_version = false;
+    fixture.index.set_app_settings(&settings).unwrap();
+    let task = fixture
+        .service
+        .start_quick_export(fixture.quick_request())
+        .unwrap();
+    assert_eq!(
+        fixture.wait(&task.id, TaskStatus::terminal).status,
+        TaskStatus::Succeeded
+    );
+    profile.input_mode = InputMode::Source;
+    ProfileStore::new(fixture.index.clone())
+        .save(vec![profile])
+        .unwrap();
+    let task = fixture
+        .service
+        .start_quick_export(fixture.quick_request())
+        .unwrap();
+    assert_eq!(
+        fixture.wait(&task.id, TaskStatus::terminal).status,
+        TaskStatus::Failed
+    );
+    assert_eq!(fixture.quick_originals(), original);
 }
 
 #[test]
@@ -386,6 +799,24 @@ fn fixture_success() {
     fs::write(Path::new(&output).join("中文 artifact.custom"), "artifact").unwrap();
     println!("fixture success");
     eprintln!("stderr message");
+}
+
+#[test]
+fn fixture_quick() {
+    let Ok(output) = std::env::var("MCDH_OUTPUT_DIR") else {
+        return;
+    };
+    let input = PathBuf::from(std::env::var("MCDH_INPUT_DIR").unwrap());
+    let artifact = serde_json::json!({
+        "manifest": read_fixture_json(&input.join("behavior_packs/Test BP/manifest.json")).unwrap(),
+        "world": read_fixture_json(&input.join("world_behavior_packs.json")).unwrap(),
+    });
+    fs::write(
+        Path::new(&output).join("artifact.json"),
+        serde_json::to_vec(&artifact).unwrap(),
+    )
+    .unwrap();
+    println!("quick snapshot complete");
 }
 
 #[test]

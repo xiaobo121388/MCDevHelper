@@ -52,6 +52,7 @@ export interface AppSettings {
 
 export interface QuickExportSettings {
   destination: string | null;
+  custom_profile_id?: string | null;
   regenerate_uuids: boolean;
   bump_version: boolean;
   version_part: VersionPart;

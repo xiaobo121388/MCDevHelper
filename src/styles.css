@@ -533,3 +533,4 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px s
 .quick-export-version { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .quick-export-version select { height: 34px; padding: 0 10px; border: 1px solid var(--control-border); border-radius: 6px; font-size: 12px; }
 .quick-export-settings:disabled { opacity: .65; }
+.quick-export-task { max-width: 1380px; margin: 0 auto 18px; }

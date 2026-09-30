@@ -105,6 +105,7 @@ impl Default for AppSettings {
 #[serde(default)]
 pub struct QuickExportSettings {
     pub destination: Option<PathBuf>,
+    pub custom_profile_id: Option<String>,
     pub regenerate_uuids: bool,
     pub bump_version: bool,
     pub version_part: VersionPart,
@@ -116,6 +117,7 @@ impl Default for QuickExportSettings {
     fn default() -> Self {
         Self {
             destination: None,
+            custom_profile_id: None,
             regenerate_uuids: true,
             bump_version: true,
             version_part: VersionPart::Patch,

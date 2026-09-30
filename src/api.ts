@@ -87,6 +87,8 @@ export const api = {
     onProgress.onmessage = handler;
     return invoke<OperationResult>("quick_export_component", { request: { component_id: componentId, destination }, onProgress });
   },
+  quickCustomExport: (componentId: string, destination: string) =>
+    invoke<CustomExportTask>("start_quick_custom_export", { request: { component_id: componentId, destination } }),
   setQuickExportDestination: async (destination: string) => {
     const saved = await invoke<AppSettings>("set_quick_export_destination", { destination });
     await notifySettings();

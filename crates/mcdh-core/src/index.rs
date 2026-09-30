@@ -294,6 +294,11 @@ impl LocalIndex {
             }
             normalized.quick_export.destination = Some(path);
         }
+        normalized.quick_export.custom_profile_id = normalized
+            .quick_export
+            .custom_profile_id
+            .filter(|id| !id.trim().is_empty())
+            .map(|id| id.trim().to_owned());
         let value = serde_json::to_string(&normalized)
             .map_err(|error| CoreError::json("app_settings", error))?;
         self.set_setting("app_settings", &value)?;
@@ -534,12 +539,17 @@ mod tests {
         assert!(!partial.quick_export.regenerate_uuids);
         assert!(partial.quick_export.bump_version);
         settings.quick_export.destination = Some(temp.path().to_path_buf());
+        settings.quick_export.custom_profile_id = Some(" selected-profile ".into());
         settings.quick_export.regenerate_uuids = false;
         settings.quick_export.bump_version = false;
         settings.quick_export.version_part = crate::VersionPart::Major;
         settings.quick_export.content_mode = crate::ContentMode::Full;
         settings.quick_export.conflict_policy = crate::ExportConflictPolicy::Error;
         let saved = index.set_app_settings(&settings).unwrap();
+        assert_eq!(
+            saved.quick_export.custom_profile_id.as_deref(),
+            Some("selected-profile")
+        );
         assert_eq!(
             LocalIndex::open(database).unwrap().app_settings().unwrap(),
             saved
@@ -552,6 +562,16 @@ mod tests {
         settings.quick_export.destination = Some(temp.path().join("missing"));
         assert!(index.set_app_settings(&settings).is_err());
         assert_eq!(index.app_settings().unwrap(), saved);
+        settings.quick_export.destination = None;
+        settings.quick_export.custom_profile_id = Some("  ".into());
+        assert!(
+            index
+                .set_app_settings(&settings)
+                .unwrap()
+                .quick_export
+                .custom_profile_id
+                .is_none()
+        );
     }
 
     #[test]

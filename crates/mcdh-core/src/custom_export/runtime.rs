@@ -24,12 +24,14 @@ struct TaskState {
     log_bytes: usize,
     decision: Option<ExportConflictPolicy>,
     finished: Option<Instant>,
+    published: bool,
 }
 
 struct Task {
     state: Mutex<TaskState>,
     changed: Condvar,
     caller: Caller,
+    quick_export: bool,
 }
 
 impl Task {
@@ -117,7 +119,7 @@ impl Drop for ServiceInner {
     fn drop(&mut self) {
         for task in self.tasks.lock().unwrap().values() {
             let mut state = task.state.lock().unwrap();
-            if !state.view.status.terminal() {
+            if !state.view.status.terminal() && !state.published {
                 state.view.cancel_requested = true;
                 task.changed.notify_all();
             }
@@ -172,6 +174,45 @@ impl CustomExportService {
         caller: Caller,
         request: StartCustomExportRequest,
     ) -> Result<CustomExportTask> {
+        self.start_internal(caller, request, None)
+    }
+
+    pub fn start_quick_export(
+        &self,
+        request: crate::QuickExportRequest,
+    ) -> Result<CustomExportTask> {
+        let options = self.0.index.app_settings()?.quick_export;
+        let profile_id = options
+            .custom_profile_id
+            .clone()
+            .ok_or_else(|| failure("profile_not_found", "一键导出尚未配置自定义方案"))?;
+        self.start_internal(
+            Caller::Desktop,
+            StartCustomExportRequest {
+                component_id: request.component_id,
+                destination: request.destination,
+                profile_id,
+                conflict_policy: options.conflict_policy,
+            },
+            Some(options),
+        )
+    }
+
+    pub fn has_active_quick_export(&self) -> bool {
+        self.0
+            .tasks
+            .lock()
+            .unwrap()
+            .values()
+            .any(|task| task.quick_export && !task.state.lock().unwrap().view.status.terminal())
+    }
+
+    fn start_internal(
+        &self,
+        caller: Caller,
+        request: StartCustomExportRequest,
+        quick: Option<crate::QuickExportSettings>,
+    ) -> Result<CustomExportTask> {
         let profile = ProfileStore::new(self.0.index.clone())
             .list()?
             .into_iter()
@@ -211,6 +252,7 @@ impl CustomExportService {
         let id = Uuid::new_v4().to_string();
         let task = Arc::new(Task {
             caller,
+            quick_export: quick.is_some(),
             changed: Condvar::new(),
             state: Mutex::new(TaskState {
                 created: Instant::now(),
@@ -233,6 +275,7 @@ impl CustomExportService {
                 log_bytes: 0,
                 decision: None,
                 finished: None,
+                published: false,
             }),
         });
         let mut tasks = self.0.tasks.lock().unwrap();
@@ -260,6 +303,7 @@ impl CustomExportService {
                         &name,
                         kind,
                         request.conflict_policy,
+                        quick.as_ref(),
                     )
                 }))
                 .unwrap_or_else(|_| Err(failure("execution_failed", "导出工作线程意外终止")));
@@ -316,7 +360,7 @@ impl CustomExportService {
         let task = self.task(caller, id)?;
         {
             let mut state = task.state.lock().unwrap();
-            if !state.view.status.terminal() {
+            if !state.view.status.terminal() && !state.published {
                 state.view.cancel_requested = true;
                 task.changed.notify_all();
             }
@@ -352,7 +396,7 @@ impl CustomExportService {
         let tasks: Vec<_> = self.0.tasks.lock().unwrap().values().cloned().collect();
         for task in &tasks {
             let mut state = task.state.lock().unwrap();
-            if !state.view.status.terminal() {
+            if !state.view.status.terminal() && !state.published {
                 state.view.cancel_requested = true;
                 task.changed.notify_all();
             }
@@ -377,116 +421,153 @@ fn execute(
     name: &str,
     kind: crate::ComponentKind,
     policy: ExportConflictPolicy,
+    quick: Option<&crate::QuickExportSettings>,
 ) -> Result<OperationResult> {
-    let started = Instant::now();
-    let check = || {
-        task.check()?;
-        if started.elapsed().as_secs() >= profile.timeout_seconds {
-            return Err(failure("timed_out", "自定义导出超时"));
-        }
-        Ok(())
-    };
-    check()?;
-    let root = tempfile::Builder::new()
-        .prefix("task-")
-        .tempdir_in(host.root.path())
-        .map_err(|e| failure("prepare_failed", e.to_string()))?;
-    let (output, work) = (root.path().join("output"), root.path().join("work"));
-    for path in [&output, &work] {
-        fs::create_dir(path).map_err(|e| CoreError::io(path, e))?;
-    }
     let mut guard = Some(index.try_lock_mutations()?);
-    if profile.input_mode == InputMode::Source {
-        crate::mcdk_session::assert_component_idle(index, source)?;
-    }
-    let input = if profile.input_mode == InputMode::Snapshot {
-        task.log("system", "正在准备完整临时副本\n".into());
-        let input = root.path().join("input");
-        files::copy_snapshot(source, &input, &check)?;
-        guard.take();
-        input
-    } else {
-        task.log(
-            "system",
-            "原目录模式：外部程序对源文件的修改无法撤销\n".into(),
-        );
-        source.to_path_buf()
-    };
-    check()?;
-    let component_id = task.state.lock().unwrap().view.component_id.clone();
-    let kind = match kind {
-        crate::ComponentKind::Addon => "addon",
-        crate::ComponentKind::Map => "map",
-        crate::ComponentKind::Material => "material",
-    };
-    let values = [
-        ("input_dir", input.to_string_lossy().into_owned()),
-        ("output_dir", output.to_string_lossy().into_owned()),
-        ("work_dir", work.to_string_lossy().into_owned()),
-        ("component_id", component_id),
-        ("component_name", name.into()),
-        ("component_kind", kind.into()),
-    ];
-    let arguments = profile
-        .arguments
-        .iter()
-        .map(|arg| substitute(arg, &values))
-        .collect::<Vec<_>>();
-    let mut environment: Vec<_> = values
-        .iter()
-        .map(|(key, value)| (format!("MCDH_{}", key.to_uppercase()), value.clone()))
-        .collect();
-    environment.push(("MCDH_EXPORT_PROTOCOL_VERSION".into(), "1".into()));
-    let cwd = profile.working_directory.as_deref().unwrap_or(&input);
-    task.status(TaskStatus::Running);
-    let mut process = ExportProcess::start(&profile.executable, &arguments, cwd, &environment)?;
-    let readers = [
-        read_log(
-            process.stdout.take().unwrap(),
-            "stdout",
-            profile.log_encoding,
-            task.clone(),
-        ),
-        read_log(
-            process.stderr.take().unwrap(),
-            "stderr",
-            profile.log_encoding,
-            task.clone(),
-        ),
-    ];
-    let outcome = loop {
-        if let Err(error) = check() {
-            break Err(error);
-        }
-        match process.poll() {
-            Ok(Some(code)) => break Ok(code),
-            Ok(None) => thread::sleep(Duration::from_millis(40)),
-            Err(error) => break Err(error),
-        }
-    };
-    let termination = process.terminate();
-    drop(process);
-    for reader in readers {
-        let _ = reader.join();
-    }
-    guard.take();
-    termination?;
-    let code = outcome?;
-    if code != 0 {
-        task.state.lock().unwrap().view.error = Some(TaskFailure {
-            code: "execution_failed".into(),
-            message: String::new(),
-            exit_code: Some(code),
-        });
-        return Err(failure(
-            "execution_failed",
-            format!("打包程序退出码：{code}"),
-        ));
-    }
     task.check()?;
-    task.status(TaskStatus::Validating);
-    let artifact = files::artifact(&output)?;
-    publish(task, &artifact, destination, policy)
+    let keep_lock = quick.is_some();
+    let mut run = || {
+        let started = Instant::now();
+        let check = || {
+            task.check()?;
+            if started.elapsed().as_secs() >= profile.timeout_seconds {
+                return Err(failure("timed_out", "自定义导出超时"));
+            }
+            Ok(())
+        };
+        check()?;
+        let root = tempfile::Builder::new()
+            .prefix("task-")
+            .tempdir_in(host.root.path())
+            .map_err(|e| failure("prepare_failed", e.to_string()))?;
+        let (output, work) = (root.path().join("output"), root.path().join("work"));
+        for path in [&output, &work] {
+            fs::create_dir(path).map_err(|e| CoreError::io(path, e))?;
+        }
+        if profile.input_mode == InputMode::Source {
+            crate::mcdk_session::assert_component_idle(index, source)?;
+        }
+        let input = if profile.input_mode == InputMode::Snapshot {
+            task.log("system", "正在准备完整临时副本\n".into());
+            let input = root.path().join("input");
+            files::copy_snapshot(source, &input, &check)?;
+            if !keep_lock {
+                guard.take();
+            }
+            input
+        } else {
+            task.log(
+                "system",
+                "原目录模式：外部程序对源文件的修改无法撤销\n".into(),
+            );
+            source.to_path_buf()
+        };
+        check()?;
+        let component_id = task.state.lock().unwrap().view.component_id.clone();
+        let kind = match kind {
+            crate::ComponentKind::Addon => "addon",
+            crate::ComponentKind::Map => "map",
+            crate::ComponentKind::Material => "material",
+        };
+        let values = [
+            ("input_dir", input.to_string_lossy().into_owned()),
+            ("output_dir", output.to_string_lossy().into_owned()),
+            ("work_dir", work.to_string_lossy().into_owned()),
+            ("component_id", component_id),
+            ("component_name", name.into()),
+            ("component_kind", kind.into()),
+        ];
+        let arguments = profile
+            .arguments
+            .iter()
+            .map(|arg| substitute(arg, &values))
+            .collect::<Vec<_>>();
+        let mut environment: Vec<_> = values
+            .iter()
+            .map(|(key, value)| (format!("MCDH_{}", key.to_uppercase()), value.clone()))
+            .collect();
+        environment.push(("MCDH_EXPORT_PROTOCOL_VERSION".into(), "1".into()));
+        let cwd = profile.working_directory.as_deref().unwrap_or(&input);
+        task.status(TaskStatus::Running);
+        let mut process = ExportProcess::start(&profile.executable, &arguments, cwd, &environment)?;
+        let readers = [
+            read_log(
+                process.stdout.take().unwrap(),
+                "stdout",
+                profile.log_encoding,
+                task.clone(),
+            ),
+            read_log(
+                process.stderr.take().unwrap(),
+                "stderr",
+                profile.log_encoding,
+                task.clone(),
+            ),
+        ];
+        let outcome = loop {
+            if let Err(error) = check() {
+                break Err(error);
+            }
+            match process.poll() {
+                Ok(Some(code)) => break Ok(code),
+                Ok(None) => thread::sleep(Duration::from_millis(40)),
+                Err(error) => break Err(error),
+            }
+        };
+        let termination = process.terminate();
+        drop(process);
+        for reader in readers {
+            let _ = reader.join();
+        }
+        if !keep_lock {
+            guard.take();
+        }
+        termination?;
+        let code = outcome?;
+        if code != 0 {
+            task.state.lock().unwrap().view.error = Some(TaskFailure {
+                code: "execution_failed".into(),
+                message: String::new(),
+                exit_code: Some(code),
+            });
+            return Err(failure(
+                "execution_failed",
+                format!("打包程序退出码：{code}"),
+            ));
+        }
+        task.check()?;
+        task.status(TaskStatus::Validating);
+        let artifact = files::artifact(&output)?;
+        let mut result = publish(task, &artifact, destination, policy)?;
+        if keep_lock && profile.input_mode == InputMode::Source {
+            result
+                .warnings
+                .push("原目录模式：外部程序对其他源文件的修改无法自动撤销。".into());
+        }
+        Ok(result)
+    };
+    if let Some(options) = quick {
+        let request = crate::QuickExportRequest {
+            component_id: task.state.lock().unwrap().view.component_id.clone(),
+            destination: destination.into(),
+        };
+        crate::ComponentService::new(index.clone()).with_quick_export_changes(
+            &request,
+            options,
+            |phase| {
+                let label = match phase {
+                    crate::QuickExportPhase::Preparing => "准备导出",
+                    crate::QuickExportPhase::Uuid => "刷新 UUID",
+                    crate::QuickExportPhase::Version => "提升版本",
+                    crate::QuickExportPhase::Exporting => "执行自定义导出",
+                };
+                task.log("system", format!("一键导出：{label}\n"));
+            },
+            run,
+        )
+    } else {
+        run()
+    }
 }
 
 fn substitute(template: &str, values: &[(&str, String)]) -> String {
@@ -549,6 +630,9 @@ fn read_log(
 }
 
 fn wait_conflict(task: &Task, path: &Path) -> Result<ExportConflictPolicy> {
+    if task.quick_export {
+        return Err(crate::CoreError::DestinationExists(path.into()));
+    }
     let mut state = task.state.lock().unwrap();
     state.view.status = TaskStatus::AwaitingConflict;
     state.view.conflict_path = Some(path.to_path_buf());
@@ -610,7 +694,12 @@ fn publish(
                     modified_files: vec![target],
                     warnings: Vec::new(),
                 };
-                state.view.status = TaskStatus::Succeeded;
+                state.published = true;
+                state.view.status = if task.quick_export {
+                    TaskStatus::Publishing
+                } else {
+                    TaskStatus::Succeeded
+                };
                 state.view.result = Some(result.clone());
                 return Ok(result);
             }

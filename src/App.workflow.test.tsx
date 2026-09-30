@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   delete: vi.fn(),
   export: vi.fn(),
   quickExport: vi.fn(),
+  quickCustomExport: vi.fn(),
   setQuickExportDestination: vi.fn(),
   open: vi.fn(),
   customExportProfiles: vi.fn(),
@@ -50,6 +51,7 @@ vi.mock("./api", () => ({
     delete: mocks.delete,
     export: mocks.export,
     quickExport: mocks.quickExport,
+    quickCustomExport: mocks.quickCustomExport,
     setQuickExportDestination: mocks.setQuickExportDestination,
     customExportProfiles: mocks.customExportProfiles,
     customExportTasks: mocks.customExportTasks,
@@ -104,6 +106,7 @@ describe("component workspace filters", () => {
     mocks.delete.mockReset().mockResolvedValue({ actual_path: "", modified_files: [], warnings: [] });
     mocks.export.mockReset();
     mocks.quickExport.mockReset();
+    mocks.quickCustomExport.mockReset();
     mocks.setQuickExportDestination.mockReset();
     mocks.open.mockReset();
     mocks.customExportProfiles.mockReset().mockResolvedValue([]);
@@ -200,6 +203,23 @@ describe("component workspace filters", () => {
     expect(await screen.findByRole("button", { name: "保存组件信息" })).toBeInTheDocument();
   });
 
+  it("runs the selected custom exporter from the footer without refreshing the workspace", async () => {
+    const component = { id: "quick", name: "自定义快捷导出", kind: "addon", path: "D:/Project", origin: { kind: "single" }, version: [1, 0, 0], manifests: [], tags: [], favorite: false, size_bytes: 1 };
+    mocks.refresh.mockResolvedValue({ components: [component], sources: [], warnings: [] });
+    mocks.settings.mockResolvedValue({ developer_nickname: "MCDH", developer_account: "local", developer_user_id: "0", theme: "dark", quick_export: { destination: "D:/Exports", custom_profile_id: "profile", regenerate_uuids: true, bump_version: true } });
+    const task = { id: "quick-task", component_id: "quick", profile_id: "profile", profile_name: "自定义发布", destination: "D:/Exports", status: "running", cancel_requested: false, conflict_path: null, result: null, error: null, logs: [], next_cursor: 0, logs_truncated: false };
+    mocks.quickCustomExport.mockResolvedValue(task);
+    mocks.customExportTask.mockResolvedValue({ ...task, status: "succeeded", result: { actual_path: "D:/Exports/release.custom", modified_files: [], warnings: [], component: { ...component, version: [1, 0, 1] } }, logs: [{ sequence: 1, source: "stdout", text: "custom release complete" }], next_cursor: 1 });
+    render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: "一键导出 自定义快捷导出" }));
+    expect(await screen.findByText("custom release complete")).toBeInTheDocument();
+    expect(screen.getByText("v1.0.1")).toBeInTheDocument();
+    expect(mocks.quickCustomExport).toHaveBeenCalledWith("quick", "D:/Exports");
+    expect(mocks.quickExport).not.toHaveBeenCalled();
+    expect(mocks.refresh).toHaveBeenCalledOnce();
+    expect(screen.getByRole("button", { name: "配置 自定义快捷导出" })).toBeEnabled();
+  });
+
   it("retains a newly created card when an older in-flight scan finishes", async () => {
     const existing = { id: "old", name: "旧模组", kind: "addon", path: "D:/Lib/Old", origin: { kind: "library" }, tags: [], manifests: [], favorite: false, size_bytes: 1 };
     const added = { ...existing, id: "new", name: "新模组", path: "D:/Lib/New" };
@@ -220,19 +240,22 @@ describe("component workspace filters", () => {
     expect(mocks.refresh).toHaveBeenCalledTimes(2);
   });
 
-  it("saves one-click export preferences independently of external exporters", async () => {
+  it("saves one-click export preferences with the selected external exporter", async () => {
     mocks.refresh.mockResolvedValue({ components: [], sources: [], warnings: [] });
     mocks.setSettings.mockImplementation(async (value) => value);
+    mocks.customExportProfiles.mockResolvedValue([{ id: "profile", name: "自定义发布", enabled: true, input_mode: "snapshot" }]);
     render(<App />);
     fireEvent.click(await screen.findByRole("button", { name: "设置" }));
     await waitFor(() => expect(mocks.sources).toHaveBeenCalled());
     expect(mocks.vscodeStatus).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: "一键导出" }));
+    await screen.findByRole("option", { name: "自定义发布" });
+    fireEvent.change(screen.getByRole("combobox", { name: "导出方式" }), { target: { value: "profile" } });
     fireEvent.change(screen.getByRole("textbox", { name: "导出目录" }), { target: { value: "D:/Custom" } });
     fireEvent.click(screen.getByRole("checkbox", { name: "刷新 Manifest UUID" }));
     fireEvent.change(screen.getByRole("combobox", { name: "一键导出版本提升方式" }), { target: { value: "minor" } });
     fireEvent.click(screen.getByRole("button", { name: "保存设置" }));
-    await waitFor(() => expect(mocks.setSettings).toHaveBeenCalledWith(expect.objectContaining({ quick_export: { destination: "D:/Custom", regenerate_uuids: false, bump_version: true, version_part: "minor", content_mode: "clean", conflict_policy: "rename" } })));
+    await waitFor(() => expect(mocks.setSettings).toHaveBeenCalledWith(expect.objectContaining({ quick_export: { destination: "D:/Custom", custom_profile_id: "profile", regenerate_uuids: false, bump_version: true, version_part: "minor", content_mode: "clean", conflict_policy: "rename" } })));
   });
 
   it("persists the MCDK switch independently and supports explicit manual installation", async () => {

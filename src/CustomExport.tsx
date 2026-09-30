@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from "react";
-import { Archive, RefreshCw, Square, Terminal } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { Archive, RefreshCw, Square, Terminal, X } from "lucide-react";
 import { api, errorMessage } from "./api";
 import type { ComponentSummary, CustomExportProfile, CustomExportStatus, CustomExportTask, ExportLog, OperationResult } from "./types";
 
@@ -8,9 +8,9 @@ const statusText: Record<CustomExportStatus, string> = {
   preparing: "准备输入", running: "正在执行", validating: "检查产物", awaiting_conflict: "等待处理重名",
   publishing: "保存产物", succeeded: "导出成功", failed: "导出失败", cancelled: "已取消",
 };
+export const exportTaskStatus = (task: CustomExportTask) => task.cancel_requested && !exportTerminal(task.status) ? "正在取消…" : statusText[task.status];
 
-export function useCustomExport(component: ComponentSummary, destination: string, onDone: (operation: OperationResult, destination: string) => void, onError: (message: string) => void) {
-  const [profiles, setProfiles] = useState<CustomExportProfile[]>([]);
+export function useExportTask(onDone: (operation: OperationResult, destination: string) => void, onError: (message: string) => void, onSettled?: (task: CustomExportTask | null) => void) {
   const [task, setTask] = useState<CustomExportTask | null>(null);
   const [logs, setLogs] = useState<ExportLog[]>([]);
   const [truncated, setTruncated] = useState(false);
@@ -22,25 +22,17 @@ export function useCustomExport(component: ComponentSummary, destination: string
   const completed = useRef(new Set<string>());
   const starting = useRef(false);
   const alive = useRef(true);
-  const callbacks = useRef({ onDone, onError });
-  callbacks.current = { onDone, onError };
+  const currentTask = useRef(task);
+  currentTask.current = task;
+  const callbacks = useRef({ onDone, onError, onSettled });
+  callbacks.current = { onDone, onError, onSettled };
   useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
-  useEffect(() => {
-    let active = true;
-    Promise.all([api.customExportProfiles(), api.customExportTasks()]).then(([nextProfiles, tasks]) => {
-      if (!active) return;
-      setProfiles(nextProfiles.filter((profile) => profile.enabled && profile.component_kinds.includes(component.kind)));
-      const matching = tasks.filter((item) => item.component_id === component.id);
-      const existing = matching.find((item) => !exportTerminal(item.status)) ?? matching.at(-1);
-      if (existing) {
-        // Restored terminal tasks are history, not new completion events.
-        if (exportTerminal(existing.status)) completed.current.add(existing.id);
-        cursor.current = 0;
-        setTask(existing);
-      }
-    }).catch((error) => { if (active) callbacks.current.onError(errorMessage(error)); });
-    return () => { active = false; };
-  }, [component.id, component.kind]);
+  const attach = useCallback((next: CustomExportTask, restored = false) => {
+    // Restored terminal tasks are history, not new completion events.
+    if (restored && exportTerminal(next.status)) completed.current.add(next.id);
+    cursor.current = 0; logBuffer.current = []; currentTask.current = next;
+    setLogs([]); setTruncated(false); setPollError(""); setTask(next);
+  }, []);
 
   useEffect(() => {
     if (!task?.id) return;
@@ -63,12 +55,14 @@ export function useCustomExport(component: ComponentSummary, destination: string
           if (!completed.current.has(id)) {
             completed.current.add(id);
             if (next.status === "succeeded" && next.result) callbacks.current.onDone(next.result, next.destination);
+            callbacks.current.onSettled?.(next);
           }
         } else { timer = setTimeout(() => void poll(), 500); }
       } catch (error) {
         if (active) {
           if (error && typeof error === "object" && "code" in error && error.code === "task_not_found") {
             setTask(null); callbacks.current.onError(errorMessage(error));
+            callbacks.current.onSettled?.(null);
           } else setPollError(errorMessage(error));
         }
       }
@@ -77,14 +71,14 @@ export function useCustomExport(component: ComponentSummary, destination: string
     return () => { active = false; clearTimeout(timer); };
   }, [task?.id, retry]);
 
-  const start = async (profile: CustomExportProfile) => {
-    if (!destination) { callbacks.current.onError("请先选择导出目录。"); return; }
-    if (starting.current || task && !exportTerminal(task.status)) return;
+  const start = async (operation: () => Promise<CustomExportTask>) => {
+    if (starting.current || currentTask.current && !exportTerminal(currentTask.current.status)) return false;
     starting.current = true; setPending(true);
     try {
-      const next = await api.startCustomExport({ component_id: component.id, profile_id: profile.id, destination, conflict_policy: "error" });
-      if (alive.current) { cursor.current = 0; logBuffer.current = []; setLogs([]); setTruncated(false); setPollError(""); setTask(next); }
-    } catch (error) { callbacks.current.onError(errorMessage(error)); }
+      const next = await operation();
+      if (alive.current) attach(next);
+      return true;
+    } catch (error) { callbacks.current.onError(errorMessage(error)); return false; }
     finally { starting.current = false; if (alive.current) setPending(false); }
   };
   const action = async (operation: () => Promise<CustomExportTask>) => {
@@ -94,21 +88,51 @@ export function useCustomExport(component: ComponentSummary, destination: string
     finally { if (alive.current) setPending(false); }
   };
   return {
-    profiles, task, logs, truncated, pending, pollError, start,
+    task, logs, truncated, pending, pollError, start, attach,
     busy: pending || !!task && !exportTerminal(task.status),
     retry: () => setRetry((value) => value + 1),
     cancel: () => task && void action(() => api.cancelCustomExport(task.id)),
     resolve: (policy: "rename" | "overwrite") => task && void action(() => api.resolveCustomExportConflict(task.id, policy)),
+    dismiss: () => {
+      if (currentTask.current && !exportTerminal(currentTask.current.status)) return;
+      currentTask.current = null; cursor.current = 0; logBuffer.current = [];
+      setTask(null); setLogs([]); setTruncated(false); setPollError("");
+    },
   };
 }
 
+export function useCustomExport(component: ComponentSummary, destination: string, onDone: (operation: OperationResult, destination: string) => void, onError: (message: string) => void) {
+  const [profiles, setProfiles] = useState<CustomExportProfile[]>([]);
+  const controller = useExportTask(onDone, onError);
+  const { attach } = controller;
+  const onErrorRef = useRef(onError);
+  onErrorRef.current = onError;
+  useEffect(() => {
+    let active = true;
+    Promise.all([api.customExportProfiles(), api.customExportTasks()]).then(([nextProfiles, tasks]) => {
+      if (!active) return;
+      setProfiles(nextProfiles.filter((profile) => profile.enabled && profile.component_kinds.includes(component.kind)));
+      const matching = tasks.filter((item) => item.component_id === component.id);
+      const existing = matching.find((item) => !exportTerminal(item.status)) ?? matching.at(-1);
+      if (existing) attach(existing, true);
+    }).catch((error) => { if (active) onErrorRef.current(errorMessage(error)); });
+    return () => { active = false; };
+  }, [component.id, component.kind, attach]);
+  const start = async (profile: CustomExportProfile) => {
+    if (!destination) { onErrorRef.current("请先选择导出目录。"); return; }
+    await controller.start(() => api.startCustomExport({ component_id: component.id, profile_id: profile.id, destination, conflict_policy: "error" }));
+  };
+  return { ...controller, profiles, start };
+}
+
 export type CustomExportController = ReturnType<typeof useCustomExport>;
+export type ExportTaskController = Pick<ReturnType<typeof useExportTask>, "task" | "logs" | "truncated" | "pending" | "pollError" | "cancel" | "resolve" | "retry" | "dismiss">;
 
 export function CustomExportButtons({ controller, disabled, gameRunning }: { controller: CustomExportController; disabled: boolean; gameRunning: boolean }) {
   return <>{controller.profiles.map((profile) => <button key={profile.id} className="button secondary custom-export-button" disabled={disabled || controller.busy || gameRunning && profile.input_mode === "source"} onClick={() => void controller.start(profile)} title={profile.name}><Archive size={16} />{profile.name}</button>)}</>;
 }
 
-export function CustomExportTaskPanel({ controller }: { controller: CustomExportController }) {
+export function CustomExportTaskPanel({ controller }: { controller: ExportTaskController }) {
   const { task, logs, truncated, pending, pollError } = controller;
   const logPane = useRef<HTMLPreElement>(null);
   const followLogs = useRef(true);
@@ -118,8 +142,9 @@ export function CustomExportTaskPanel({ controller }: { controller: CustomExport
   }, [logs]);
   if (!task) return null;
   return <section className="export-task" aria-label="自定义导出任务">
-    <div className="export-task-heading"><strong><Terminal size={16} />{task.profile_name}</strong><span role="status">{task.cancel_requested && !exportTerminal(task.status) ? "正在取消…" : statusText[task.status]}</span>
+    <div className="export-task-heading"><strong><Terminal size={16} />{task.profile_name}</strong><span role="status">{exportTaskStatus(task)}</span>
       {!exportTerminal(task.status) && <button className="button secondary" disabled={pending || task.cancel_requested} onClick={controller.cancel}><Square size={14} />取消任务</button>}
+      {exportTerminal(task.status) && <button className="icon-button" title="关闭导出任务" aria-label="关闭导出任务" onClick={controller.dismiss}><X size={16} /></button>}
     </div>
     {task.status === "awaiting_conflict" && <div className="export-conflict" role="alert"><div><strong>导出文件已存在</strong><p title={task.conflict_path ?? ""}>{task.conflict_path}</p></div><div className="export-conflict-actions"><button className="button secondary" disabled={pending || task.cancel_requested} onClick={() => controller.resolve("rename")}>添加后缀</button><button className="button danger" disabled={pending || task.cancel_requested} onClick={() => controller.resolve("overwrite")}>覆盖原文件</button></div></div>}
     {task.error && <p className="form-error" role="alert">{task.error.message}{task.error.exit_code != null && '（退出码 ' + task.error.exit_code + '）'}</p>}

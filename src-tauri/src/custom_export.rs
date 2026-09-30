@@ -30,6 +30,18 @@ pub(crate) async fn start_custom_export(
 }
 
 #[tauri::command]
+pub(crate) async fn start_quick_custom_export(
+    state: State<'_, AppState>,
+    request: mcdh_core::QuickExportRequest,
+) -> CommandResult<CustomExportTask> {
+    if crate::app_update::is_updating() {
+        return Err(mcdh_core::CoreError::Busy.payload());
+    }
+    let service = state.exports.clone();
+    background(move || service.start_quick_export(request)).await
+}
+
+#[tauri::command]
 pub(crate) fn get_custom_export_task(
     state: State<'_, AppState>,
     task_id: String,

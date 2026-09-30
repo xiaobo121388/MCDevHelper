@@ -424,7 +424,8 @@ pub fn run() {
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 let exporting = window.label() == "main"
-                    && window.state::<AppState>().quick_exports.load(Ordering::Acquire) > 0;
+                    && (window.state::<AppState>().quick_exports.load(Ordering::Acquire) > 0
+                        || window.state::<AppState>().exports.has_active_quick_export());
                 if app_update::is_updating() || exporting { api.prevent_close(); }
             }
             if window.label() == "main" && matches!(event, tauri::WindowEvent::Destroyed) {
@@ -463,6 +464,7 @@ pub fn run() {
             list_custom_export_profiles,
             save_custom_export_profiles,
             start_custom_export,
+            start_quick_custom_export,
             get_custom_export_task,
             list_custom_export_tasks,
             cancel_custom_export,

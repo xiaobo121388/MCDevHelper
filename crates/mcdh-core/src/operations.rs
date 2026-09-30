@@ -407,11 +407,34 @@ impl ComponentService {
     pub fn quick_export_component(
         &self,
         request: &QuickExportRequest,
-        mut progress: impl FnMut(QuickExportPhase),
+        progress: impl FnMut(QuickExportPhase),
     ) -> Result<OperationResult> {
         let _guard = self.index.try_lock_mutations()?;
-        progress(QuickExportPhase::Preparing);
         let options = self.index.app_settings()?.quick_export;
+        if options.custom_profile_id.is_some() {
+            return Err(CoreError::InvalidInput(
+                "当前一键导出已配置自定义方案，请通过自定义导出任务执行".into(),
+            ));
+        }
+        self.with_quick_export_changes(request, &options, progress, || {
+            self.export_component_unlocked(&ExportComponentRequest {
+                component_id: request.component_id.clone(),
+                destination: request.destination.clone(),
+                content_mode: options.content_mode,
+                conflict_policy: options.conflict_policy,
+            })
+        })
+    }
+
+    // The caller holds the mutation lock until the exporter and any rollback finish.
+    pub(crate) fn with_quick_export_changes(
+        &self,
+        request: &QuickExportRequest,
+        options: &crate::QuickExportSettings,
+        mut progress: impl FnMut(QuickExportPhase),
+        exporter: impl FnOnce() -> Result<OperationResult>,
+    ) -> Result<OperationResult> {
+        progress(QuickExportPhase::Preparing);
         let path = self.indexed_component_path(&request.component_id)?;
         let destination = existing_directory(&request.destination)?;
         ensure_not_inside(&path, &destination)?;
@@ -459,15 +482,10 @@ impl ComponentService {
                 progress(QuickExportPhase::Version);
                 modified_files.extend(bump_manifest_versions(&path, options.version_part)?);
             }
-            // Inspect before publishing so a metadata failure cannot leave a ZIP with reverted UUIDs.
+            // Inspect before publishing so a metadata failure cannot leave an artifact with reverted UUIDs.
             let updated = self.discovery.get_indexed(&request.component_id)?;
             progress(QuickExportPhase::Exporting);
-            let mut result = self.export_component_unlocked(&ExportComponentRequest {
-                component_id: request.component_id.clone(),
-                destination,
-                content_mode: options.content_mode,
-                conflict_policy: options.conflict_policy,
-            })?;
+            let mut result = exporter()?;
             modified_files.extend(result.modified_files);
             modified_files.sort();
             modified_files.dedup();

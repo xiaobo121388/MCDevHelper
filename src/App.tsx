@@ -308,6 +308,8 @@ export function App() {
 
         {visibleWarnings.length > 0 && <button className="warning-line" onClick={() => showModal("warnings")}><TriangleAlert size={17} /><span>有 {visibleWarnings.length} 个扫描问题，点击查看具体原因并处理。</span><ChevronRight size={16} /></button>}
 
+        {quickExport.task && <div className="quick-export-task"><CustomExportTaskPanel controller={quickExport} /></div>}
+
         <section className="component-grid" aria-live="polite">
           {components.map((component) => <ComponentCard key={component.id} component={component} mcdk={mcdk} settings={settings} quickExport={quickExport} onOpen={() => showComponent(component)} onUpdate={(updated, message) => {
             acceptComponent(updated);
