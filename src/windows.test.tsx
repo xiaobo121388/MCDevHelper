@@ -13,15 +13,18 @@ vi.mock("@tauri-apps/api/window", () => ({
   getCurrentWindow: () => ({ label: "main", ...mocks }),
 }));
 
-import { confirmAction, openDialogWindow } from "./windows";
+import { confirmAction, openDialogWindow, requestExportDirectory } from "./windows";
 import { DialogLauncher } from "./DialogLauncher";
 import { WindowChrome } from "./WindowChrome";
+import type { ComponentSummary } from "./types";
+
+const component: ComponentSummary = { id: "bomd", name: "BOMD", kind: "addon", path: "D:/BOMD", origin: { kind: "single" }, manifests: [], tags: [], favorite: false, size_bytes: 0 };
 
 describe("native window shell", () => {
   beforeEach(() => {
     vi.resetAllMocks();
     mocks.invoke.mockResolvedValue("dialog-settings");
-    mocks.getByLabel.mockResolvedValue({ once: mocks.once });
+    mocks.getByLabel.mockResolvedValue({ label: "dialog-settings", once: mocks.once });
     mocks.once.mockResolvedValue(mocks.stop);
     mocks.listen.mockResolvedValue(mocks.stop);
     mocks.emit.mockResolvedValue(undefined);
@@ -109,6 +112,37 @@ describe("native window shell", () => {
     mocks.invoke.mockRejectedValue(new Error("creation failed"));
     expect(await confirmAction("delete?")).toBe(false);
     expect(mocks.emit).toHaveBeenCalledWith("mcdh:workspace-changed", expect.objectContaining({ message: expect.stringContaining("creation failed") }));
+    expect(mocks.stop).toHaveBeenCalledOnce();
+  });
+
+  it("waits for an independent directory form to return a saved path", async () => {
+    const answer = requestExportDirectory(component, "source");
+    await waitFor(() => expect(mocks.once).toHaveBeenCalledOnce());
+    const request = mocks.invoke.mock.calls[0][1].request;
+    expect(request).toMatchObject({ kind: "export_directory", purpose: "source", componentId: "bomd", componentName: "BOMD", projectPath: "D:/BOMD", owner: "main" });
+    expect(mocks.listen).toHaveBeenCalledWith("mcdh:export-directory-" + request.token, expect.any(Function));
+    mocks.listen.mock.calls[0][1]({ payload: "D:/BOMD/src" });
+    expect(await answer).toBe("D:/BOMD/src");
+    expect(mocks.stop).toHaveBeenCalledTimes(2);
+  });
+
+  it("cancels directory selection when its native window is closed", async () => {
+    const answer = requestExportDirectory(component, "destination");
+    await waitFor(() => expect(mocks.once).toHaveBeenCalledOnce());
+    mocks.once.mock.calls[0][1]();
+    expect(await answer).toBeNull();
+    expect(mocks.stop).toHaveBeenCalledTimes(2);
+  });
+
+  it("also cancels when the directory window closed before destruction was subscribed", async () => {
+    mocks.getByLabel.mockResolvedValueOnce({ label: "dialog-directory", once: mocks.once }).mockResolvedValueOnce(null);
+    expect(await requestExportDirectory(component, "source")).toBeNull();
+    expect(mocks.stop).toHaveBeenCalledTimes(2);
+  });
+
+  it("propagates directory window failures and releases its reply listener", async () => {
+    mocks.invoke.mockRejectedValue(new Error("creation failed"));
+    await expect(requestExportDirectory(component, "destination")).rejects.toThrow("creation failed");
     expect(mocks.stop).toHaveBeenCalledOnce();
   });
 });

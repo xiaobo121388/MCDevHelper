@@ -286,6 +286,14 @@ pub struct ExportComponentRequest {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ExportSourceInfo {
+    pub path: PathBuf,
+    pub configured: bool,
+    pub valid: bool,
+    pub issue: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SetComponentMetadataRequest {
     pub component_id: String,
     pub display_name: String,

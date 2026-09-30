@@ -111,6 +111,13 @@ export interface OperationResult {
   warnings: string[];
 }
 
+export interface ExportSourceInfo {
+  path: string;
+  configured: boolean;
+  valid: boolean;
+  issue: string | null;
+}
+
 export interface UpdateCheckResult {
   current_version: string;
   latest_version?: string;

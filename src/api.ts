@@ -19,6 +19,7 @@ import type {
   CustomExportProfile,
   CustomExportTask,
   QuickExportPhase,
+  ExportSourceInfo,
 } from "./types";
 
 export const desktop = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
@@ -89,6 +90,7 @@ export const api = {
   },
   quickCustomExport: (componentId: string, destination: string) =>
     invoke<CustomExportTask>("start_quick_custom_export", { request: { component_id: componentId, destination } }),
+  exportSource: (componentId: string) => invoke<ExportSourceInfo>("get_component_export_source", { componentId }),
   setExportSource: (componentId: string, source: string) => invoke<string>("set_component_export_source", { componentId, source }),
   setQuickExportDestination: async (destination: string) => {
     const saved = await invoke<AppSettings>("set_quick_export_destination", { destination });

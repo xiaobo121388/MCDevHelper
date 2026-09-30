@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { api, desktop, errorMessage } from "./api";
 import { exportTaskStatus, useExportTask } from "./CustomExport";
 import { isExportSourceCancelled, withExportSource } from "./exportSource";
-import { notifyWorkspace } from "./windows";
+import { notifyWorkspace, requestExportDirectory } from "./windows";
 import type { AppSettings, ComponentSummary, CustomExportProfile, OperationResult, QuickExportPhase, QuickExportSettings } from "./types";
 
 export const DEFAULT_QUICK_EXPORT: QuickExportSettings = {
@@ -37,10 +37,10 @@ export function useQuickExport(onDone: (operation: OperationResult, message: str
       let saved = await api.settings();
       let destination = saved.quick_export?.destination;
       if (!destination) {
-        const chosen = await open({ title: "选择一键导出目录", directory: true, multiple: false });
-        if (typeof chosen !== "string") return;
+        const chosen = await requestExportDirectory(component, "destination");
+        if (!chosen) return;
         destination = chosen;
-        saved = await api.setQuickExportDestination(destination);
+        saved = await api.settings();
         onSettings(saved);
       }
       const target = destination;

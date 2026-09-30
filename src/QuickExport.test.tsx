@@ -2,10 +2,10 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-libra
 import { useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const mocks = vi.hoisted(() => ({ settings: vi.fn(), quickExport: vi.fn(), destination: vi.fn(), open: vi.fn(), notify: vi.fn(), done: vi.fn(), notice: vi.fn(), profiles: vi.fn(), quickCustom: vi.fn(), task: vi.fn(), cancel: vi.fn(), resolve: vi.fn(), source: vi.fn() }));
+const mocks = vi.hoisted(() => ({ settings: vi.fn(), quickExport: vi.fn(), destination: vi.fn(), open: vi.fn(), notify: vi.fn(), done: vi.fn(), notice: vi.fn(), profiles: vi.fn(), quickCustom: vi.fn(), task: vi.fn(), cancel: vi.fn(), resolve: vi.fn(), source: vi.fn(), request: vi.fn() }));
 vi.mock("@tauri-apps/plugin-dialog", () => ({ open: mocks.open }));
 vi.mock("./api", () => ({ desktop: true, errorMessage: (value: unknown) => String(value), api: { settings: mocks.settings, quickExport: mocks.quickExport, setQuickExportDestination: mocks.destination, customExportProfiles: mocks.profiles, quickCustomExport: mocks.quickCustom, customExportTask: mocks.task, cancelCustomExport: mocks.cancel, resolveCustomExportConflict: mocks.resolve, setExportSource: mocks.source } }));
-vi.mock("./windows", () => ({ notifyWorkspace: mocks.notify }));
+vi.mock("./windows", () => ({ notifyWorkspace: mocks.notify, requestExportDirectory: mocks.request }));
 
 import { DEFAULT_QUICK_EXPORT, QuickExportButton, QuickExportOptions, useQuickExport } from "./QuickExport";
 import { CustomExportTaskPanel } from "./CustomExport";
@@ -31,6 +31,7 @@ describe("one-click export", () => {
     mocks.quickExport.mockResolvedValue(operation);
     mocks.notify.mockResolvedValue(undefined);
     mocks.open.mockResolvedValue("D:/Exports");
+    mocks.request.mockResolvedValue("D:/Exports");
     mocks.profiles.mockResolvedValue([]);
     mocks.quickCustom.mockResolvedValue(task);
     mocks.task.mockResolvedValue(task);
@@ -42,9 +43,10 @@ describe("one-click export", () => {
     render(<Workspace />);
     fireEvent.click(screen.getByRole("button", { name: "一键导出 Test" }));
     await waitFor(() => expect(mocks.done).toHaveBeenCalledOnce());
-    expect(mocks.open).toHaveBeenCalledWith({ title: "选择一键导出目录", directory: true, multiple: false });
-    expect(mocks.destination).toHaveBeenCalledWith("D:/Exports");
-    expect(mocks.destination.mock.invocationCallOrder[0]).toBeLessThan(mocks.quickExport.mock.invocationCallOrder[0]);
+    expect(mocks.request).toHaveBeenCalledWith(component, "destination");
+    expect(mocks.open).not.toHaveBeenCalled();
+    expect(mocks.request.mock.invocationCallOrder[0]).toBeLessThan(mocks.quickExport.mock.invocationCallOrder[0]);
+    expect(mocks.settings).toHaveBeenCalledTimes(2);
     expect(mocks.quickExport).toHaveBeenCalledWith("one", "D:/Exports", expect.any(Function));
     expect(mocks.done).toHaveBeenCalledWith(operation, "已导出到 D:/Exports/Test.zip");
     expect(mocks.notify).toHaveBeenCalledWith(undefined, operation, false);
@@ -58,18 +60,20 @@ describe("one-click export", () => {
     await waitFor(() => expect(mocks.quickExport).toHaveBeenCalledWith("one", "D:/Saved", expect.any(Function)));
     expect(mocks.open).not.toHaveBeenCalled();
     expect(mocks.destination).not.toHaveBeenCalled();
+    expect(mocks.request).not.toHaveBeenCalled();
   });
 
   it("cancels directory selection without modifying the project", async () => {
-    mocks.open.mockResolvedValue(null);
+    mocks.request.mockResolvedValue(null);
     render(<Workspace />);
     const button = screen.getByRole("button", { name: "一键导出 Test" });
     fireEvent.click(button);
-    await waitFor(() => expect(mocks.open).toHaveBeenCalledOnce());
+    await waitFor(() => expect(mocks.request).toHaveBeenCalledOnce());
     await waitFor(() => expect(button).toBeEnabled());
     expect(mocks.destination).not.toHaveBeenCalled();
     expect(mocks.quickExport).not.toHaveBeenCalled();
     expect(mocks.done).not.toHaveBeenCalled();
+    expect(mocks.open).not.toHaveBeenCalled();
   });
 
   it("blocks repeated and parallel clicks and reports the current phase", async () => {
@@ -99,8 +103,8 @@ describe("one-click export", () => {
     await waitFor(() => expect(mocks.done).toHaveBeenCalledOnce());
   });
 
-  it("does not export when saving the chosen destination fails", async () => {
-    mocks.destination.mockRejectedValue(new Error("invalid directory"));
+  it("does not export when the built-in directory window cannot open", async () => {
+    mocks.request.mockRejectedValue(new Error("window unavailable"));
     render(<Workspace />);
     fireEvent.click(screen.getByRole("button", { name: "一键导出 Test" }));
     await waitFor(() => expect(mocks.notice).toHaveBeenCalled());
@@ -202,11 +206,12 @@ describe("one-click export", () => {
   it("chooses the actual package source separately from the output folder and retries", async () => {
     mocks.settings.mockResolvedValue({ ...settings, quick_export: { ...DEFAULT_QUICK_EXPORT, destination: "D:/Exports" } });
     mocks.quickExport.mockRejectedValueOnce({ code: "pack_location_required" });
-    mocks.open.mockResolvedValue("D:/Project/src");
+    mocks.request.mockResolvedValue("D:/Project/src");
     render(<Workspace />);
     fireEvent.click(screen.getByRole("button", { name: "一键导出 Test" }));
     await waitFor(() => expect(mocks.done).toHaveBeenCalledOnce());
-    expect(mocks.source).toHaveBeenCalledWith("one", "D:/Project/src");
+    expect(mocks.request).toHaveBeenCalledWith(component, "source");
+    expect(mocks.open).not.toHaveBeenCalled();
     expect(mocks.destination).not.toHaveBeenCalled();
     expect(mocks.quickExport).toHaveBeenNthCalledWith(2, "one", "D:/Exports", expect.any(Function));
     expect(mocks.notice).not.toHaveBeenCalled();
@@ -215,10 +220,10 @@ describe("one-click export", () => {
   it("cancels missing-package selection without retrying or showing another alert", async () => {
     mocks.settings.mockResolvedValue({ ...settings, quick_export: { ...DEFAULT_QUICK_EXPORT, destination: "D:/Exports" } });
     mocks.quickExport.mockRejectedValueOnce({ code: "pack_location_required" });
-    mocks.open.mockResolvedValue(null);
+    mocks.request.mockResolvedValue(null);
     render(<Workspace />);
     fireEvent.click(screen.getByRole("button", { name: "一键导出 Test" }));
-    await waitFor(() => expect(mocks.open).toHaveBeenCalledOnce());
+    await waitFor(() => expect(mocks.request).toHaveBeenCalledOnce());
     await waitFor(() => expect(screen.getByRole("button", { name: "一键导出 Test" })).toBeEnabled());
     expect(mocks.quickExport).toHaveBeenCalledOnce();
     expect(mocks.source).not.toHaveBeenCalled(); expect(mocks.done).not.toHaveBeenCalled(); expect(mocks.notice).not.toHaveBeenCalled();
@@ -227,13 +232,14 @@ describe("one-click export", () => {
   it("starts custom export after selecting a missing package source", async () => {
     mocks.settings.mockResolvedValue({ ...settings, quick_export: { ...DEFAULT_QUICK_EXPORT, destination: "D:/Exports", custom_profile_id: "custom" } });
     mocks.quickCustom.mockRejectedValueOnce({ code: "pack_location_required" });
-    mocks.open.mockResolvedValue("D:/Project/src");
+    mocks.request.mockResolvedValue("D:/Project/src");
     mocks.task.mockResolvedValue({ ...task, status: "succeeded", result: operation });
     render(<Workspace />);
     fireEvent.click(screen.getByRole("button", { name: "一键导出 Test" }));
     await waitFor(() => expect(mocks.done).toHaveBeenCalledOnce());
     expect(mocks.quickCustom).toHaveBeenCalledTimes(2);
-    expect(mocks.source).toHaveBeenCalledWith("one", "D:/Project/src");
+    expect(mocks.request).toHaveBeenCalledWith(component, "source");
+    expect(mocks.open).not.toHaveBeenCalled();
     expect(mocks.quickExport).not.toHaveBeenCalled();
   });
 

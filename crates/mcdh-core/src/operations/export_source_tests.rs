@@ -41,6 +41,54 @@ fn entries(path: &Path) -> Vec<String> {
 }
 
 #[test]
+fn location_info_is_read_only_and_reports_missing_and_saved_sources() {
+    let (_temp, index, root, id, destination) = fixture();
+    let service = ComponentService::new(index.clone());
+    let before = originals(&root);
+    let unresolved = service.export_source_info(&id).unwrap();
+    assert_eq!(unresolved.path, root);
+    assert!(!unresolved.configured);
+    assert!(!unresolved.valid);
+    assert!(unresolved.issue.is_some());
+    assert!(index.component_export_source(&root).unwrap().is_none());
+
+    service.set_export_source(&id, &root.join("src")).unwrap();
+    let saved = service.export_source_info(&id).unwrap();
+    assert_eq!(saved.path, root.join("src"));
+    assert!(saved.configured);
+    assert!(saved.valid);
+    assert!(saved.issue.is_none());
+
+    fs::rename(root.join("src"), root.join("moved")).unwrap();
+    let missing = service.export_source_info(&id).unwrap();
+    assert_eq!(missing.path, root.join("src"));
+    assert!(missing.configured);
+    assert!(!missing.valid);
+    assert!(missing.issue.is_some());
+    let after = ["BP/manifest.json", "RP/manifest.json"]
+        .map(|file| fs::read(root.join("moved").join(file)).unwrap());
+    assert_eq!(after, before);
+    assert!(fs::read_dir(destination).unwrap().next().is_none());
+}
+
+#[test]
+fn recognizable_project_directory_is_visible_without_a_saved_override() {
+    let (_temp, index, root, _id, _destination) = fixture();
+    let source = root.join("src");
+    index.add_source(SourceKind::Single, &source).unwrap();
+    let id = index.component_id(&source).unwrap();
+    let service = ComponentService::new(index.clone());
+    let info = service.export_source_info(&id).unwrap();
+    assert_eq!(info.path, source);
+    assert!(info.valid);
+    assert!(!info.configured);
+    assert!(info.issue.is_none());
+    assert!(index.component_export_source(&source).unwrap().is_none());
+    service.set_export_source(&id, &source).unwrap();
+    assert!(service.export_source_info(&id).unwrap().configured);
+}
+
+#[test]
 fn unidentified_root_requests_selection_before_any_mutation_or_publication() {
     let (_temp, index, root, id, destination) = fixture();
     let service = ComponentService::new(index.clone());

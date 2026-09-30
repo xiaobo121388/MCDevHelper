@@ -8,10 +8,11 @@ import { ComponentDialog, CreateDialog, DEFAULT_SETTINGS, ImportDialog, Modal, r
 import { UpdateProgress, useAppUpdate } from "./AppUpdate";
 import { useMcdk } from "./Mcdk";
 import { WindowChrome } from "./WindowChrome";
+import { ExportDirectoryForm } from "./ExportLocation";
 import { closeDialogWindow, confirmAction, nativeWindows, notifySettings, notifyWorkspace, openDialogWindow, SETTINGS_CHANGED, WORKSPACE_CHANGED, type DialogRequest, type WorkspaceChange } from "./windows";
 import type { AppSettings, ComponentSummary, DiscoveryWarning, OperationResult, SourceRecord } from "./types";
 
-const titles = { settings: "设置", create: "新建组件", import: "导入组件", warnings: "扫描问题", component: "组件配置", startup: "版本更新", confirm: "确认操作" };
+const titles = { settings: "设置", create: "新建组件", import: "导入组件", warnings: "扫描问题", component: "组件配置", startup: "版本更新", confirm: "确认操作", export_directory: "导出目录配置" };
 
 export function DialogApp({ request }: { request: DialogRequest }) {
   const initialComponent = request.kind === "component" && request.initialComponent?.id === request.componentId ? request.initialComponent : null;
@@ -23,6 +24,7 @@ export function DialogApp({ request }: { request: DialogRequest }) {
   const [loading, setLoading] = useState(!initialComponent);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const [directoryBusy, setDirectoryBusy] = useState(false);
   const mcdk = useMcdk(setNotice);
   const updater = useAppUpdate();
   const loadRevision = useRef(0);
@@ -91,9 +93,15 @@ export function DialogApp({ request }: { request: DialogRequest }) {
     try { await emitTo(request.owner, `mcdh:confirm-${request.token}`, value); close(); }
     catch (cause) { setNotice(errorMessage(cause)); }
   };
+  const directorySaved = async (path: string) => {
+    if (request.kind !== "export_directory") return;
+    await emitTo(request.owner, `mcdh:export-directory-${request.token}`, path);
+    await closeDialogWindow();
+  };
+  const title = request.kind === "export_directory" ? request.purpose === "source" ? "包体位置" : "一键导出目录" : titles[request.kind];
 
   return <div className="dialog-window">
-    <WindowChrome title={titles[request.kind] + " · MCDH"} busy={!!updater.progress} onError={setNotice} />
+    <WindowChrome title={title + " · MCDH"} busy={!!updater.progress || directoryBusy} onError={setNotice} />
     {updater.progress ? <UpdateProgress progress={updater.progress} standalone /> : loading ? <div className="window-loading" role="status"><LoaderCircle className="spin" size={22} />正在加载</div> : error ?
       <div className="window-load-error" role="alert"><TriangleAlert size={24} /><p>{error}</p><button className="button secondary" onClick={() => { setLoading(true); void load(); }}>重试</button></div> : <>
         {request.kind === "settings" && <SettingsDialog settings={settings} mcdk={mcdk} updater={updater} onSettings={onSettings} onClose={close} onChanged={changed} onNotice={setNotice} />}
@@ -107,6 +115,7 @@ export function DialogApp({ request }: { request: DialogRequest }) {
         }} onRemoveSource={removeSource} onClose={close} onNotice={setNotice} />}
         {request.kind === "startup" && <StartupUpdateDialog dialog={request.dialog} updater={updater} onClose={close} />}
         {request.kind === "confirm" && <Modal title="确认操作" onClose={close}><div className="confirm-content"><TriangleAlert size={24} /><p>{request.message}</p></div><div className="dialog-actions"><button className="button secondary" autoFocus onClick={() => void answer(false)}>取消</button><button className="button primary" onClick={() => void answer(true)}>确认</button></div></Modal>}
+        {request.kind === "export_directory" && <Modal title={title} subtitle={request.componentName} onClose={close}><ExportDirectoryForm request={request} onSaved={directorySaved} onCancel={close} onBusy={setDirectoryBusy} onNotice={setNotice} /></Modal>}
       </>}
     {updater.error && <div className="app-update-error" role="alert"><strong>更新未完成</strong><p>{updater.error}</p><button className="button secondary" onClick={updater.clearError}>知道了</button></div>}
     {notice && <div className="toast" role="status">{notice}</div>}

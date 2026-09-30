@@ -19,7 +19,7 @@ pub use index::{LocalIndex, MutationGuard};
 pub use model::{
     AppSettings, BumpManifestVersionRequest, ColorPreset, ComponentKind, ComponentMetadata, ComponentOrigin,
     ComponentSummary, ContentMode, CopyComponentRequest, CreateComponentRequest, DiscoveryResult,
-    DiscoveryWarning, ExportComponentRequest, ExportConflictPolicy, IdentityPolicy,
+    DiscoveryWarning, ExportComponentRequest, ExportConflictPolicy, ExportSourceInfo, IdentityPolicy,
     ImportComponentRequest, ManifestSummary, McsInfo, McsTemplateIdentity, MoveComponentRequest,
     OperationResult, QuickExportPhase, QuickExportRequest, QuickExportSettings,
     SetComponentMetadataRequest, SetComponentTagsRequest, SourceKind, SourceRecord,

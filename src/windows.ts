@@ -6,11 +6,21 @@ import type { AppSettings, ComponentSummary, OperationResult, UpdateCheckResult 
 export type StartupDialog =
   | { kind: "updated"; currentVersion: string; notes: string[] }
   | { kind: "available"; update: UpdateCheckResult };
+export type ExportDirectoryRequest = {
+  kind: "export_directory";
+  purpose: "destination" | "source";
+  componentId: string;
+  componentName: string;
+  projectPath: string;
+  token: string;
+  owner: string;
+};
 export type DialogRequest =
   | { kind: "settings" | "create" | "import" | "warnings" }
   | { kind: "component"; componentId: string; initialComponent?: ComponentSummary; initialSettings?: AppSettings }
   | { kind: "startup"; dialog: StartupDialog }
-  | { kind: "confirm"; message: string; token: string; owner: string };
+  | { kind: "confirm"; message: string; token: string; owner: string }
+  | ExportDirectoryRequest;
 
 declare global {
   interface Window { __MCDH_DIALOG__?: DialogRequest }
@@ -48,6 +58,27 @@ export function openDialogWindow(request: DialogRequest): Promise<Window> {
 
 export async function closeDialogWindow() {
   if (nativeWindows) await getCurrentWindow().close();
+}
+
+export async function requestExportDirectory(component: ComponentSummary, purpose: ExportDirectoryRequest["purpose"]): Promise<string | null> {
+  if (!nativeWindows) throw new Error("目录配置窗口只能在桌面应用中打开。");
+  const token = crypto.randomUUID();
+  let resolve!: (value: string | null) => void;
+  const answer = new Promise<string | null>((done) => { resolve = done; });
+  const stop = await listen<string | null>(
+    `mcdh:export-directory-${token}`,
+    (event) => resolve(typeof event.payload === "string" && event.payload.trim() ? event.payload : null),
+  );
+  let stopClosed: (() => void) | undefined;
+  try {
+    const child = await openDialogWindow({ kind: "export_directory", purpose, componentId: component.id, componentName: component.name, projectPath: component.path, token, owner: getCurrentWindow().label });
+    stopClosed = await child.once("tauri://destroyed", () => resolve(null));
+    if (!await Window.getByLabel(child.label)) resolve(null);
+    return await answer;
+  } finally {
+    stop();
+    stopClosed?.();
+  }
 }
 
 export async function confirmAction(message: string): Promise<boolean> {

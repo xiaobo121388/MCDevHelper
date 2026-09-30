@@ -1,14 +1,15 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const mocks = vi.hoisted(() => ({ settings: vi.fn(), sources: vi.fn(), create: vi.fn(), component: vi.fn(), customExportProfiles: vi.fn(), customExportTasks: vi.fn(), notify: vi.fn(), close: vi.fn(), open: vi.fn(), show: vi.fn(), listen: vi.fn(), stop: vi.fn() }));
-vi.mock("./api", () => ({ desktop: false, errorMessage: (value: unknown) => String(value), api: { settings: mocks.settings, sources: mocks.sources, create: mocks.create, component: mocks.component, customExportProfiles: mocks.customExportProfiles, customExportTasks: mocks.customExportTasks } }));
+const mocks = vi.hoisted(() => ({ settings: vi.fn(), sources: vi.fn(), create: vi.fn(), component: vi.fn(), exportSource: vi.fn(), destination: vi.fn(), emitTo: vi.fn(), picker: vi.fn(), customExportProfiles: vi.fn(), customExportTasks: vi.fn(), notify: vi.fn(), close: vi.fn(), open: vi.fn(), show: vi.fn(), listen: vi.fn(), stop: vi.fn() }));
+vi.mock("./api", () => ({ desktop: false, errorMessage: (value: unknown) => String(value), api: { settings: mocks.settings, sources: mocks.sources, create: mocks.create, component: mocks.component, exportSource: mocks.exportSource, setQuickExportDestination: mocks.destination, customExportProfiles: mocks.customExportProfiles, customExportTasks: mocks.customExportTasks } }));
 vi.mock("./WindowChrome", () => ({ WindowChrome: () => <header>Window chrome</header> }));
 vi.mock("./windows", () => ({
   nativeWindows: true, dialogRequest: { kind: "create" }, WORKSPACE_CHANGED: "workspace", SETTINGS_CHANGED: "settings",
   closeDialogWindow: mocks.close, notifyWorkspace: mocks.notify, notifySettings: vi.fn(), openDialogWindow: mocks.open, confirmAction: vi.fn(),
 }));
-vi.mock("@tauri-apps/api/event", () => ({ listen: mocks.listen, emitTo: vi.fn() }));
+vi.mock("@tauri-apps/api/event", () => ({ listen: mocks.listen, emitTo: mocks.emitTo }));
+vi.mock("@tauri-apps/plugin-dialog", () => ({ open: mocks.picker }));
 vi.mock("@tauri-apps/api/window", () => ({ getCurrentWindow: () => ({ show: mocks.show }) }));
 
 import { DialogApp } from "./DialogApp";
@@ -26,6 +27,9 @@ describe("standalone dialog application", () => {
     mocks.customExportProfiles.mockResolvedValue([]); mocks.customExportTasks.mockResolvedValue([]);
     mocks.notify.mockResolvedValue(undefined); mocks.close.mockResolvedValue(undefined); mocks.open.mockResolvedValue(undefined);
     mocks.show.mockResolvedValue(undefined); mocks.listen.mockResolvedValue(mocks.stop);
+    mocks.exportSource.mockResolvedValue({ path: component.path, configured: false, valid: true, issue: null });
+    mocks.destination.mockResolvedValue({ ...DEFAULT_SETTINGS, quick_export: { ...DEFAULT_SETTINGS.quick_export, destination: "D:/Exports" } });
+    mocks.emitTo.mockResolvedValue(undefined);
   });
   afterEach(cleanup);
 
@@ -124,5 +128,29 @@ describe("standalone dialog application", () => {
     expect(screen.getByRole("textbox", { name: "显示名称" })).toHaveValue("正在编辑的名称");
     expect(screen.getByRole("textbox", { name: "标签（使用逗号分隔）" })).toHaveValue("最新标签");
     expect(screen.getByRole("checkbox", { name: /收藏组件/ })).toBeChecked();
+  });
+
+  it("first shows an internal directory window, then returns a saved destination to its owner", async () => {
+    render(<DialogApp request={{ kind: "export_directory", purpose: "destination", componentId: component.id, componentName: component.name, projectPath: component.path, owner: "main", token: "export-test" }} />);
+    const input = await screen.findByRole("textbox", { name: "导出目录" });
+    expect(screen.getByRole("heading", { name: "一键导出目录" })).toBeInTheDocument();
+    expect(mocks.picker).not.toHaveBeenCalled();
+    fireEvent.change(input, { target: { value: "D:/Exports" } });
+    fireEvent.click(screen.getByRole("button", { name: "保存并继续导出" }));
+    await waitFor(() => expect(mocks.close).toHaveBeenCalledOnce());
+    expect(mocks.destination).toHaveBeenCalledWith("D:/Exports");
+    expect(mocks.emitTo).toHaveBeenCalledWith("main", "mcdh:export-directory-export-test", "D:/Exports");
+    expect(mocks.destination.mock.invocationCallOrder[0]).toBeLessThan(mocks.emitTo.mock.invocationCallOrder[0]);
+    expect(mocks.emitTo.mock.invocationCallOrder[0]).toBeLessThan(mocks.close.mock.invocationCallOrder[0]);
+    expect(mocks.picker).not.toHaveBeenCalled();
+  });
+
+  it("can close an internal directory window without returning a destination", async () => {
+    render(<DialogApp request={{ kind: "export_directory", purpose: "destination", componentId: component.id, componentName: component.name, projectPath: component.path, owner: "main", token: "cancel-test" }} />);
+    fireEvent.click(await screen.findByRole("button", { name: "取消" }));
+    await waitFor(() => expect(mocks.close).toHaveBeenCalledOnce());
+    expect(mocks.destination).not.toHaveBeenCalled();
+    expect(mocks.emitTo).not.toHaveBeenCalled();
+    expect(mocks.picker).not.toHaveBeenCalled();
   });
 });

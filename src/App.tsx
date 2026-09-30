@@ -38,6 +38,7 @@ import {
 } from "lucide-react";
 import { FormEvent, ReactNode, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { api, desktop, errorMessage } from "./api";
+import { ExportSourceEditor } from "./ExportLocation";
 import { releaseNotesFor } from "./releaseNotes";
 import { useAppUpdate, UpdateButton, UpdateProgress, type AppUpdater } from "./AppUpdate";
 import { useMcdk, LaunchGameButton, McdkSettings, type McdkController } from "./Mcdk";
@@ -785,6 +786,7 @@ export function ComponentDialog({ component, running = false, onClose, onDone, o
       <div className="component-dialog">
         <section>
           <h3>快捷配置</h3>
+          <ExportSourceEditor componentId={component.id} projectPath={component.path} disabled={!!busy} onBusy={(value) => setBusy(value ? "source" : "")} onNotice={onNotice} />
           <div className="metadata-editor"><Field label="显示名称"><input required value={displayName} onChange={(event) => { edited.current.name = true; setDisplayName(event.target.value); }} placeholder="组件显示名称" /></Field><Field label="标签（使用逗号分隔）"><input value={tags} onChange={(event) => { edited.current.tags = true; setTags(event.target.value); }} placeholder="开发, 测试" /></Field><CheckRow checked={favorite} onChange={(value) => { edited.current.favorite = true; setFavorite(value); }} label="收藏组件" hint="收藏后可从左侧收藏视图快速找到" /><div className="metadata-actions"><button className="button secondary" disabled={!!busy || !displayName.trim() || (running && !!component.mcs)} onClick={() => void run("metadata", () => api.metadata(component.id, displayName, tags.split(/[,，]/), favorite), "组件信息已保存", false)}><Save size={15} />{busy === "metadata" ? "保存中…" : "保存组件信息"}</button></div></div>
           <div className="config-row"><div><strong>Manifest UUID</strong><p>重生 header、module，并同步内部依赖和地图清单；保留 JSONC 注释。</p></div><button disabled={!!busy || running} onClick={() => void run("uuid", () => withExportSource(component, () => api.regenerateUuids(component.id)), "UUID 已重新生成", false)}>随机重生</button></div>
           <div className="config-row"><div><strong>包版本</strong><p>同步 header、module、依赖和地图包清单；保留 JSONC 注释。</p></div><select value={part} onChange={(event) => setPart(event.target.value as VersionPart)}><option value="patch">Patch</option><option value="minor">Minor</option><option value="major">Major</option></select><button disabled={!!busy || running} onClick={() => void run("version", () => withExportSource(component, () => api.bumpVersion(component.id, part)), "版本已提升", false)}>提升版本</button></div>

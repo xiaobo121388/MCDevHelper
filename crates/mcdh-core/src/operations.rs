@@ -335,6 +335,26 @@ impl ComponentService {
         Ok(source)
     }
 
+    pub fn export_source_info(&self, component_id: &str) -> Result<crate::ExportSourceInfo> {
+        let project = self.indexed_component_path(component_id)?;
+        let saved = self.index.component_export_source(&project)?;
+        let configured = saved.is_some();
+        let selected = saved.unwrap_or_else(|| project.clone());
+        let (path, issue) = match checked_export_source(&project, &selected) {
+            Ok(source) => (source, None),
+            Err(CoreError::InvalidComponent(_)) => {
+                (selected, Some("目录内未找到可导出的包体".into()))
+            }
+            Err(error) => (selected, Some(error.to_string())),
+        };
+        Ok(crate::ExportSourceInfo {
+            path,
+            configured,
+            valid: issue.is_none(),
+            issue,
+        })
+    }
+
     pub(crate) fn export_source(&self, component_id: &str) -> Result<PathBuf> {
         let project = self.indexed_component_path(component_id)?;
         let selected = self

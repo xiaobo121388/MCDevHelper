@@ -8,7 +8,7 @@ use std::sync::{
 use mcdh_core::{
     AppSettings, BumpManifestVersionRequest, ComponentService, ComponentSummary,
     CopyComponentRequest, CreateComponentRequest, DiscoveryResult, DiscoveryService, ErrorPayload,
-    ExportComponentRequest, ImportComponentRequest, LocalIndex, MoveComponentRequest,
+    ExportComponentRequest, ExportSourceInfo, ImportComponentRequest, LocalIndex, MoveComponentRequest,
     OperationResult, QuickExportPhase, QuickExportRequest, SetComponentMetadataRequest,
     SetComponentTagsRequest, SourceKind, SourceRecord, VsCodeStatus,
 };
@@ -267,6 +267,15 @@ async fn export_component(
 }
 
 #[tauri::command]
+async fn get_component_export_source(
+    state: State<'_, AppState>,
+    component_id: String,
+) -> CommandResult<ExportSourceInfo> {
+    let index = state.index.clone();
+    background(move || ComponentService::new(index).export_source_info(&component_id)).await
+}
+
+#[tauri::command]
 async fn set_component_export_source(
     state: State<'_, AppState>,
     component_id: String,
@@ -469,6 +478,7 @@ pub fn run() {
             copy_component,
             move_component,
             export_component,
+            get_component_export_source,
             set_component_export_source,
             quick_export_component,
             set_quick_export_destination,

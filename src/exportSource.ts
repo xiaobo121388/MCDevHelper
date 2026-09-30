@@ -1,5 +1,4 @@
-import { open } from "@tauri-apps/plugin-dialog";
-import { api } from "./api";
+import { requestExportDirectory } from "./windows";
 import type { ComponentSummary } from "./types";
 
 class ExportSourceCancelled extends Error {
@@ -12,9 +11,8 @@ export async function withExportSource<T>(component: ComponentSummary, operation
   try { return await operation(); }
   catch (error) {
     if (!error || typeof error !== "object" || !("code" in error) || error.code !== "pack_location_required") throw error;
-    const path = await open({ title: "选择包体目录（BP/RP 所在目录）", directory: true, multiple: false, defaultPath: component.path });
-    if (typeof path !== "string") throw new ExportSourceCancelled();
-    await api.setExportSource(component.id, path);
+    const path = await requestExportDirectory(component, "source");
+    if (!path) throw new ExportSourceCancelled();
     return operation();
   }
 }

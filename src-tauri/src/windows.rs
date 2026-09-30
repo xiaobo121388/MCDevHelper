@@ -36,6 +36,24 @@ pub(crate) enum DialogRequest {
         token: String,
         owner: String,
     },
+    ExportDirectory {
+        purpose: ExportDirectoryPurpose,
+        #[serde(rename = "componentId")]
+        component_id: String,
+        #[serde(rename = "componentName")]
+        component_name: String,
+        #[serde(rename = "projectPath")]
+        project_path: String,
+        token: String,
+        owner: String,
+    },
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum ExportDirectoryPurpose {
+    Destination,
+    Source,
 }
 
 impl DialogRequest {
@@ -56,6 +74,20 @@ impl DialogRequest {
                 )
             }
             Self::Startup { .. } => ("dialog-startup".into(), "版本更新", 620., 550.),
+            Self::ExportDirectory { purpose, token, .. } => {
+                let mut hash = DefaultHasher::new();
+                token.hash(&mut hash);
+                let (title, height) = match purpose {
+                    ExportDirectoryPurpose::Destination => ("一键导出目录", 400.),
+                    ExportDirectoryPurpose::Source => ("包体位置", 480.),
+                };
+                (
+                    format!("dialog-export-directory-{:x}", hash.finish()),
+                    title,
+                    640.,
+                    height,
+                )
+            }
             Self::Confirm { token, .. } => {
                 let mut hash = DefaultHasher::new();
                 token.hash(&mut hash);
@@ -83,7 +115,9 @@ pub(crate) async fn open_dialog_window(
         return Ok(label);
     }
     let parent_label = match &request {
-        DialogRequest::Confirm { owner, .. } => owner.as_str(),
+        DialogRequest::Confirm { owner, .. } | DialogRequest::ExportDirectory { owner, .. } => {
+            owner.as_str()
+        }
         _ => "main",
     };
     let parent = app.get_webview_window(parent_label).ok_or("父窗口已关闭")?;
@@ -109,7 +143,10 @@ pub(crate) async fn open_dialog_window(
         builder = builder.additional_browser_args(arguments);
     }
     let child = builder.build().map_err(|error| error.to_string())?;
-    if matches!(request, DialogRequest::Confirm { .. }) {
+    if matches!(
+        request,
+        DialogRequest::Confirm { .. } | DialogRequest::ExportDirectory { .. }
+    ) {
         parent
             .set_enabled(false)
             .map_err(|error| error.to_string())?;
@@ -183,6 +220,24 @@ mod tests {
             serde_json::from_str(r#"{"kind":"component","componentId":"abc"}"#).unwrap();
         assert!(
             matches!(request, DialogRequest::Component { component_id, .. } if component_id == "abc")
+        );
+    }
+
+    #[test]
+    fn export_directory_windows_preserve_the_owner_and_distinguish_each_request() {
+        let json = r#"{"kind":"export_directory","purpose":"source","componentId":"bomd","componentName":"BOMD","projectPath":"D:/BOMD","token":"one","owner":"dialog-component-test"}"#;
+        let one: DialogRequest = serde_json::from_str(json).unwrap();
+        let two: DialogRequest =
+            serde_json::from_str(&json.replace("\"one\"", "\"two\"")).unwrap();
+        assert_ne!(one.specification().0, two.specification().0);
+        assert!(one.specification().0.starts_with("dialog-export-directory-"));
+        assert_eq!(one.specification().1, "包体位置");
+        let payload = serde_json::to_value(one).unwrap();
+        assert_eq!(payload["owner"], "dialog-component-test");
+        assert_eq!(payload["componentId"], "bomd");
+        assert!(
+            serde_json::from_str::<DialogRequest>(&json.replace("\"source\"", "\"invalid\""))
+                .is_err()
         );
     }
 }
