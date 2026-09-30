@@ -1,8 +1,8 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const mocks = vi.hoisted(() => ({ settings: vi.fn(), sources: vi.fn(), create: vi.fn(), component: vi.fn(), notify: vi.fn(), close: vi.fn(), open: vi.fn(), show: vi.fn(), listen: vi.fn(), stop: vi.fn() }));
-vi.mock("./api", () => ({ desktop: false, errorMessage: (value: unknown) => String(value), api: { settings: mocks.settings, sources: mocks.sources, create: mocks.create, component: mocks.component } }));
+const mocks = vi.hoisted(() => ({ settings: vi.fn(), sources: vi.fn(), create: vi.fn(), component: vi.fn(), customExportProfiles: vi.fn(), customExportTasks: vi.fn(), notify: vi.fn(), close: vi.fn(), open: vi.fn(), show: vi.fn(), listen: vi.fn(), stop: vi.fn() }));
+vi.mock("./api", () => ({ desktop: false, errorMessage: (value: unknown) => String(value), api: { settings: mocks.settings, sources: mocks.sources, create: mocks.create, component: mocks.component, customExportProfiles: mocks.customExportProfiles, customExportTasks: mocks.customExportTasks } }));
 vi.mock("./WindowChrome", () => ({ WindowChrome: () => <header>Window chrome</header> }));
 vi.mock("./windows", () => ({
   nativeWindows: true, dialogRequest: { kind: "create" }, WORKSPACE_CHANGED: "workspace", SETTINGS_CHANGED: "settings",
@@ -12,6 +12,10 @@ vi.mock("@tauri-apps/api/event", () => ({ listen: mocks.listen, emitTo: vi.fn() 
 vi.mock("@tauri-apps/api/window", () => ({ getCurrentWindow: () => ({ show: mocks.show }) }));
 
 import { DialogApp } from "./DialogApp";
+import { DEFAULT_SETTINGS } from "./App";
+import type { ComponentSummary } from "./types";
+
+const component: ComponentSummary = { id: "test", name: "即时组件", kind: "addon", path: "D:/Project", origin: { kind: "single", source_id: "source" }, manifests: [], tags: ["开发"], favorite: false, size_bytes: 1 };
 
 describe("standalone dialog application", () => {
   beforeEach(() => {
@@ -19,6 +23,7 @@ describe("standalone dialog application", () => {
     mocks.settings.mockResolvedValue({ developer_nickname: "MCDH", developer_account: "local", developer_user_id: "0", theme: "dark", color_preset: "graphite" });
     mocks.sources.mockResolvedValue([{ id: "library", kind: "library", path: "D:/TestLibrary" }]);
     mocks.create.mockResolvedValue({ actual_path: "D:/TestLibrary/New" });
+    mocks.customExportProfiles.mockResolvedValue([]); mocks.customExportTasks.mockResolvedValue([]);
     mocks.notify.mockResolvedValue(undefined); mocks.close.mockResolvedValue(undefined); mocks.open.mockResolvedValue(undefined);
     mocks.show.mockResolvedValue(undefined); mocks.listen.mockResolvedValue(mocks.stop);
   });
@@ -73,5 +78,51 @@ describe("standalone dialog application", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("temporary read failure");
     fireEvent.click(screen.getByRole("button", { name: "重试" }));
     expect(await screen.findByRole("textbox", { name: "组件名称" })).toBeInTheDocument();
+  });
+
+  it("renders the card snapshot before settings or component I/O finishes", async () => {
+    mocks.settings.mockReturnValue(new Promise(() => {}));
+    mocks.component.mockReturnValue(new Promise(() => {}));
+    render(<DialogApp request={{ kind: "component", componentId: component.id, initialComponent: component, initialSettings: { ...DEFAULT_SETTINGS, theme: "light", color_preset: "cupertino" } }} />);
+    expect(screen.getByRole("textbox", { name: "显示名称" })).toHaveValue("即时组件");
+    expect(screen.queryByText("正在加载")).not.toBeInTheDocument();
+    expect(mocks.component).toHaveBeenCalledWith("test");
+    expect(document.documentElement.dataset.colorPreset).toBe("cupertino");
+    expect(mocks.sources).not.toHaveBeenCalled();
+  });
+
+  it("starts the component lookup without waiting for settings", () => {
+    mocks.settings.mockReturnValue(new Promise(() => {}));
+    mocks.component.mockReturnValue(new Promise(() => {}));
+    render(<DialogApp request={{ kind: "component", componentId: "test" }} />);
+    expect(mocks.component).toHaveBeenCalledWith("test");
+    expect(screen.getByText("正在加载")).toBeInTheDocument();
+  });
+
+  it("does not seed a different component into the configuration form", async () => {
+    mocks.component.mockResolvedValue(component);
+    render(<DialogApp request={{ kind: "component", componentId: "test", initialComponent: { ...component, id: "wrong", name: "错误组件" } }} />);
+    expect(await screen.findByRole("textbox", { name: "显示名称" })).toHaveValue("即时组件");
+    expect(screen.queryByText("错误组件")).not.toBeInTheDocument();
+  });
+
+  it("updates appearance without rescanning the configured component", async () => {
+    mocks.component.mockResolvedValue(component);
+    render(<DialogApp request={{ kind: "component", componentId: "test", initialComponent: component }} />);
+    await waitFor(() => expect(mocks.settings).toHaveBeenCalledOnce());
+    const handler = mocks.listen.mock.calls.find(([name]) => name === "settings")![1];
+    await act(async () => handler());
+    expect(mocks.component).toHaveBeenCalledOnce();
+  });
+
+  it("fills untouched metadata from the fresh lookup without replacing edits", async () => {
+    let complete!: (value: ComponentSummary) => void;
+    mocks.component.mockReturnValue(new Promise((resolve) => { complete = resolve; }));
+    render(<DialogApp request={{ kind: "component", componentId: "test", initialComponent: component }} />);
+    fireEvent.change(screen.getByRole("textbox", { name: "显示名称" }), { target: { value: "正在编辑的名称" } });
+    await act(async () => complete({ ...component, name: "后台读取的名称", tags: ["最新标签"], favorite: true }));
+    expect(screen.getByRole("textbox", { name: "显示名称" })).toHaveValue("正在编辑的名称");
+    expect(screen.getByRole("textbox", { name: "标签（使用逗号分隔）" })).toHaveValue("最新标签");
+    expect(screen.getByRole("checkbox", { name: /收藏组件/ })).toBeChecked();
   });
 });

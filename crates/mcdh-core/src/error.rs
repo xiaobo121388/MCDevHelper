@@ -22,6 +22,8 @@ pub enum CoreError {
     DestinationExists(PathBuf),
     #[error("{message}")]
     CustomExport { code: &'static str, message: String },
+    #[error("一键导出配置恢复失败：{0}")]
+    QuickExportRestore(String),
     #[error("压缩包处理失败：{path}: {message}")]
     Archive { path: PathBuf, message: String },
     #[error("文件操作失败：{path}: {source}")]
@@ -60,6 +62,7 @@ impl CoreError {
             Self::Conflict(_) => "conflict",
             Self::DestinationExists(_) => "destination_exists",
             Self::CustomExport { code, .. } => code,
+            Self::QuickExportRestore(_) => "quick_export_restore_failed",
             Self::Archive { .. } => "archive_error",
             Self::Io { .. } => "io_error",
             Self::Json { .. } => "json_error",

@@ -1,14 +1,14 @@
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { emit, listen } from "@tauri-apps/api/event";
 import { getCurrentWindow, Window } from "@tauri-apps/api/window";
-import type { OperationResult, UpdateCheckResult } from "./types";
+import type { AppSettings, ComponentSummary, OperationResult, UpdateCheckResult } from "./types";
 
 export type StartupDialog =
   | { kind: "updated"; currentVersion: string; notes: string[] }
   | { kind: "available"; update: UpdateCheckResult };
 export type DialogRequest =
   | { kind: "settings" | "create" | "import" | "warnings" }
-  | { kind: "component"; componentId: string }
+  | { kind: "component"; componentId: string; initialComponent?: ComponentSummary; initialSettings?: AppSettings }
   | { kind: "startup"; dialog: StartupDialog }
   | { kind: "confirm"; message: string; token: string; owner: string };
 

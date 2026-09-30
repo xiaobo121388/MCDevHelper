@@ -21,8 +21,9 @@ pub use model::{
     ComponentSummary, ContentMode, CopyComponentRequest, CreateComponentRequest, DiscoveryResult,
     DiscoveryWarning, ExportComponentRequest, ExportConflictPolicy, IdentityPolicy,
     ImportComponentRequest, ManifestSummary, McsInfo, McsTemplateIdentity, MoveComponentRequest,
-    OperationResult, SetComponentMetadataRequest, SetComponentTagsRequest, SourceKind,
-    SourceRecord, ThemePreference, VersionPart, VsCodeStatus,
+    OperationResult, QuickExportPhase, QuickExportRequest, QuickExportSettings,
+    SetComponentMetadataRequest, SetComponentTagsRequest, SourceKind, SourceRecord,
+    ThemePreference, VersionPart, VsCodeStatus,
 };
 pub use operations::ComponentService;
 pub use template::{RenderedFile, RenderedTemplate, TemplateRequest, TemplateService};

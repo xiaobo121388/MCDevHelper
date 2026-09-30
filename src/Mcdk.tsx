@@ -67,13 +67,13 @@ export function useMcdk(onNotice: (message: string) => void) {
 
 export type McdkController = ReturnType<typeof useMcdk>;
 
-export function LaunchGameButton({ componentId, name, mcdk }: { componentId: string; name: string; mcdk: McdkController }) {
+export function LaunchGameButton({ componentId, name, mcdk, disabled = false }: { componentId: string; name: string; mcdk: McdkController; disabled?: boolean }) {
   const waiting = mcdk.launching === componentId;
   const running = mcdk.status?.session?.component_id === componentId;
   const title = running ? "MCDK 会话运行中" : mcdk.status?.session ? "请先退出正在运行的 MCDK 会话" : "启动游戏";
   return <button className={running ? "launch-game active" : "launch-game"} title={title}
     aria-label={"启动游戏 " + name} aria-busy={waiting}
-    disabled={!desktop || !mcdk.status?.available || !!mcdk.launching || !!mcdk.status?.session}
+    disabled={disabled || !desktop || !mcdk.status?.available || !!mcdk.launching || !!mcdk.status?.session}
     onClick={() => void mcdk.launch(componentId)}>
     {waiting ? <LoaderCircle size={16} className="mcdk-spin" /> : <Play size={16} />}
   </button>;

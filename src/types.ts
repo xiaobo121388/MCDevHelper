@@ -47,7 +47,18 @@ export interface AppSettings {
   default_destination?: string;
   theme: ThemePreference;
   color_preset: ColorPreset;
+  quick_export: QuickExportSettings;
 }
+
+export interface QuickExportSettings {
+  destination: string | null;
+  regenerate_uuids: boolean;
+  bump_version: boolean;
+  version_part: VersionPart;
+  content_mode: ContentMode;
+  conflict_policy: ExportConflictPolicy;
+}
+export type QuickExportPhase = "preparing" | "uuid" | "version" | "exporting";
 
 export interface SourceRecord {
   id: string;

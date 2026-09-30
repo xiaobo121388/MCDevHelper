@@ -526,3 +526,10 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px s
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
 }
+.component-card footer button.quick-export-button.active { color: var(--accent); opacity: 1; background: var(--accent-soft); }
+.quick-export-settings { display: grid; gap: 18px; min-width: 0; border: 0; margin: 0; padding: 0; }
+.quick-export-toggle { display: flex; align-items: center; gap: 9px; font-size: 12px; cursor: pointer; }
+.quick-export-toggle input { width: 16px; height: 16px; margin: 0; accent-color: var(--accent); }
+.quick-export-version { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.quick-export-version select { height: 34px; padding: 0 10px; border: 1px solid var(--control-border); border-radius: 6px; font-size: 12px; }
+.quick-export-settings:disabled { opacity: .65; }

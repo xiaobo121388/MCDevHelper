@@ -70,6 +70,7 @@ pub struct AppSettings {
     pub default_destination: Option<PathBuf>,
     pub theme: ThemePreference,
     pub color_preset: ColorPreset,
+    pub quick_export: QuickExportSettings,
 }
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -95,8 +96,48 @@ impl Default for AppSettings {
             default_destination: None,
             theme: ThemePreference::System,
             color_preset: ColorPreset::Fluent,
+            quick_export: QuickExportSettings::default(),
         }
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct QuickExportSettings {
+    pub destination: Option<PathBuf>,
+    pub regenerate_uuids: bool,
+    pub bump_version: bool,
+    pub version_part: VersionPart,
+    pub content_mode: ContentMode,
+    pub conflict_policy: ExportConflictPolicy,
+}
+
+impl Default for QuickExportSettings {
+    fn default() -> Self {
+        Self {
+            destination: None,
+            regenerate_uuids: true,
+            bump_version: true,
+            version_part: VersionPart::Patch,
+            content_mode: ContentMode::Clean,
+            conflict_policy: ExportConflictPolicy::Rename,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct QuickExportRequest {
+    pub component_id: String,
+    pub destination: PathBuf,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum QuickExportPhase {
+    Preparing,
+    Uuid,
+    Version,
+    Exporting,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

@@ -1,12 +1,16 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::{
+    Arc,
+    atomic::{AtomicUsize, Ordering},
+};
 
 use mcdh_core::{
     AppSettings, BumpManifestVersionRequest, ComponentService, ComponentSummary,
     CopyComponentRequest, CreateComponentRequest, DiscoveryResult, DiscoveryService, ErrorPayload,
     ExportComponentRequest, ImportComponentRequest, LocalIndex, MoveComponentRequest,
-    OperationResult, SetComponentMetadataRequest, SetComponentTagsRequest, SourceKind,
-    SourceRecord, VsCodeStatus,
+    OperationResult, QuickExportPhase, QuickExportRequest, SetComponentMetadataRequest,
+    SetComponentTagsRequest, SourceKind, SourceRecord, VsCodeStatus,
 };
 use serde::{Deserialize, Serialize};
 use tauri::{Manager, State};
@@ -32,6 +36,22 @@ type CommandResult<T> = std::result::Result<T, ErrorPayload>;
 struct AppState {
     index: LocalIndex,
     exports: CustomExportService,
+    quick_exports: Arc<AtomicUsize>,
+}
+
+struct QuickExportActivity(Arc<AtomicUsize>);
+
+impl QuickExportActivity {
+    fn begin(count: &Arc<AtomicUsize>) -> Self {
+        count.fetch_add(1, Ordering::AcqRel);
+        Self(count.clone())
+    }
+}
+
+impl Drop for QuickExportActivity {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::AcqRel);
+    }
 }
 
 impl AppState {
@@ -40,6 +60,7 @@ impl AppState {
         Ok(Self {
             exports: CustomExportService::new(index.clone())?,
             index,
+            quick_exports: Arc::new(AtomicUsize::new(0)),
         })
     }
 
@@ -153,11 +174,12 @@ async fn refresh_components(state: State<'_, AppState>) -> CommandResult<Discove
 }
 
 #[tauri::command]
-fn get_component(
+async fn get_component(
     state: State<'_, AppState>,
     component_id: String,
 ) -> CommandResult<ComponentSummary> {
-    core_result(state.service().get_component(&component_id))
+    let index = state.index.clone();
+    background(move || ComponentService::new(index).get_component(&component_id)).await
 }
 
 #[tauri::command]
@@ -244,6 +266,34 @@ async fn export_component(
 }
 
 #[tauri::command]
+async fn quick_export_component(
+    state: State<'_, AppState>,
+    request: QuickExportRequest,
+    on_progress: tauri::ipc::Channel<QuickExportPhase>,
+) -> CommandResult<OperationResult> {
+    if app_update::is_updating() { return Err(mcdh_core::CoreError::Busy.payload()); }
+    let index = state.index.clone();
+    let activity = QuickExportActivity::begin(&state.quick_exports);
+    background(move || {
+        let _activity = activity;
+        ComponentService::new(index).quick_export_component(&request, |phase| {
+            let _ = on_progress.send(phase);
+        })
+    })
+    .await
+}
+
+#[tauri::command]
+fn set_quick_export_destination(
+    state: State<'_, AppState>,
+    destination: PathBuf,
+) -> CommandResult<AppSettings> {
+    let mut settings = core_result(state.index.app_settings())?;
+    settings.quick_export.destination = Some(destination);
+    core_result(state.index.set_app_settings(&settings))
+}
+
+#[tauri::command]
 fn delete_component(
     state: State<'_, AppState>,
     component_id: String,
@@ -268,19 +318,21 @@ fn set_component_metadata(
 }
 
 #[tauri::command]
-fn regenerate_manifest_uuids(
+async fn regenerate_manifest_uuids(
     state: State<'_, AppState>,
     component_id: String,
 ) -> CommandResult<OperationResult> {
-    core_result(state.service().regenerate_manifest_uuids(&component_id))
+    let index = state.index.clone();
+    background(move || ComponentService::new(index).regenerate_manifest_uuids(&component_id)).await
 }
 
 #[tauri::command]
-fn bump_manifest_version(
+async fn bump_manifest_version(
     state: State<'_, AppState>,
     request: BumpManifestVersionRequest,
 ) -> CommandResult<OperationResult> {
-    core_result(state.service().bump_manifest_version(&request))
+    let index = state.index.clone();
+    background(move || ComponentService::new(index).bump_manifest_version(&request)).await
 }
 
 #[tauri::command]
@@ -369,10 +421,10 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_shell::init())
         .on_window_event(|window, event| {
-            if let tauri::WindowEvent::CloseRequested { api, .. } = event
-                && app_update::is_updating()
-            {
-                api.prevent_close();
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                let exporting = window.label() == "main"
+                    && window.state::<AppState>().quick_exports.load(Ordering::Acquire) > 0;
+                if app_update::is_updating() || exporting { api.prevent_close(); }
             }
             if window.label() == "main" && matches!(event, tauri::WindowEvent::Destroyed) {
                 window.app_handle().exit(0);
@@ -405,6 +457,8 @@ pub fn run() {
             copy_component,
             move_component,
             export_component,
+            quick_export_component,
+            set_quick_export_destination,
             list_custom_export_profiles,
             save_custom_export_profiles,
             start_custom_export,
@@ -435,6 +489,18 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::{GitHubRelease, UpdateCheckResult, nearest_existing_directory, release_is_newer};
+
+    #[test]
+    fn quick_export_activity_tracks_all_workers_until_completion() {
+        let count = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let first = super::QuickExportActivity::begin(&count);
+        let second = super::QuickExportActivity::begin(&count);
+        assert_eq!(count.load(std::sync::atomic::Ordering::Acquire), 2);
+        drop(first);
+        assert_eq!(count.load(std::sync::atomic::Ordering::Acquire), 1);
+        drop(second);
+        assert_eq!(count.load(std::sync::atomic::Ordering::Acquire), 0);
+    }
 
     #[test]
     fn warning_paths_fall_back_to_the_nearest_existing_parent() {

@@ -287,6 +287,13 @@ impl LocalIndex {
             }
             normalized.default_destination = Some(destination);
         }
+        if let Some(path) = &normalized.quick_export.destination {
+            let path = normalize_existing_path(path)?;
+            if !path.is_dir() {
+                return Err(CoreError::InvalidInput("一键导出位置必须是一个目录".into()));
+            }
+            normalized.quick_export.destination = Some(path);
+        }
         let value = serde_json::to_string(&normalized)
             .map_err(|error| CoreError::json("app_settings", error))?;
         self.set_setting("app_settings", &value)?;
@@ -464,6 +471,7 @@ mod tests {
                 default_destination: Some(default_destination.clone()),
                 theme: crate::ThemePreference::Dark,
                 color_preset: crate::ColorPreset::Graphite,
+                quick_export: crate::QuickExportSettings::default(),
             })
             .unwrap();
         assert_eq!(saved.developer_nickname, "开发者");
@@ -509,6 +517,41 @@ mod tests {
             );
         }
         assert!(serde_json::from_str::<AppSettings>(r#"{"color_preset":"invalid"}"#).is_err());
+    }
+
+    #[test]
+    fn quick_export_defaults_migrate_and_custom_options_persist() {
+        let temp = tempfile::tempdir().unwrap();
+        let database = temp.path().join("db");
+        let index = LocalIndex::open(&database).unwrap();
+        index
+            .set_setting("app_settings", r#"{"theme":"dark"}"#)
+            .unwrap();
+        let mut settings = index.app_settings().unwrap();
+        assert_eq!(settings.quick_export, crate::QuickExportSettings::default());
+        let partial: AppSettings =
+            serde_json::from_str(r#"{"quick_export":{"regenerate_uuids":false}}"#).unwrap();
+        assert!(!partial.quick_export.regenerate_uuids);
+        assert!(partial.quick_export.bump_version);
+        settings.quick_export.destination = Some(temp.path().to_path_buf());
+        settings.quick_export.regenerate_uuids = false;
+        settings.quick_export.bump_version = false;
+        settings.quick_export.version_part = crate::VersionPart::Major;
+        settings.quick_export.content_mode = crate::ContentMode::Full;
+        settings.quick_export.conflict_policy = crate::ExportConflictPolicy::Error;
+        let saved = index.set_app_settings(&settings).unwrap();
+        assert_eq!(
+            LocalIndex::open(database).unwrap().app_settings().unwrap(),
+            saved
+        );
+        let file = temp.path().join("file.txt");
+        fs::write(&file, b"not a directory").unwrap();
+        settings.quick_export.destination = Some(file);
+        assert!(index.set_app_settings(&settings).is_err());
+        assert_eq!(index.app_settings().unwrap(), saved);
+        settings.quick_export.destination = Some(temp.path().join("missing"));
+        assert!(index.set_app_settings(&settings).is_err());
+        assert_eq!(index.app_settings().unwrap(), saved);
     }
 
     #[test]

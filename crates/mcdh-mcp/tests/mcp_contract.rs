@@ -333,6 +333,9 @@ fn initializes_lists_strict_schemas_and_calls_every_tool() {
     let index = mcdh_core::LocalIndex::open(temp.path().join("state/mcdh.db")).unwrap();
     let mut appearance = index.app_settings().unwrap();
     appearance.color_preset = mcdh_core::ColorPreset::Graphite;
+    appearance.quick_export.destination = Some(exports.clone());
+    appearance.quick_export.regenerate_uuids = false;
+    appearance.quick_export.version_part = mcdh_core::VersionPart::Minor;
     index.set_app_settings(&appearance).unwrap();
     let saved_settings = client.call(
         "set_settings",
@@ -347,6 +350,9 @@ fn initializes_lists_strict_schemas_and_calls_every_tool() {
     assert_eq!(saved_settings["developer_nickname"], "协议开发者");
     assert_eq!(saved_settings["theme"], "dark");
     assert_eq!(saved_settings["color_preset"], "graphite");
+    assert_eq!(saved_settings["quick_export"]["destination"], path_text(&exports));
+    assert_eq!(saved_settings["quick_export"]["regenerate_uuids"], false);
+    assert_eq!(saved_settings["quick_export"]["version_part"], "minor");
     let created = client.call(
         "create_component",
         json!({

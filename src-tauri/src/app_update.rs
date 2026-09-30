@@ -352,9 +352,11 @@ struct Job {
 #[tauri::command]
 pub(crate) async fn install_app_update(
     app: tauri::AppHandle,
+    state: tauri::State<'_, crate::AppState>,
     version: String,
     on_progress: Channel<Progress>,
 ) -> CommandResult<()> {
+    let _component_lock = state.index.try_lock_mutations().map_err(|error| error.payload())?;
     let guard = UpdateGuard::acquire().map_err(update_error)?;
     prepare_update(&app, &version, &on_progress)
         .await

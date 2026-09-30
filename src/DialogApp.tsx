@@ -1,7 +1,7 @@
 import { emitTo, listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { LoaderCircle, TriangleAlert } from "lucide-react";
-import { useCallback, useEffect, useLayoutEffect, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { api, errorMessage } from "./api";
 import { applyAppearance } from "./appearance";
 import { ComponentDialog, CreateDialog, DEFAULT_SETTINGS, ImportDialog, Modal, readIgnoredWarningKeys, SettingsDialog, StartupUpdateDialog, warningKey, WarningsDialog, writeIgnoredWarningKeys } from "./App";
@@ -14,42 +14,50 @@ import type { AppSettings, ComponentSummary, DiscoveryWarning, OperationResult, 
 const titles = { settings: "设置", create: "新建组件", import: "导入组件", warnings: "扫描问题", component: "组件配置", startup: "版本更新", confirm: "确认操作" };
 
 export function DialogApp({ request }: { request: DialogRequest }) {
-  const [settings, setSettings] = useState(DEFAULT_SETTINGS);
+  const initialComponent = request.kind === "component" && request.initialComponent?.id === request.componentId ? request.initialComponent : null;
+  const [settings, setSettings] = useState(request.kind === "component" ? request.initialSettings ?? DEFAULT_SETTINGS : DEFAULT_SETTINGS);
   const [sources, setSources] = useState<SourceRecord[]>([]);
   const [warnings, setWarnings] = useState<DiscoveryWarning[]>([]);
-  const [component, setComponent] = useState<ComponentSummary | null>(null);
+  const [component, setComponent] = useState<ComponentSummary | null>(initialComponent);
   const [ignored, setIgnored] = useState(readIgnoredWarningKeys);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(!initialComponent);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const mcdk = useMcdk(setNotice);
   const updater = useAppUpdate();
+  const loadRevision = useRef(0);
   const load = useCallback(async () => {
+    const revision = ++loadRevision.current;
+    const current = () => revision === loadRevision.current;
     setError("");
     try {
-      setSettings(await api.settings());
-      if (request.kind === "component") setComponent(await api.component(request.componentId));
-      if (request.kind === "create") setSources(await api.sources());
-      if (request.kind === "warnings") {
-        const result = await api.refresh();
-        setSources(result.sources); setWarnings(result.warnings); setIgnored(readIgnoredWarningKeys());
-      }
-    } catch (cause) { setError(errorMessage(cause)); }
-    finally { setLoading(false); }
+      await Promise.all([
+        api.settings().then((value) => { if (current()) setSettings(value); }),
+        request.kind === "component" ? api.component(request.componentId).then((value) => { if (current()) setComponent(value); }) :
+        request.kind === "create" ? api.sources().then((value) => { if (current()) setSources(value); }) :
+        request.kind === "warnings" ? api.refresh().then((result) => {
+          if (current()) { setSources(result.sources); setWarnings(result.warnings); setIgnored(readIgnoredWarningKeys()); }
+        }) : Promise.resolve(),
+      ]);
+    } catch (cause) { if (current()) setError(errorMessage(cause)); }
+    finally { if (current()) setLoading(false); }
   }, [request]);
 
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => { void load(); return () => { loadRevision.current += 1; }; }, [load]);
   useLayoutEffect(() => {
     applyAppearance(settings);
   }, [settings.theme, settings.color_preset]);
   useEffect(() => {
     if (!nativeWindows) return;
+    let active = true;
     void getCurrentWindow().show().catch((cause) => setError(errorMessage(cause)));
-    const changed = listen(SETTINGS_CHANGED, () => { void load(); });
+    const changed = listen(SETTINGS_CHANGED, () => {
+      void api.settings().then((value) => { if (active) setSettings(value); }).catch((cause) => { if (active) setNotice(errorMessage(cause)); });
+    });
     const workspace = listen(WORKSPACE_CHANGED, () => {
       if (request.kind === "create" || request.kind === "warnings") void load();
     });
-    return () => { void changed.then((stop) => stop()); void workspace.then((stop) => stop()); };
+    return () => { active = false; void changed.then((stop) => stop()); void workspace.then((stop) => stop()); };
   }, [load, request.kind]);
   useEffect(() => {
     if (!notice) return;

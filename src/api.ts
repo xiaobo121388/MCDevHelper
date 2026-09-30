@@ -18,6 +18,7 @@ import type {
   McdkSession,
   CustomExportProfile,
   CustomExportTask,
+  QuickExportPhase,
 } from "./types";
 
 export const desktop = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
@@ -81,6 +82,16 @@ export const api = {
     invoke<OperationResult>("move_component", { request }),
   export: (request: { component_id: string; destination: string; content_mode: ContentMode; conflict_policy: ExportConflictPolicy }) =>
     invoke<OperationResult>("export_component", { request }),
+  quickExport: (componentId: string, destination: string, handler: (phase: QuickExportPhase) => void) => {
+    const onProgress = new Channel<QuickExportPhase>();
+    onProgress.onmessage = handler;
+    return invoke<OperationResult>("quick_export_component", { request: { component_id: componentId, destination }, onProgress });
+  },
+  setQuickExportDestination: async (destination: string) => {
+    const saved = await invoke<AppSettings>("set_quick_export_destination", { destination });
+    await notifySettings();
+    return saved;
+  },
   delete: (componentId: string) =>
     invoke<OperationResult>("delete_component", { componentId }),
   tags: (componentId: string, tags: string[]) =>

@@ -24,9 +24,9 @@ use crate::{
     BumpManifestVersionRequest, ComponentKind, ComponentOrigin, ComponentSummary, ContentMode,
     CopyComponentRequest, CoreError, CreateComponentRequest, DiscoveryService,
     ExportComponentRequest, ExportConflictPolicy, IdentityPolicy, ImportComponentRequest,
-    LocalIndex, McsTemplateIdentity, MoveComponentRequest, OperationResult, Result,
-    SetComponentMetadataRequest, SetComponentTagsRequest, TemplateRequest, TemplateService,
-    VersionPart, VsCodeStatus,
+    LocalIndex, McsTemplateIdentity, MoveComponentRequest, OperationResult, QuickExportPhase,
+    QuickExportRequest, Result, SetComponentMetadataRequest, SetComponentTagsRequest,
+    TemplateRequest, TemplateService, VersionPart, VsCodeStatus,
 };
 
 #[cfg(test)]
@@ -318,6 +318,10 @@ impl ComponentService {
 
     pub fn export_component(&self, request: &ExportComponentRequest) -> Result<OperationResult> {
         let _guard = self.index.try_lock_mutations()?;
+        self.export_component_unlocked(request)
+    }
+
+    fn export_component_unlocked(&self, request: &ExportComponentRequest) -> Result<OperationResult> {
         let component_path = self.indexed_component_path(&request.component_id)?;
         let (component_kind, fallback_name) = inspect_export(&component_path)?;
         let mut warnings = Vec::new();
@@ -396,6 +400,99 @@ impl ComponentService {
             modified_files: vec![archive_path],
             warnings,
         })
+    }
+
+    pub fn quick_export_component(
+        &self,
+        request: &QuickExportRequest,
+        mut progress: impl FnMut(QuickExportPhase),
+    ) -> Result<OperationResult> {
+        let _guard = self.index.try_lock_mutations()?;
+        progress(QuickExportPhase::Preparing);
+        let options = self.index.app_settings()?.quick_export;
+        let path = self.indexed_component_path(&request.component_id)?;
+        let destination = existing_directory(&request.destination)?;
+        ensure_not_inside(&path, &destination)?;
+        if options.regenerate_uuids || options.bump_version {
+            crate::mcdk_session::assert_component_idle(&self.index, &path)?;
+        }
+        inspect_export(&path)?;
+        let mut originals = Vec::new();
+        let mut warnings = Vec::new();
+        let mut files = Vec::new();
+        if options.regenerate_uuids || options.bump_version {
+            files = manifest_files(&path)?;
+            if files.is_empty() {
+                warnings.push("未发现 manifest，已跳过 UUID 刷新和版本提升。".into());
+            } else {
+                let mut tracked = files.clone();
+                for name in ["world_behavior_packs.json", "world_resource_packs.json"] {
+                    let world_file = path.join(name);
+                    match fs::symlink_metadata(&world_file) {
+                        Ok(metadata) if metadata.file_type().is_symlink() => {
+                            return Err(CoreError::InvalidInput(format!(
+                                "拒绝修改符号链接清单：{}",
+                                world_file.display()
+                            )));
+                        }
+                        Ok(metadata) if metadata.is_file() => tracked.push(world_file),
+                        Ok(_) => {}
+                        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                        Err(error) => return Err(CoreError::io(world_file, error)),
+                    }
+                }
+                for file in tracked {
+                    let bytes = fs::read(&file).map_err(|error| CoreError::io(&file, error))?;
+                    originals.push((file, bytes));
+                }
+            }
+        }
+        let operation = (|| {
+            let mut modified_files = Vec::new();
+            if !files.is_empty() && options.regenerate_uuids {
+                progress(QuickExportPhase::Uuid);
+                modified_files.extend(regenerate_manifest_identifiers(&path)?);
+            }
+            if !files.is_empty() && options.bump_version {
+                progress(QuickExportPhase::Version);
+                modified_files.extend(bump_manifest_versions(&path, options.version_part)?);
+            }
+            // Inspect before publishing so a metadata failure cannot leave a ZIP with reverted UUIDs.
+            let updated = self.discovery.get_indexed(&request.component_id)?;
+            progress(QuickExportPhase::Exporting);
+            let mut result = self.export_component_unlocked(&ExportComponentRequest {
+                component_id: request.component_id.clone(),
+                destination,
+                content_mode: options.content_mode,
+                conflict_policy: options.conflict_policy,
+            })?;
+            modified_files.extend(result.modified_files);
+            modified_files.sort();
+            modified_files.dedup();
+            result.modified_files = modified_files;
+            result.component = Some(updated);
+            result.warnings.extend(warnings);
+            Ok(result)
+        })();
+        if let Err(error) = operation {
+            let mut failures = Vec::new();
+            for (file, bytes) in originals {
+                if fs::read(&file).is_ok_and(|current| current == bytes) {
+                    continue;
+                }
+                if let Err(failure) = atomic_write(&file, &bytes) {
+                    failures.push(format!("{}：{failure}", file.display()));
+                }
+            }
+            if !failures.is_empty() {
+                return Err(CoreError::QuickExportRestore(format!(
+                    "导出错误：{error}。请检查：{}",
+                    failures.join("；")
+                )));
+            }
+            return Err(error);
+        }
+        operation
     }
 
     pub fn delete_component(&self, component_id: &str) -> Result<OperationResult> {
@@ -495,7 +592,7 @@ impl ComponentService {
     }
 
     pub fn get_component(&self, component_id: &str) -> Result<ComponentSummary> {
-        self.find_component(component_id)
+        self.discovery.get_indexed(component_id)
     }
 
     fn mcs_identity(&self, namespace: Option<&str>) -> Result<McsTemplateIdentity> {
@@ -1654,6 +1751,292 @@ mod tests {
     }
 
     #[test]
+    fn reads_only_the_indexed_component_without_discovering_siblings() {
+        let temp = tempfile::tempdir().unwrap();
+        let database = temp.path().join("state/db");
+        let index = LocalIndex::open(&database).unwrap();
+        let library = temp.path().join("library");
+        let selected = library.join("selected");
+        write_json(
+            &selected.join("manifest.json"),
+            manifest("Selected", "resources", Uuid::new_v4()),
+        );
+        index.add_source(SourceKind::Library, &library).unwrap();
+        let id = index.component_id(&selected).unwrap();
+        write_json(
+            &library.join("unindexed/manifest.json"),
+            manifest("Other", "resources", Uuid::new_v4()),
+        );
+        let service = ComponentService::new(index);
+        assert_eq!(service.get_component(&id).unwrap().name, "Selected");
+        let connection = rusqlite::Connection::open(database).unwrap();
+        let count: i64 = connection
+            .query_row("SELECT COUNT(*) FROM component_metadata", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(
+            count, 1,
+            "opening configuration must not discover other components"
+        );
+    }
+
+    fn quick_export_fixture() -> (tempfile::TempDir, LocalIndex, PathBuf, QuickExportRequest) {
+        let temp = tempfile::tempdir().unwrap();
+        let index = LocalIndex::open(temp.path().join("state/db")).unwrap();
+        let library = temp.path().join("library");
+        let root = library.join("map");
+        let output = temp.path().join("output");
+        fs::create_dir_all(root.join("db")).unwrap();
+        fs::create_dir_all(&output).unwrap();
+        let behavior_id = Uuid::new_v4();
+        let resources_id = Uuid::new_v4();
+        let mut behavior = manifest("Behavior", "data", behavior_id);
+        behavior["header"]["version"] = serde_json::json!([1, 2, 3]);
+        behavior["dependencies"] = serde_json::json!([
+            {"uuid": resources_id, "version": [1, 2, 3]},
+            {"module_name": "@minecraft/server", "version": "1.0.0"}
+        ]);
+        let behavior_path = root.join("behavior_packs/bp/manifest.json");
+        write_json(&behavior_path, behavior.clone());
+        fs::write(
+            &behavior_path,
+            format!(
+                "\u{feff}// retained comment\n{}",
+                serde_json::to_string_pretty(&behavior).unwrap()
+            ),
+        )
+        .unwrap();
+        let mut resources = manifest("Resources", "resources", resources_id);
+        resources["header"]["version"] = serde_json::json!([1, 2, 3]);
+        write_json(&root.join("resource_packs/rp/manifest.json"), resources);
+        write_json(
+            &root.join("world_behavior_packs.json"),
+            serde_json::json!([{"pack_id": behavior_id, "version": [1, 2, 3]}]),
+        );
+        write_json(
+            &root.join("world_resource_packs.json"),
+            serde_json::json!([{"pack_id": resources_id, "version": [1, 2, 3]}]),
+        );
+        fs::write(root.join(".private"), b"not game content").unwrap();
+        write_component_metadata(&root, &normalized_metadata("Quick", &[], false).unwrap())
+            .unwrap();
+        index.add_source(SourceKind::Library, library).unwrap();
+        let request = QuickExportRequest {
+            component_id: index.component_id(&root).unwrap(),
+            destination: output,
+        };
+        (temp, index, root, request)
+    }
+
+    fn quick_export_originals(root: &Path) -> Vec<(PathBuf, Vec<u8>)> {
+        let mut paths = manifest_files(root).unwrap();
+        paths.extend([
+            root.join("world_behavior_packs.json"),
+            root.join("world_resource_packs.json"),
+        ]);
+        paths
+            .into_iter()
+            .map(|path| {
+                let bytes = fs::read(&path).unwrap();
+                (path, bytes)
+            })
+            .collect()
+    }
+
+    #[test]
+    fn quick_export_updates_sources_references_and_clean_zip_once() {
+        let (_temp, index, root, request) = quick_export_fixture();
+        let old = read_json(&root.join("behavior_packs/bp/manifest.json")).unwrap();
+        let mut phases = Vec::new();
+        let result = ComponentService::new(index.clone())
+            .quick_export_component(&request, |phase| phases.push(phase))
+            .unwrap();
+        assert_eq!(
+            phases,
+            [
+                QuickExportPhase::Preparing,
+                QuickExportPhase::Uuid,
+                QuickExportPhase::Version,
+                QuickExportPhase::Exporting
+            ]
+        );
+        let behavior_path = root.join("behavior_packs/bp/manifest.json");
+        let behavior = read_json(&behavior_path).unwrap();
+        let resources = read_json(&root.join("resource_packs/rp/manifest.json")).unwrap();
+        assert_ne!(behavior["header"]["uuid"], old["header"]["uuid"]);
+        assert_ne!(behavior["modules"][0]["uuid"], old["modules"][0]["uuid"]);
+        assert_eq!(behavior["header"]["version"], serde_json::json!([1, 2, 4]));
+        assert_eq!(
+            behavior["modules"][0]["version"],
+            behavior["header"]["version"]
+        );
+        assert_eq!(
+            behavior["dependencies"][0]["uuid"],
+            resources["header"]["uuid"]
+        );
+        assert_eq!(
+            behavior["dependencies"][0]["version"],
+            resources["header"]["version"]
+        );
+        assert_eq!(behavior["dependencies"][1]["version"], "1.0.0");
+        let world = read_json(&root.join("world_behavior_packs.json")).unwrap();
+        assert_eq!(world[0]["pack_id"], behavior["header"]["uuid"]);
+        assert_eq!(world[0]["version"], behavior["header"]["version"]);
+        let text = fs::read_to_string(&behavior_path).unwrap();
+        assert!(text.starts_with('\u{feff}'));
+        assert!(text.contains("// retained comment"));
+        assert_eq!(result.component.as_ref().unwrap().version, Some([1, 2, 4]));
+        assert_eq!(result.modified_files.len(), 5);
+        let mut zip = ZipArchive::new(fs::File::open(&result.actual_path).unwrap()).unwrap();
+        let mut archived = Vec::new();
+        zip.by_name("behavior_packs/bp/manifest.json")
+            .unwrap()
+            .read_to_end(&mut archived)
+            .unwrap();
+        assert_eq!(archived, fs::read(behavior_path).unwrap());
+        assert!(zip.by_name(".private").is_err());
+        assert!(zip.by_name(METADATA_FILE_NAME).is_err());
+        let second = ComponentService::new(index)
+            .quick_export_component(&request, |_| {})
+            .unwrap();
+        assert_ne!(result.actual_path, second.actual_path);
+        assert_eq!(second.component.unwrap().version, Some([1, 2, 5]));
+        assert!(result.actual_path.is_file());
+    }
+
+    #[test]
+    fn quick_export_honors_saved_options_and_can_preserve_sources() {
+        for (part, expected) in [
+            (VersionPart::Minor, [1, 3, 0]),
+            (VersionPart::Major, [2, 0, 0]),
+        ] {
+            let (_temp, index, root, request) = quick_export_fixture();
+            let old_uuid =
+                read_json(&root.join("behavior_packs/bp/manifest.json")).unwrap()["header"]["uuid"]
+                    .clone();
+            let mut settings = index.app_settings().unwrap();
+            settings.quick_export.regenerate_uuids = false;
+            settings.quick_export.version_part = part;
+            settings.quick_export.content_mode = ContentMode::Full;
+            settings.quick_export.conflict_policy = ExportConflictPolicy::Overwrite;
+            index.set_app_settings(&settings).unwrap();
+            let service = ComponentService::new(index.clone());
+            let result = service.quick_export_component(&request, |_| {}).unwrap();
+            assert_eq!(result.component.unwrap().version, Some(expected));
+            let mut zip = ZipArchive::new(fs::File::open(&result.actual_path).unwrap()).unwrap();
+            assert!(zip.by_name(".private").is_ok());
+            drop(zip);
+            settings.quick_export.bump_version = false;
+            index.set_app_settings(&settings).unwrap();
+            let originals = quick_export_originals(&root);
+            let mut phases = Vec::new();
+            let pure = service
+                .quick_export_component(&request, |phase| phases.push(phase))
+                .unwrap();
+            assert_eq!(
+                phases,
+                [QuickExportPhase::Preparing, QuickExportPhase::Exporting]
+            );
+            assert_eq!(pure.actual_path, result.actual_path);
+            assert_eq!(quick_export_originals(&root), originals);
+            assert_eq!(
+                read_json(&root.join("behavior_packs/bp/manifest.json")).unwrap()["header"]["uuid"],
+                old_uuid
+            );
+        }
+    }
+
+    #[test]
+    fn quick_export_rolls_back_all_configuration_on_conflict_and_publish_failure() {
+        for policy in [ExportConflictPolicy::Error, ExportConflictPolicy::Overwrite] {
+            let (_temp, index, root, request) = quick_export_fixture();
+            let originals = quick_export_originals(&root);
+            let mut settings = index.app_settings().unwrap();
+            settings.quick_export.conflict_policy = policy;
+            index.set_app_settings(&settings).unwrap();
+            let target = request.destination.join("Quick.zip");
+            if policy == ExportConflictPolicy::Error {
+                fs::write(&target, b"existing zip").unwrap();
+            } else {
+                fs::create_dir(&target).unwrap();
+            }
+            assert!(
+                ComponentService::new(index)
+                    .quick_export_component(&request, |_| {})
+                    .is_err()
+            );
+            assert_eq!(quick_export_originals(&root), originals);
+            if policy == ExportConflictPolicy::Error {
+                assert_eq!(fs::read(target).unwrap(), b"existing zip");
+            } else {
+                assert!(target.is_dir());
+            }
+            assert_eq!(fs::read_dir(request.destination).unwrap().count(), 1);
+        }
+    }
+
+    #[test]
+    fn quick_export_rolls_back_uuid_changes_when_version_cannot_advance() {
+        let (_temp, index, root, request) = quick_export_fixture();
+        let path = root.join("behavior_packs/bp/manifest.json");
+        let mut behavior = read_json(&path).unwrap();
+        behavior["header"]["version"] = serde_json::json!([1, 2, u64::MAX]);
+        write_json(&path, behavior);
+        let originals = quick_export_originals(&root);
+        let error = ComponentService::new(index)
+            .quick_export_component(&request, |_| {})
+            .unwrap_err();
+        assert!(error.to_string().contains("上限"));
+        assert_eq!(quick_export_originals(&root), originals);
+        assert_eq!(fs::read_dir(request.destination).unwrap().count(), 0);
+    }
+
+    #[test]
+    fn quick_export_validates_destination_and_holds_one_mutation_lock() {
+        let (_temp, index, root, mut request) = quick_export_fixture();
+        let originals = quick_export_originals(&root);
+        let service = ComponentService::new(index.clone());
+        let guard = index.try_lock_mutations().unwrap();
+        assert!(matches!(
+            service.quick_export_component(&request, |_| {}),
+            Err(CoreError::Busy)
+        ));
+        drop(guard);
+        request.destination = root.clone();
+        assert!(service.quick_export_component(&request, |_| {}).is_err());
+        request.destination = root.join("does-not-exist");
+        assert!(service.quick_export_component(&request, |_| {}).is_err());
+        assert_eq!(quick_export_originals(&root), originals);
+    }
+
+    #[test]
+    fn quick_export_skips_manifest_actions_for_blank_maps() {
+        let temp = tempfile::tempdir().unwrap();
+        let index = LocalIndex::open(temp.path().join("state/db")).unwrap();
+        let root = temp.path().join("map");
+        fs::create_dir_all(root.join("db")).unwrap();
+        index.add_source(SourceKind::Single, &root).unwrap();
+        let result = ComponentService::new(index.clone())
+            .quick_export_component(
+                &QuickExportRequest {
+                    component_id: index.component_id(&root).unwrap(),
+                    destination: temp.path().into(),
+                },
+                |_| {},
+            )
+            .unwrap();
+        assert!(result.actual_path.is_file());
+        assert!(
+            result
+                .warnings
+                .iter()
+                .any(|message| message.contains("跳过"))
+        );
+        assert!(result.component.unwrap().version.is_none());
+    }
+
+    #[test]
     fn creates_generic_and_mcs_components() {
         let temp = tempfile::tempdir().unwrap();
         let index = LocalIndex::open(temp.path().join("state/mcdh.db")).unwrap();
@@ -1711,7 +2094,7 @@ mod tests {
         let id = index.component_id(&created.actual_path).unwrap();
         let component = service.get_component(&id).unwrap();
         let process = inspect_process(std::process::id()).unwrap().unwrap();
-        crate::mcdk::McdkStore::new(index).write(SESSION_KEY, &SessionState { session: Some(McdkSession {
+        crate::mcdk::McdkStore::new(index.clone()).write(SESSION_KEY, &SessionState { session: Some(McdkSession {
             component_id: component.id.clone(), component_path: component.path.clone(), executable: process.executable,
             version: "1.6.1".into(), pid: std::process::id(), created_at: process.created_at,
         }), last_exit: None }).unwrap();
@@ -1719,6 +2102,13 @@ mod tests {
         assert!(service.move_component(&MoveComponentRequest { component_id: component.id.clone(), destination: temp.path().into(), mcs_compatible: false }).is_err());
         assert!(service.regenerate_manifest_uuids(&component.id).is_err());
         assert!(service.bump_manifest_version(&BumpManifestVersionRequest { component_id: component.id.clone(), part: VersionPart::Patch }).is_err());
+        let request = QuickExportRequest { component_id: component.id.clone(), destination: temp.path().into() };
+        assert!(service.quick_export_component(&request, |_| {}).is_err());
+        let mut settings = index.app_settings().unwrap();
+        settings.quick_export.regenerate_uuids = false;
+        settings.quick_export.bump_version = false;
+        index.set_app_settings(&settings).unwrap();
+        assert!(service.quick_export_component(&request, |_| {}).is_ok());
         assert!(component.path.is_dir());
     }
 

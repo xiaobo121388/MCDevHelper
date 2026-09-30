@@ -1,6 +1,7 @@
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 
+use mcdh_core::{AppSettings, ComponentSummary};
 use serde::{Deserialize, Serialize};
 use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
 
@@ -14,6 +15,18 @@ pub(crate) enum DialogRequest {
     Component {
         #[serde(rename = "componentId")]
         component_id: String,
+        #[serde(
+            rename = "initialComponent",
+            default,
+            skip_serializing_if = "Option::is_none"
+        )]
+        initial_component: Option<Box<ComponentSummary>>,
+        #[serde(
+            rename = "initialSettings",
+            default,
+            skip_serializing_if = "Option::is_none"
+        )]
+        initial_settings: Option<AppSettings>,
     },
     Startup {
         dialog: serde_json::Value,
@@ -32,7 +45,7 @@ impl DialogRequest {
             Self::Create => ("dialog-create".into(), "新建组件", 600., 640.),
             Self::Import => ("dialog-import".into(), "导入组件", 620., 660.),
             Self::Warnings => ("dialog-warnings".into(), "扫描问题", 760., 620.),
-            Self::Component { component_id } => {
+            Self::Component { component_id, .. } => {
                 let mut hash = DefaultHasher::new();
                 component_id.hash(&mut hash);
                 (
@@ -142,9 +155,13 @@ mod tests {
     fn windows_have_stable_labels_and_component_windows_are_distinct() {
         let one = DialogRequest::Component {
             component_id: "D:/中文/project".into(),
+            initial_component: None,
+            initial_settings: None,
         };
         let two = DialogRequest::Component {
             component_id: "another".into(),
+            initial_component: None,
+            initial_settings: None,
         };
         assert_eq!(one.specification().0, one.specification().0);
         assert_ne!(one.specification().0, two.specification().0);
@@ -165,7 +182,7 @@ mod tests {
         let request: DialogRequest =
             serde_json::from_str(r#"{"kind":"component","componentId":"abc"}"#).unwrap();
         assert!(
-            matches!(request, DialogRequest::Component { component_id } if component_id == "abc")
+            matches!(request, DialogRequest::Component { component_id, .. } if component_id == "abc")
         );
     }
 }
