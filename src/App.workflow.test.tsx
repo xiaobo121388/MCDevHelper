@@ -735,6 +735,7 @@ describe("component workspace filters", () => {
     fireEvent.click(screen.getByRole("button", { name: "配置 快速配置模组" }));
     fireEvent.click(screen.getByRole("button", { name: "随机重生" }));
     await waitFor(() => expect(mocks.regenerateUuids).toHaveBeenCalledWith(component.id));
+    expect(confirm).not.toHaveBeenCalled();
     expect(mocks.refresh).toHaveBeenCalledTimes(1);
 
     fireEvent.click(screen.getByRole("button", { name: "配置 快速配置模组" }));
