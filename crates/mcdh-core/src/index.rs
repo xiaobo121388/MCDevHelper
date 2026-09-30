@@ -190,6 +190,33 @@ impl LocalIndex {
             .map(PathBuf::from))
     }
 
+    pub(crate) fn component_export_source(&self, root: &Path) -> Result<Option<PathBuf>> {
+        let root = normalize_path(root)?;
+        let text: Option<String> = self.connection()?.query_row(
+            "SELECT settings.value FROM settings JOIN component_metadata ON settings.key = 'component_export_source:' || component_metadata.id WHERE component_metadata.path = ?1",
+            [root.to_string_lossy().as_ref()], |row| row.get(0),
+        ).optional()?;
+        let Some(text) = text else {
+            return Ok(None);
+        };
+        let relative: PathBuf = parse_jsonc(&text, "component_export_source")?;
+        if relative
+            .components()
+            .any(|part| !matches!(part, std::path::Component::Normal(_)))
+        {
+            return Err(CoreError::InvalidInput(
+                "包体位置必须为项目内的相对目录".into(),
+            ));
+        }
+        Ok(Some(root.join(relative)))
+    }
+
+    pub(crate) fn store_component_export_source(&self, id: &str, relative: &Path) -> Result<()> {
+        let text = serde_json::to_string(relative)
+            .map_err(|error| CoreError::json("component_export_source", error))?;
+        self.set_setting(&format!("component_export_source:{id}"), &text)
+    }
+
     pub fn tags(&self, path: impl AsRef<Path>) -> Result<Vec<String>> {
         let path = normalize_path(path.as_ref())?;
         let path_text = path.to_string_lossy().into_owned();

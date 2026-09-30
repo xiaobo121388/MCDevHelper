@@ -3,6 +3,7 @@ import { Archive, LoaderCircle, FolderOpen } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { api, desktop, errorMessage } from "./api";
 import { exportTaskStatus, useExportTask } from "./CustomExport";
+import { isExportSourceCancelled, withExportSource } from "./exportSource";
 import { notifyWorkspace } from "./windows";
 import type { AppSettings, ComponentSummary, CustomExportProfile, OperationResult, QuickExportPhase, QuickExportSettings } from "./types";
 
@@ -45,9 +46,9 @@ export function useQuickExport(onDone: (operation: OperationResult, message: str
       const target = destination;
       if (saved.quick_export?.custom_profile_id) {
         setPhase("custom_export");
-        delegated = await custom.start(() => api.quickCustomExport(component.id, target));
-      } else await complete(await api.quickExport(component.id, target, setPhase));
-    } catch (error) { onNotice(errorMessage(error)); }
+        delegated = await custom.start(() => withExportSource(component, () => api.quickCustomExport(component.id, target)));
+      } else await complete(await withExportSource(component, () => api.quickExport(component.id, target, setPhase)));
+    } catch (error) { if (!isExportSourceCancelled(error)) onNotice(errorMessage(error)); }
     finally { if (!delegated) release(); }
   };
   const status = phase === "custom_export" ? custom.task ? exportTaskStatus(custom.task) : "准备自定义导出" : phaseText[phase];

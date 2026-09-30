@@ -237,14 +237,24 @@ impl CustomExportService {
             .component_path(&request.component_id)?
             .ok_or_else(|| CoreError::InvalidInput("找不到组件 ID".into()))?;
         let source = files::directory(&source)?;
+        let project = source;
+        let source = crate::ComponentService::new(self.0.index.clone())
+            .export_source(&request.component_id)?;
         let destination = files::directory(&request.destination)?;
-        files::outside(&source, &destination)?;
+        files::outside(&project, &destination)?;
         files::outside(&source, &files::directory(self.0.workspace.root.path())?)?;
-        let (kind, fallback_name) = crate::operations::inspect_export(&source)?;
+        let (kind, mut fallback_name) = crate::operations::inspect_export(&source)?;
+        if source != project {
+            fallback_name = project
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .into_owned();
+        }
         if !profile.component_kinds.contains(&kind) {
             return Err(failure("incompatible_profile", "方案不适用于此组件类型"));
         }
-        let name = crate::metadata::read_component_metadata(&source)
+        let name = crate::metadata::read_component_metadata(&project)
             .ok()
             .flatten()
             .map(|metadata| metadata.display_name)
@@ -425,6 +435,10 @@ fn execute(
 ) -> Result<OperationResult> {
     let mut guard = Some(index.try_lock_mutations()?);
     task.check()?;
+    let component_id = task.state.lock().unwrap().view.component_id.clone();
+    if crate::ComponentService::new(index.clone()).export_source(&component_id)? != source {
+        return Err(failure("source_changed", "包体位置已变化，请重新导出"));
+    }
     let keep_lock = quick.is_some();
     let mut run = || {
         let started = Instant::now();

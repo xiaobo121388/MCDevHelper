@@ -253,7 +253,7 @@ impl DiscoveryService {
                 }
             };
             for root in roots {
-                if let Ok(paths) = find_manifest_paths(&root) {
+                if let Ok(paths) = component_manifest_paths(&self.index, &root) {
                     for path in paths {
                         if let Ok(manifest) = read_manifest(&path)
                             && let Some(uuid) = manifest.header_uuid
@@ -423,7 +423,7 @@ impl DiscoveryService {
             }
         };
         let work_config = read_optional_json(&path.join("work.mcscfg"))?;
-        let manifest_paths = find_manifest_paths(path)?;
+        let manifest_paths = component_manifest_paths(&self.index, path)?;
         let mut manifests = manifest_paths
             .iter()
             .map(|manifest_path| read_manifest(manifest_path))
@@ -463,6 +463,14 @@ impl DiscoveryService {
             .and_then(Value::as_str)
             .filter(|name| !name.trim().is_empty())
             .map(ToOwned::to_owned)
+            .or_else(|| {
+                self.index
+                    .component_export_source(path)
+                    .ok()
+                    .flatten()
+                    .filter(|source| source != path)
+                    .map(|_| file_name(path))
+            })
             .or_else(|| manifests.iter().find_map(|manifest| manifest.name.clone()))
             .unwrap_or_else(|| file_name(path));
         let name = component_metadata
@@ -668,6 +676,16 @@ fn find_manifest_paths(root: &Path) -> Result<Vec<PathBuf>> {
     paths.sort_by_key(|path| path_key(path));
     paths.dedup_by(|left, right| path_key(left) == path_key(right));
     Ok(paths)
+}
+
+fn component_manifest_paths(index: &LocalIndex, root: &Path) -> Result<Vec<PathBuf>> {
+    if let Some(source) = index.component_export_source(root)?
+        && let Ok(source) = canonicalize(&source)
+        && source.starts_with(root)
+    {
+        return find_manifest_paths(&source);
+    }
+    find_manifest_paths(root)
 }
 
 fn push_file(paths: &mut Vec<PathBuf>, path: PathBuf) {

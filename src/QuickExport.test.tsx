@@ -2,9 +2,9 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-libra
 import { useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const mocks = vi.hoisted(() => ({ settings: vi.fn(), quickExport: vi.fn(), destination: vi.fn(), open: vi.fn(), notify: vi.fn(), done: vi.fn(), notice: vi.fn(), profiles: vi.fn(), quickCustom: vi.fn(), task: vi.fn(), cancel: vi.fn(), resolve: vi.fn() }));
+const mocks = vi.hoisted(() => ({ settings: vi.fn(), quickExport: vi.fn(), destination: vi.fn(), open: vi.fn(), notify: vi.fn(), done: vi.fn(), notice: vi.fn(), profiles: vi.fn(), quickCustom: vi.fn(), task: vi.fn(), cancel: vi.fn(), resolve: vi.fn(), source: vi.fn() }));
 vi.mock("@tauri-apps/plugin-dialog", () => ({ open: mocks.open }));
-vi.mock("./api", () => ({ desktop: true, errorMessage: (value: unknown) => String(value), api: { settings: mocks.settings, quickExport: mocks.quickExport, setQuickExportDestination: mocks.destination, customExportProfiles: mocks.profiles, quickCustomExport: mocks.quickCustom, customExportTask: mocks.task, cancelCustomExport: mocks.cancel, resolveCustomExportConflict: mocks.resolve } }));
+vi.mock("./api", () => ({ desktop: true, errorMessage: (value: unknown) => String(value), api: { settings: mocks.settings, quickExport: mocks.quickExport, setQuickExportDestination: mocks.destination, customExportProfiles: mocks.profiles, quickCustomExport: mocks.quickCustom, customExportTask: mocks.task, cancelCustomExport: mocks.cancel, resolveCustomExportConflict: mocks.resolve, setExportSource: mocks.source } }));
 vi.mock("./windows", () => ({ notifyWorkspace: mocks.notify }));
 
 import { DEFAULT_QUICK_EXPORT, QuickExportButton, QuickExportOptions, useQuickExport } from "./QuickExport";
@@ -34,6 +34,7 @@ describe("one-click export", () => {
     mocks.profiles.mockResolvedValue([]);
     mocks.quickCustom.mockResolvedValue(task);
     mocks.task.mockResolvedValue(task);
+    mocks.source.mockResolvedValue("D:/Project/src");
   });
   afterEach(cleanup);
 
@@ -196,6 +197,44 @@ describe("one-click export", () => {
     await waitFor(() => expect(mocks.notice).toHaveBeenCalledWith("Error: profile not found"));
     expect(mocks.quickExport).not.toHaveBeenCalled();
     expect(screen.getByRole("button", { name: "一键导出 Test" })).toBeEnabled();
+  });
+
+  it("chooses the actual package source separately from the output folder and retries", async () => {
+    mocks.settings.mockResolvedValue({ ...settings, quick_export: { ...DEFAULT_QUICK_EXPORT, destination: "D:/Exports" } });
+    mocks.quickExport.mockRejectedValueOnce({ code: "pack_location_required" });
+    mocks.open.mockResolvedValue("D:/Project/src");
+    render(<Workspace />);
+    fireEvent.click(screen.getByRole("button", { name: "一键导出 Test" }));
+    await waitFor(() => expect(mocks.done).toHaveBeenCalledOnce());
+    expect(mocks.source).toHaveBeenCalledWith("one", "D:/Project/src");
+    expect(mocks.destination).not.toHaveBeenCalled();
+    expect(mocks.quickExport).toHaveBeenNthCalledWith(2, "one", "D:/Exports", expect.any(Function));
+    expect(mocks.notice).not.toHaveBeenCalled();
+  });
+
+  it("cancels missing-package selection without retrying or showing another alert", async () => {
+    mocks.settings.mockResolvedValue({ ...settings, quick_export: { ...DEFAULT_QUICK_EXPORT, destination: "D:/Exports" } });
+    mocks.quickExport.mockRejectedValueOnce({ code: "pack_location_required" });
+    mocks.open.mockResolvedValue(null);
+    render(<Workspace />);
+    fireEvent.click(screen.getByRole("button", { name: "一键导出 Test" }));
+    await waitFor(() => expect(mocks.open).toHaveBeenCalledOnce());
+    await waitFor(() => expect(screen.getByRole("button", { name: "一键导出 Test" })).toBeEnabled());
+    expect(mocks.quickExport).toHaveBeenCalledOnce();
+    expect(mocks.source).not.toHaveBeenCalled(); expect(mocks.done).not.toHaveBeenCalled(); expect(mocks.notice).not.toHaveBeenCalled();
+  });
+
+  it("starts custom export after selecting a missing package source", async () => {
+    mocks.settings.mockResolvedValue({ ...settings, quick_export: { ...DEFAULT_QUICK_EXPORT, destination: "D:/Exports", custom_profile_id: "custom" } });
+    mocks.quickCustom.mockRejectedValueOnce({ code: "pack_location_required" });
+    mocks.open.mockResolvedValue("D:/Project/src");
+    mocks.task.mockResolvedValue({ ...task, status: "succeeded", result: operation });
+    render(<Workspace />);
+    fireEvent.click(screen.getByRole("button", { name: "一键导出 Test" }));
+    await waitFor(() => expect(mocks.done).toHaveBeenCalledOnce());
+    expect(mocks.quickCustom).toHaveBeenCalledTimes(2);
+    expect(mocks.source).toHaveBeenCalledWith("one", "D:/Project/src");
+    expect(mocks.quickExport).not.toHaveBeenCalled();
   });
 
   it("reports failed tasks and permits retrying after rollback completes", async () => {

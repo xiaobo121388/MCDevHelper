@@ -323,9 +323,51 @@ impl ComponentService {
         self.export_component_unlocked(request)
     }
 
-    fn export_component_unlocked(&self, request: &ExportComponentRequest) -> Result<OperationResult> {
+    pub fn set_export_source(&self, component_id: &str, selected: &Path) -> Result<PathBuf> {
+        let _guard = self.index.try_lock_mutations()?;
+        let project = self.indexed_component_path(component_id)?;
+        let source = checked_export_source(&project, selected)?;
+        let relative = source
+            .strip_prefix(&project)
+            .map_err(|_| CoreError::InvalidInput("包体目录必须位于当前项目内".into()))?;
+        self.index
+            .store_component_export_source(component_id, relative)?;
+        Ok(source)
+    }
+
+    pub(crate) fn export_source(&self, component_id: &str) -> Result<PathBuf> {
+        let project = self.indexed_component_path(component_id)?;
+        let selected = self
+            .index
+            .component_export_source(&project)?
+            .unwrap_or_else(|| project.clone());
+        match checked_export_source(&project, &selected) {
+            Ok(source) => Ok(source),
+            Err(CoreError::InvalidComponent(_) | CoreError::NotFound(_)) => {
+                Err(CoreError::PackLocationRequired(project))
+            }
+            Err(CoreError::Io { source, .. }) if source.kind() == std::io::ErrorKind::NotFound => {
+                Err(CoreError::PackLocationRequired(project))
+            }
+            Err(error) => Err(error),
+        }
+    }
+
+    fn export_component_unlocked(
+        &self,
+        request: &ExportComponentRequest,
+    ) -> Result<OperationResult> {
         let component_path = self.indexed_component_path(&request.component_id)?;
-        let (component_kind, fallback_name) = inspect_export(&component_path)?;
+        let source = self.export_source(&request.component_id)?;
+        let (component_kind, mut fallback_name) = inspect_export(&source)?;
+        let selected_source = source != component_path;
+        if selected_source {
+            fallback_name = component_path
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .into_owned();
+        }
         let mut warnings = Vec::new();
         let component_metadata = match read_component_metadata(&component_path) {
             Ok(metadata) => metadata,
@@ -357,9 +399,14 @@ impl ComponentService {
             },
         };
         let temporary = temporary_zip_path(&destination);
+        let component = if selected_source {
+            Some(self.discovery.get_indexed(&request.component_id)?)
+        } else {
+            None
+        };
         let write_result = match request.content_mode {
             ContentMode::Clean => {
-                write_clean_component_zip(&component_path, component_kind, &destination, &temporary)
+                write_clean_component_zip(&source, component_kind, &destination, &temporary)
             }
             ContentMode::Full => {
                 let metadata_is_regular = fs::symlink_metadata(metadata_path(&component_path))
@@ -397,7 +444,7 @@ impl ComponentService {
             return Err(CoreError::io(&archive_path, error));
         }
         Ok(OperationResult {
-            component: None,
+            component,
             actual_path: archive_path.clone(),
             modified_files: vec![archive_path],
             warnings,
@@ -435,9 +482,10 @@ impl ComponentService {
         exporter: impl FnOnce() -> Result<OperationResult>,
     ) -> Result<OperationResult> {
         progress(QuickExportPhase::Preparing);
-        let path = self.indexed_component_path(&request.component_id)?;
+        let project = self.indexed_component_path(&request.component_id)?;
+        let path = self.export_source(&request.component_id)?;
         let destination = existing_directory(&request.destination)?;
-        ensure_not_inside(&path, &destination)?;
+        ensure_not_inside(&project, &destination)?;
         if options.regenerate_uuids || options.bump_version {
             crate::mcdk_session::assert_component_idle(&self.index, &path)?;
         }
@@ -584,7 +632,8 @@ impl ComponentService {
         let _guard = self.index.try_lock_mutations()?;
         let path = self.indexed_component_path(component_id)?;
         crate::mcdk_session::assert_component_idle(&self.index, &path)?;
-        let modified_files = regenerate_manifest_identifiers(&path)?;
+        let source = self.export_source(component_id)?;
+        let modified_files = regenerate_manifest_identifiers(&source)?;
         let updated = self.discovery.get_indexed(component_id)?;
         Ok(OperationResult {
             component: Some(updated),
@@ -601,7 +650,8 @@ impl ComponentService {
         let _guard = self.index.try_lock_mutations()?;
         let path = self.indexed_component_path(&request.component_id)?;
         crate::mcdk_session::assert_component_idle(&self.index, &path)?;
-        let modified_files = bump_manifest_versions(&path, request.part)?;
+        let source = self.export_source(&request.component_id)?;
+        let modified_files = bump_manifest_versions(&source, request.part)?;
         let updated = self.discovery.get_indexed(&request.component_id)?;
         Ok(OperationResult {
             component: Some(updated),
@@ -1027,6 +1077,21 @@ fn direct_pack_directories(root: &Path) -> Result<Vec<PathBuf>> {
         .collect::<Vec<_>>();
     paths.sort();
     Ok(paths)
+}
+
+fn checked_export_source(project: &Path, selected: &Path) -> Result<PathBuf> {
+    let selected = existing_directory(selected)?;
+    if !selected.starts_with(project) {
+        return Err(CoreError::InvalidInput("包体目录必须位于当前项目内".into()));
+    }
+    let (kind, _) = inspect_export(&selected)?;
+    if kind == ComponentKind::Addon
+        && !selected.join("manifest.json").is_file()
+        && direct_pack_directories(&selected)?.is_empty()
+    {
+        return Err(CoreError::InvalidComponent(selected));
+    }
+    Ok(selected)
 }
 
 fn unwrap_single_directory(root: &Path) -> Result<PathBuf> {
@@ -1742,6 +1807,10 @@ impl Drop for StagingDirectory {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "operations/export_source_tests.rs"]
+mod export_source_tests;
 
 #[cfg(test)]
 mod tests {

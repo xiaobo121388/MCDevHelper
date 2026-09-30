@@ -267,6 +267,16 @@ async fn export_component(
 }
 
 #[tauri::command]
+async fn set_component_export_source(
+    state: State<'_, AppState>,
+    component_id: String,
+    source: PathBuf,
+) -> CommandResult<PathBuf> {
+    let index = state.index.clone();
+    background(move || ComponentService::new(index).set_export_source(&component_id, &source)).await
+}
+
+#[tauri::command]
 async fn quick_export_component(
     state: State<'_, AppState>,
     request: QuickExportRequest,
@@ -459,6 +469,7 @@ pub fn run() {
             copy_component,
             move_component,
             export_component,
+            set_component_export_source,
             quick_export_component,
             set_quick_export_destination,
             list_custom_export_profiles,

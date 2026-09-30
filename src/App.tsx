@@ -51,6 +51,7 @@ import appIcon from "../src-tauri/icons/128x128.png";
 import { DialogLauncher } from "./DialogLauncher";
 import { confirmAction, dialogRequest, nativeWindows, openDialogWindow, SETTINGS_CHANGED, WORKSPACE_CHANGED, type StartupDialog, type WorkspaceChange } from "./windows";
 import { useCustomExport, CustomExportButtons, CustomExportTaskPanel } from "./CustomExport";
+import { isExportSourceCancelled, withExportSource } from "./exportSource";
 import type {
   AppSettings,
   ComponentKind,
@@ -752,17 +753,18 @@ export function ComponentDialog({ component, running = false, onClose, onDone, o
     onDone("自定义导出已完成", operation, false);
   }, onNotice);
   const busy = operationBusy || (customExport.busy ? "custom-export" : "");
-  const run = async (label: string, action: () => Promise<OperationResult>, message: string, refreshAfter = true) => { setBusy(label); try { onDone(message, await action(), refreshAfter); } catch (error) { onNotice(errorMessage(error)); } finally { setBusy(""); } };
+  const run = async (label: string, action: () => Promise<OperationResult>, message: string, refreshAfter = true) => { setBusy(label); try { onDone(message, await action(), refreshAfter); } catch (error) { if (!isExportSourceCancelled(error)) onNotice(errorMessage(error)); } finally { setBusy(""); } };
   const needDestination = () => { if (destination) return true; onNotice("请先选择目标目录。" ); return false; };
   const runExport = async (contentMode: ContentMode, conflictPolicy: ExportConflictPolicy = "error", selectedDestination = exportDestination) => {
     if (!selectedDestination) { onNotice("请先选择导出目录。"); return; }
     setBusy(`export-${contentMode}`);
     try {
-      const operation = await api.export({ component_id: component.id, destination: selectedDestination, content_mode: contentMode, conflict_policy: conflictPolicy });
+      const operation = await withExportSource(component, () => api.export({ component_id: component.id, destination: selectedDestination, content_mode: contentMode, conflict_policy: conflictPolicy }));
       writeLastExportDestination(selectedDestination);
       setExportConflict(null);
       onDone(contentMode === "clean" ? "游戏 ZIP 已导出" : "完整 ZIP 已导出", operation, false);
     } catch (error) {
+      if (isExportSourceCancelled(error)) return;
       const conflictPath = destinationExistsPath(error);
       if (conflictPolicy === "error" && conflictPath !== undefined) {
         setExportConflict({ contentMode, destination: selectedDestination, path: conflictPath });
@@ -784,8 +786,8 @@ export function ComponentDialog({ component, running = false, onClose, onDone, o
         <section>
           <h3>快捷配置</h3>
           <div className="metadata-editor"><Field label="显示名称"><input required value={displayName} onChange={(event) => { edited.current.name = true; setDisplayName(event.target.value); }} placeholder="组件显示名称" /></Field><Field label="标签（使用逗号分隔）"><input value={tags} onChange={(event) => { edited.current.tags = true; setTags(event.target.value); }} placeholder="开发, 测试" /></Field><CheckRow checked={favorite} onChange={(value) => { edited.current.favorite = true; setFavorite(value); }} label="收藏组件" hint="收藏后可从左侧收藏视图快速找到" /><div className="metadata-actions"><button className="button secondary" disabled={!!busy || !displayName.trim() || (running && !!component.mcs)} onClick={() => void run("metadata", () => api.metadata(component.id, displayName, tags.split(/[,，]/), favorite), "组件信息已保存", false)}><Save size={15} />{busy === "metadata" ? "保存中…" : "保存组件信息"}</button></div></div>
-          <div className="config-row"><div><strong>Manifest UUID</strong><p>重生 header、module，并同步内部依赖和地图清单；保留 JSONC 注释。</p></div><button disabled={!!busy || running} onClick={() => void run("uuid", () => api.regenerateUuids(component.id), "UUID 已重新生成", false)}>随机重生</button></div>
-          <div className="config-row"><div><strong>包版本</strong><p>同步 header、module、依赖和地图包清单；保留 JSONC 注释。</p></div><select value={part} onChange={(event) => setPart(event.target.value as VersionPart)}><option value="patch">Patch</option><option value="minor">Minor</option><option value="major">Major</option></select><button disabled={!!busy || running} onClick={() => void run("version", () => api.bumpVersion(component.id, part), "版本已提升", false)}>提升版本</button></div>
+          <div className="config-row"><div><strong>Manifest UUID</strong><p>重生 header、module，并同步内部依赖和地图清单；保留 JSONC 注释。</p></div><button disabled={!!busy || running} onClick={() => void run("uuid", () => withExportSource(component, () => api.regenerateUuids(component.id)), "UUID 已重新生成", false)}>随机重生</button></div>
+          <div className="config-row"><div><strong>包版本</strong><p>同步 header、module、依赖和地图包清单；保留 JSONC 注释。</p></div><select value={part} onChange={(event) => setPart(event.target.value as VersionPart)}><option value="patch">Patch</option><option value="minor">Minor</option><option value="major">Major</option></select><button disabled={!!busy || running} onClick={() => void run("version", () => withExportSource(component, () => api.bumpVersion(component.id, part)), "版本已提升", false)}>提升版本</button></div>
         </section>
         <section>
           <h3>复制、移动与删除</h3>

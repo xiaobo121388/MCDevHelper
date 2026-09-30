@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Archive, RefreshCw, Square, Terminal, X } from "lucide-react";
 import { api, errorMessage } from "./api";
+import { isExportSourceCancelled, withExportSource } from "./exportSource";
 import type { ComponentSummary, CustomExportProfile, CustomExportStatus, CustomExportTask, ExportLog, OperationResult } from "./types";
 
 export const exportTerminal = (status: CustomExportStatus) => ["succeeded", "failed", "cancelled"].includes(status);
@@ -78,7 +79,7 @@ export function useExportTask(onDone: (operation: OperationResult, destination: 
       const next = await operation();
       if (alive.current) attach(next);
       return true;
-    } catch (error) { callbacks.current.onError(errorMessage(error)); return false; }
+    } catch (error) { if (!isExportSourceCancelled(error)) callbacks.current.onError(errorMessage(error)); return false; }
     finally { starting.current = false; if (alive.current) setPending(false); }
   };
   const action = async (operation: () => Promise<CustomExportTask>) => {
@@ -120,7 +121,7 @@ export function useCustomExport(component: ComponentSummary, destination: string
   }, [component.id, component.kind, attach]);
   const start = async (profile: CustomExportProfile) => {
     if (!destination) { onErrorRef.current("请先选择导出目录。"); return; }
-    await controller.start(() => api.startCustomExport({ component_id: component.id, profile_id: profile.id, destination, conflict_policy: "error" }));
+    await controller.start(() => withExportSource(component, () => api.startCustomExport({ component_id: component.id, profile_id: profile.id, destination, conflict_policy: "error" })));
   };
   return { ...controller, profiles, start };
 }

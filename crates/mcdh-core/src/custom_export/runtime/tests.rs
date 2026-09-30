@@ -506,6 +506,68 @@ fn substitution_is_single_pass() {
 
 #[test]
 #[cfg(windows)]
+fn selected_pack_source_is_used_by_custom_quick_export() {
+    let fixture = Fixture::new();
+    let profile = fixture.profile("fixture_selected_source");
+    fixture.prepare_quick(&profile);
+    fs::write(
+        fixture.source.join("work.mcscfg"),
+        r#"{"Type":7,"Name":"Nested component"}"#,
+    )
+    .unwrap();
+    fs::create_dir(fixture.source.join("src")).unwrap();
+    fs::rename(
+        fixture.source.join("behavior_packs/Test BP"),
+        fixture.source.join("src/BP"),
+    )
+    .unwrap();
+    assert_eq!(
+        fixture
+            .service
+            .start_quick_export(fixture.quick_request())
+            .unwrap_err()
+            .code(),
+        "pack_location_required"
+    );
+    assert!(fixture.service.list_tasks(Caller::Desktop).is_empty());
+    crate::ComponentService::new(fixture.index.clone())
+        .set_export_source(&fixture.id, &fixture.source.join("src"))
+        .unwrap();
+    let task = fixture
+        .service
+        .start_quick_export(fixture.quick_request())
+        .unwrap();
+    let finished = fixture.wait(&task.id, TaskStatus::terminal);
+    assert_eq!(finished.status, TaskStatus::Succeeded, "{finished:?}");
+    let result = finished.result.unwrap();
+    let component = result.component.unwrap();
+    assert_eq!(component.path, fixture.source);
+    assert_eq!(component.version, Some([1, 2, 4]));
+    let artifact = read_fixture_json(&result.actual_path).unwrap();
+    assert_eq!(artifact["header"]["version"], serde_json::json!([1, 2, 4]));
+    assert_ne!(
+        artifact["header"]["uuid"],
+        "11111111-1111-4111-8111-111111111111"
+    );
+}
+
+#[test]
+fn fixture_selected_source() {
+    let Ok(output) = std::env::var("MCDH_OUTPUT_DIR") else {
+        return;
+    };
+    let input = PathBuf::from(std::env::var("MCDH_INPUT_DIR").unwrap());
+    assert!(!input.join("work.mcscfg").exists());
+    assert_eq!(std::env::var("MCDH_COMPONENT_KIND").unwrap(), "addon");
+    fs::copy(
+        input.join("BP/manifest.json"),
+        Path::new(&output).join("selected.json"),
+    )
+    .unwrap();
+}
+
+#[test]
+#[cfg(windows)]
 fn snapshot_exports_and_conflict_resolution_does_not_rerun() {
     let fixture = Fixture::new();
     let profile = fixture.profile("fixture_success");

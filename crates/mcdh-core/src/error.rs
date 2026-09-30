@@ -14,6 +14,8 @@ pub enum CoreError {
     InvalidInput(String),
     #[error("无法识别组件：{0}")]
     InvalidComponent(PathBuf),
+    #[error("无法识别包体位置，请选择包含 BP/RP 或 manifest.json 的目录：{0}")]
+    PackLocationRequired(PathBuf),
     #[error("组件修改正被另一个 MCDH 进程占用")]
     Busy,
     #[error("组件标识冲突：{0}")]
@@ -58,6 +60,7 @@ impl CoreError {
             Self::NotFound(_) => "not_found",
             Self::InvalidInput(_) => "invalid_input",
             Self::InvalidComponent(_) => "invalid_component",
+            Self::PackLocationRequired(_) => "pack_location_required",
             Self::Busy => "busy",
             Self::Conflict(_) => "conflict",
             Self::DestinationExists(_) => "destination_exists",
@@ -75,6 +78,7 @@ impl CoreError {
             Self::NotFound(path)
             | Self::DestinationExists(path)
             | Self::InvalidComponent(path)
+            | Self::PackLocationRequired(path)
             | Self::Io { path, .. }
             | Self::Json { path, .. } => Some(path),
             Self::Archive { path, .. } => Some(path),

@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   export: vi.fn(),
   quickExport: vi.fn(),
   quickCustomExport: vi.fn(),
+  setExportSource: vi.fn(),
   setQuickExportDestination: vi.fn(),
   open: vi.fn(),
   customExportProfiles: vi.fn(),
@@ -52,6 +53,7 @@ vi.mock("./api", () => ({
     export: mocks.export,
     quickExport: mocks.quickExport,
     quickCustomExport: mocks.quickCustomExport,
+    setExportSource: mocks.setExportSource,
     setQuickExportDestination: mocks.setQuickExportDestination,
     customExportProfiles: mocks.customExportProfiles,
     customExportTasks: mocks.customExportTasks,
@@ -107,6 +109,7 @@ describe("component workspace filters", () => {
     mocks.export.mockReset();
     mocks.quickExport.mockReset();
     mocks.quickCustomExport.mockReset();
+    mocks.setExportSource.mockReset().mockResolvedValue("D:/BOMD/src");
     mocks.setQuickExportDestination.mockReset();
     mocks.open.mockReset();
     mocks.customExportProfiles.mockReset().mockResolvedValue([]);
@@ -218,6 +221,22 @@ describe("component workspace filters", () => {
     expect(mocks.quickExport).not.toHaveBeenCalled();
     expect(mocks.refresh).toHaveBeenCalledOnce();
     expect(screen.getByRole("button", { name: "配置 自定义快捷导出" })).toBeEnabled();
+  });
+
+  it("asks for a missing pack location before retrying a normal export", async () => {
+    const component = { id: "bomd", name: "BOMD", kind: "addon", path: "D:/BOMD", origin: { kind: "single" }, manifests: [], tags: [], favorite: false, size_bytes: 1 };
+    mocks.refresh.mockResolvedValue({ components: [component], sources: [], warnings: [] });
+    mocks.open.mockResolvedValue("D:/BOMD/src");
+    mocks.export.mockRejectedValueOnce({ code: "pack_location_required" }).mockResolvedValue({ actual_path: "D:/Exports/BOMD.zip", modified_files: [], warnings: [] });
+    render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: "配置 BOMD" }));
+    fireEvent.change(screen.getByRole("textbox", { name: /^导出目录/ }), { target: { value: "D:/Exports" } });
+    fireEvent.click(screen.getByRole("button", { name: "导出游戏 ZIP" }));
+    await waitFor(() => expect(mocks.export).toHaveBeenCalledTimes(2));
+    expect(mocks.open).toHaveBeenCalledWith({ title: "选择包体目录（BP/RP 所在目录）", directory: true, multiple: false, defaultPath: "D:/BOMD" });
+    expect(mocks.setExportSource).toHaveBeenCalledWith("bomd", "D:/BOMD/src");
+    expect(mocks.export.mock.calls[1][0].destination).toBe("D:/Exports");
+    expect(mocks.refresh).toHaveBeenCalledOnce();
   });
 
   it("retains a newly created card when an older in-flight scan finishes", async () => {
