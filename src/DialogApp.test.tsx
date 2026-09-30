@@ -46,7 +46,7 @@ describe("standalone dialog application", () => {
     fireEvent.click(screen.getByRole("button", { name: "创建组件" }));
     await waitFor(() => expect(mocks.close).toHaveBeenCalledOnce());
     expect(mocks.create).toHaveBeenCalledWith(expect.objectContaining({ name: "New", destination: "D:/TestLibrary" }));
-    expect(mocks.notify).toHaveBeenCalledWith("已创建到 D:/TestLibrary/New", undefined, true);
+    expect(mocks.notify).toHaveBeenCalledWith("已创建到 D:/TestLibrary/New", { actual_path: "D:/TestLibrary/New" }, false);
     expect(mocks.notify.mock.invocationCallOrder[0]).toBeLessThan(mocks.close.mock.invocationCallOrder[0]);
   });
 
@@ -57,7 +57,7 @@ describe("standalone dialog application", () => {
     expect(mocks.open).toHaveBeenCalledWith({ kind: "settings" });
     expect(mocks.close).not.toHaveBeenCalled();
     const handler = mocks.listen.mock.calls.find(([name]) => name === "workspace")![1];
-    await act(async () => handler());
+    await act(async () => handler({ payload: {} }));
     expect(await screen.findByRole("combobox", { name: "生成位置" })).toHaveValue("D:/TestLibrary");
   });
 

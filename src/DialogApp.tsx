@@ -8,7 +8,7 @@ import { ComponentDialog, CreateDialog, DEFAULT_SETTINGS, ImportDialog, Modal, r
 import { UpdateProgress, useAppUpdate } from "./AppUpdate";
 import { useMcdk } from "./Mcdk";
 import { WindowChrome } from "./WindowChrome";
-import { closeDialogWindow, confirmAction, nativeWindows, notifySettings, notifyWorkspace, openDialogWindow, SETTINGS_CHANGED, WORKSPACE_CHANGED, type DialogRequest } from "./windows";
+import { closeDialogWindow, confirmAction, nativeWindows, notifySettings, notifyWorkspace, openDialogWindow, SETTINGS_CHANGED, WORKSPACE_CHANGED, type DialogRequest, type WorkspaceChange } from "./windows";
 import type { AppSettings, ComponentSummary, DiscoveryWarning, OperationResult, SourceRecord } from "./types";
 
 const titles = { settings: "设置", create: "新建组件", import: "导入组件", warnings: "扫描问题", component: "组件配置", startup: "版本更新", confirm: "确认操作" };
@@ -54,7 +54,12 @@ export function DialogApp({ request }: { request: DialogRequest }) {
     const changed = listen(SETTINGS_CHANGED, () => {
       void api.settings().then((value) => { if (active) setSettings(value); }).catch((cause) => { if (active) setNotice(errorMessage(cause)); });
     });
-    const workspace = listen(WORKSPACE_CHANGED, () => {
+    const workspace = listen<WorkspaceChange>(WORKSPACE_CHANGED, ({ payload }) => {
+      if (payload.refreshAfter === false) {
+        if (request.kind === "create") void api.sources().then((value) => { if (active) setSources(value); }).catch((cause) => { if (active) setNotice(errorMessage(cause)); });
+        if (request.kind === "component" && payload.operation?.component?.id === request.componentId) setComponent(payload.operation.component);
+        return;
+      }
       if (request.kind === "create" || request.kind === "warnings") void load();
     });
     return () => { active = false; void changed.then((stop) => stop()); void workspace.then((stop) => stop()); };

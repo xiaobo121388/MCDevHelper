@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => ({
   startCustomExport: vi.fn(),
   customExportTask: vi.fn(),
   import: vi.fn(),
+  create: vi.fn(),
   metadata: vi.fn(),
   regenerateUuids: vi.fn(),
   bumpVersion: vi.fn(),
@@ -55,6 +56,7 @@ vi.mock("./api", () => ({
     startCustomExport: mocks.startCustomExport,
     customExportTask: mocks.customExportTask,
     import: mocks.import,
+    create: mocks.create,
     metadata: mocks.metadata,
     regenerateUuids: mocks.regenerateUuids,
     bumpVersion: mocks.bumpVersion,
@@ -109,6 +111,7 @@ describe("component workspace filters", () => {
     mocks.startCustomExport.mockReset();
     mocks.customExportTask.mockReset();
     mocks.import.mockReset();
+    mocks.create.mockReset();
     mocks.metadata.mockReset();
     mocks.regenerateUuids.mockReset();
     mocks.bumpVersion.mockReset();
@@ -152,6 +155,30 @@ describe("component workspace filters", () => {
     expect(await screen.findByText("已打开 MCDK 启动器")).toBeInTheDocument();
   });
 
+  it.each(["create", "import"] as const)("adds the %s result without refreshing or resetting filters", async (action) => {
+    const existing = { id: "existing", name: "旧模组", kind: "addon", path: "D:/Library/Old", origin: { kind: "library" }, tags: ["开发"], manifests: [], favorite: false, size_bytes: 1 };
+    const added = { ...existing, id: "added", name: "新模组", path: "D:/Library/New" };
+    const sources = [{ id: "lib", path: "D:/Library", kind: "library" }];
+    mocks.refresh.mockResolvedValue({ components: [existing], sources, warnings: [] });
+    mocks[action].mockResolvedValue({ component: added, actual_path: added.path, modified_files: [], warnings: [] });
+    render(<App />);
+    await screen.findByRole("heading", { name: "旧模组" });
+    fireEvent.change(screen.getByPlaceholderText("搜索名称或路径"), { target: { value: "模组" } });
+    fireEvent.click(screen.getByRole("button", { name: action === "create" ? "新建组件" : "导入" }));
+    if (action === "create") {
+      fireEvent.change(screen.getByRole("textbox", { name: "组件名称" }), { target: { value: "新模组" } });
+      fireEvent.click(screen.getByRole("button", { name: "创建组件" }));
+    } else {
+      fireEvent.change(screen.getByRole("textbox", { name: /^导入来源/ }), { target: { value: "D:/Incoming.zip" } });
+      fireEvent.change(screen.getByRole("textbox", { name: /^存放位置/ }), { target: { value: "D:/Library" } });
+      fireEvent.click(screen.getByRole("button", { name: "开始导入" }));
+    }
+    expect(await screen.findByRole("heading", { name: "新模组" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "旧模组" })).toBeInTheDocument();
+    expect(screen.getByPlaceholderText("搜索名称或路径")).toHaveValue("模组");
+    expect(mocks.refresh).toHaveBeenCalledOnce();
+  });
+
   it("exports from the card footer and updates its version without rescanning", async () => {
     const component = { id: "quick", name: "快捷导出", kind: "addon", path: "D:/Project", origin: { kind: "single" }, version: [1, 0, 0], manifests: [], tags: [], favorite: false, size_bytes: 1 };
     mocks.refresh.mockResolvedValue({ components: [component], sources: [], warnings: [] });
@@ -171,6 +198,26 @@ describe("component workspace filters", () => {
     expect(mocks.open).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: "配置 快捷导出" }));
     expect(await screen.findByRole("button", { name: "保存组件信息" })).toBeInTheDocument();
+  });
+
+  it("retains a newly created card when an older in-flight scan finishes", async () => {
+    const existing = { id: "old", name: "旧模组", kind: "addon", path: "D:/Lib/Old", origin: { kind: "library" }, tags: [], manifests: [], favorite: false, size_bytes: 1 };
+    const added = { ...existing, id: "new", name: "新模组", path: "D:/Lib/New" };
+    const initial = { components: [existing], sources: [{ id: "lib", kind: "library", path: "D:/Lib" }], warnings: [] };
+    let complete!: (value: unknown) => void;
+    mocks.refresh.mockResolvedValueOnce(initial).mockReturnValue(new Promise((resolve) => { complete = resolve; }));
+    mocks.create.mockResolvedValue({ actual_path: added.path, component: added, modified_files: [], warnings: [] });
+    render(<App />);
+    await screen.findByRole("heading", { name: "旧模组" });
+    fireEvent.click(screen.getByRole("button", { name: "刷新组件" }));
+    fireEvent.click(screen.getByRole("button", { name: "新建组件" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "组件名称" }), { target: { value: "新模组" } });
+    fireEvent.click(screen.getByRole("button", { name: "创建组件" }));
+    await screen.findByRole("heading", { name: "新模组" });
+    await act(async () => complete(initial));
+    expect(screen.getByRole("heading", { name: "新模组" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "旧模组" })).toBeInTheDocument();
+    expect(mocks.refresh).toHaveBeenCalledTimes(2);
   });
 
   it("saves one-click export preferences independently of external exporters", async () => {

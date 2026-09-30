@@ -45,6 +45,7 @@ import { CustomExportSettings } from "./CustomExportSettings";
 import { DEFAULT_QUICK_EXPORT, QuickExportButton, QuickExportOptions, useQuickExport, type QuickExportController } from "./QuickExport";
 import { AppearanceSettings } from "./AppearanceSettings";
 import { applyAppearance } from "./appearance";
+import { mergeComponent } from "./workspace";
 import { WindowChrome } from "./WindowChrome";
 import appIcon from "../src-tauri/icons/128x128.png";
 import { DialogLauncher } from "./DialogLauncher";
@@ -97,9 +98,15 @@ export function App() {
   const updater = useAppUpdate();
   const [ignoredWarningKeys, setIgnoredWarningKeys] = useState<Set<string>>(readIgnoredWarningKeys);
   const [startupDialogs, setStartupDialogs] = useState<StartupDialog[]>([]);
+  const revision = useRef(0);
+  const changes = useRef(new globalThis.Map<string, { revision: number; component: ComponentSummary }>());
+  const acceptComponent = useCallback((component: ComponentSummary) => {
+    changes.current.set(component.id, { revision: ++revision.current, component });
+    setResult((current) => mergeComponent(current, component));
+  }, []);
   const quickExport = useQuickExport((operation, message) => {
     const updated = operation.component;
-    if (updated) setResult((current) => ({ ...current, components: current.components.map((item) => item.id === updated.id ? updated : item) }));
+    if (updated) acceptComponent(updated);
     setNotice(message);
   }, setSettings, setNotice);
   const showModal = (value: "create" | "import" | "settings" | "warnings") => {
@@ -117,8 +124,12 @@ export function App() {
       return;
     }
     setLoading(true);
+    const before = revision.current;
     try {
-      const next = await api.refresh();
+      let next = await api.refresh();
+      for (const change of changes.current.values()) {
+        if (change.revision > before) next = mergeComponent(next, change.component);
+      }
       setResult(next);
       setIgnoredWarningKeys((current) => {
         const active = new Set(next.warnings.map(warningKey));
@@ -146,7 +157,8 @@ export function App() {
       if (payload.message) setNotice(payload.message);
       if (payload.refreshAfter === false) {
         const updated = payload.operation?.component;
-        if (updated) setResult((current) => ({ ...current, components: current.components.map((item) => item.id === updated.id ? updated : item) }));
+        if (updated) acceptComponent(updated);
+        void api.sources().then((sources) => { if (active) setResult((current) => ({ ...current, sources })); }).catch((error) => { if (active) setNotice(errorMessage(error)); });
         return;
       }
       setIgnoredWarningKeys(readIgnoredWarningKeys());
@@ -156,7 +168,7 @@ export function App() {
       void api.settings().then((value) => { if (active) setSettings(value); }).catch((error) => setNotice(errorMessage(error)));
     });
     return () => { active = false; void workspace.then((stop) => stop()); void appearance.then((stop) => stop()); };
-  }, [refresh]);
+  }, [refresh, acceptComponent]);
 
   useEffect(() => {
     if (!desktop) return;
@@ -244,9 +256,10 @@ export function App() {
     await refresh();
   };
 
-  const done = async (message: string) => {
+  const done = async (message: string, operation?: OperationResult, refreshAfter = true) => {
     setNotice(message);
-    await refresh();
+    if (refreshAfter) await refresh();
+    else if (operation?.component) acceptComponent(operation.component);
   };
 
   const dismissStartupDialog = () => setStartupDialogs((current) => current.slice(1));
@@ -297,10 +310,7 @@ export function App() {
 
         <section className="component-grid" aria-live="polite">
           {components.map((component) => <ComponentCard key={component.id} component={component} mcdk={mcdk} settings={settings} quickExport={quickExport} onOpen={() => showComponent(component)} onUpdate={(updated, message) => {
-            setResult((current) => ({
-              ...current,
-              components: current.components.map((item) => item.id === updated.id ? updated : item),
-            }));
+            acceptComponent(updated);
             setNotice(message);
           }} onNotice={setNotice} />)}
           {!loading && components.length === 0 && (
@@ -314,8 +324,8 @@ export function App() {
         </section>
       </main>
 
-      {modal === "create" && <CreateDialog sources={result.sources} settings={settings} onConfigurePaths={() => showModal("settings")} onClose={() => setModal(null)} onDone={(message) => { setModal(null); void done(message); }} />}
-      {modal === "import" && <ImportDialog onClose={() => setModal(null)} onDone={(message) => { setModal(null); void done(message); }} />}
+      {modal === "create" && <CreateDialog sources={result.sources} settings={settings} onConfigurePaths={() => showModal("settings")} onClose={() => setModal(null)} onDone={(message, operation) => { setModal(null); void done(message, operation, false); }} />}
+      {modal === "import" && <ImportDialog onClose={() => setModal(null)} onDone={(message, operation) => { setModal(null); void done(message, operation, false); }} />}
       {modal === "settings" && <SettingsDialog updater={updater} mcdk={mcdk} settings={settings} onSettings={setSettings} onClose={() => setModal(null)} onChanged={() => void refresh()} onNotice={setNotice} />}
       {modal === "warnings" && <WarningsDialog warnings={result.warnings} sources={result.sources} ignoredKeys={ignoredWarningKeys} onIgnore={setWarningIgnored} onRemoveSource={removeWarningSource} onClose={() => setModal(null)} onNotice={setNotice} />}
       {selected && <ComponentDialog component={selected} running={mcdk.status?.session?.component_id === selected.id} onClose={() => setSelected(null)} onDone={(message, operation, refreshAfter) => {
@@ -323,10 +333,7 @@ export function App() {
         const updated = operation.component;
         if (!refreshAfter) {
           if (updated) {
-            setResult((current) => ({
-              ...current,
-              components: current.components.map((component) => component.id === updated.id ? updated : component),
-            }));
+            acceptComponent(updated);
           }
           setNotice(message);
         } else {
@@ -490,7 +497,7 @@ export function CreateDialog({ sources, settings, onConfigurePaths, onClose, onD
   }, [destinations, settings.default_destination]);
   const submit = async (event: FormEvent) => {
     event.preventDefault(); setBusy(true); setError("");
-    try { const result = await api.create({ name, kind, destination, mcs_compatible: mcs, namespace: mcs ? namespace : undefined }); onDone(`已创建到 ${result.actual_path}`); }
+    try { const result = await api.create({ name, kind, destination, mcs_compatible: mcs, namespace: mcs ? namespace : undefined }); onDone(`已创建到 ${result.actual_path}${result.warnings?.length ? "；" + result.warnings.join("；") : ""}`, result, false); }
     catch (reason) { setError(errorMessage(reason)); } finally { setBusy(false); }
   };
   return (
@@ -522,7 +529,7 @@ export function ImportDialog({ onClose, onDone }: DialogProps) {
   };
   const submit = async (event: FormEvent) => {
     event.preventDefault(); setBusy(true); setError("");
-    try { const result = await api.import({ source, destination, mcs_compatible: mcs, identity_policy: policy, content_mode: full ? "full" : "clean" }); onDone(`已导入到 ${result.actual_path}`); }
+    try { const result = await api.import({ source, destination, mcs_compatible: mcs, identity_policy: policy, content_mode: full ? "full" : "clean" }); onDone(`已导入到 ${result.actual_path}${result.warnings?.length ? "；" + result.warnings.join("；") : ""}`, result, false); }
     catch (reason) { setError(errorMessage(reason)); } finally { setBusy(false); }
   };
   return <Modal title="导入组件" subtitle="支持文件夹、ZIP、mcpack 和 mcaddon" onClose={onClose}><form onSubmit={submit} className="dialog-form"><Field label="导入来源"><div className="path-row"><input required value={source} onChange={(event) => setSource(event.target.value)} placeholder="选择组件包或文件夹" /><button type="button" onClick={() => void chooseSource(false)}>选文件</button><button type="button" onClick={() => void chooseSource(true)}>选文件夹</button></div></Field><PathField label="存放位置" value={destination} onChange={setDestination} /><Field label="遇到重复 UUID"><select value={policy} onChange={(event) => setPolicy(event.target.value as IdentityPolicy)}><option value="error">停止并提示</option><option value="regenerate">生成全新 UUID</option><option value="preserve">保留原 UUID</option></select></Field><CheckRow checked={full} onChange={setFull} label="完整恢复" hint="保留点号项、MCS 配置和开发辅助文件；关闭时按游戏内容清洁导入" /><CheckRow checked={mcs} onChange={setMcs} label="导入为 MCS 组件" hint="将生成新的 MCS UID 与兼容配置" />{error && <FormError>{error}</FormError>}<DialogActions busy={busy} onClose={onClose} submit="开始导入" /></form></Modal>;
@@ -804,7 +811,7 @@ function PathField({ label, value, onChange }: { label: string; value: string; o
 function CheckRow({ checked, onChange, label, hint }: { checked: boolean; onChange: (value: boolean) => void; label: string; hint?: string }) { return <label className="check-row"><input type="checkbox" checked={checked} onChange={(event) => onChange(event.target.checked)} /><span><strong>{label}</strong>{hint && <small>{hint}</small>}</span></label>; }
 function FormError({ children }: { children: ReactNode }) { return <p className="form-error">{children}</p>; }
 function DialogActions({ busy, disabled = false, onClose, submit }: { busy: boolean; disabled?: boolean; onClose: () => void; submit: string }) { return <div className="dialog-actions"><button type="button" className="button secondary" onClick={onClose}>取消</button><button type="submit" className="button primary" disabled={busy || disabled}>{busy ? "处理中…" : submit}</button></div>; }
-interface DialogProps { onClose: () => void; onDone: (message: string) => void; }
+interface DialogProps { onClose: () => void; onDone: (message: string, operation?: OperationResult, refreshAfter?: boolean) => void; }
 function countKind(components: ComponentSummary[], kind: ComponentKind) { return components.filter((component) => component.kind === kind).length; }
 function originText(component: ComponentSummary) { if (component.mcs) return "MCStudio"; if (component.origin.kind === "single") return "单独路径"; return "组件库"; }
 function formatDate(value?: string) { if (!value) return "时间未知"; return new Intl.DateTimeFormat("zh-CN", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }).format(new Date(value)); }

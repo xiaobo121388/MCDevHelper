@@ -101,12 +101,13 @@ impl ComponentService {
         )?;
         let actual_path = staging.publish(&target)?;
         let modified_files = collect_files(&actual_path)?;
-        self.index.component_id(&actual_path)?;
+        let mut warnings = Vec::new();
+        let component = self.register_published_component(&actual_path, &mut warnings)?;
         Ok(OperationResult {
-            component: None,
+            component,
             actual_path,
             modified_files,
-            warnings: Vec::new(),
+            warnings,
         })
     }
 
@@ -260,12 +261,13 @@ impl ComponentService {
             .as_ref()
             .map(|metadata| metadata.display_name.clone())
             .unwrap_or(fallback_name);
-        let duplicate_uuids = duplicate_manifest_uuids(&import_root, &self.current_components()?)?;
-        if !duplicate_uuids.is_empty() && request.identity_policy == IdentityPolicy::Error {
-            return Err(CoreError::Conflict(format!(
-                "导入包与现有组件重复 UUID：{}",
-                duplicate_uuids.join(", ")
-            )));
+        if request.identity_policy == IdentityPolicy::Error {
+            let duplicate_uuids = duplicate_manifest_uuids(&import_root, &self.discovery.manifest_uuids()?)?;
+            if !duplicate_uuids.is_empty() {
+                return Err(CoreError::Conflict(format!(
+                    "导入包与现有组件重复 UUID：{}", duplicate_uuids.join(", ")
+                )));
+            }
         }
 
         let target_uid = request
@@ -307,9 +309,9 @@ impl ComponentService {
             write_component_metadata(staging.path(), &normalized_metadata(&name, &[], false)?)?;
         }
         let actual_path = staging.publish(&target)?;
-        self.index.component_id(&actual_path)?;
+        let component = self.register_published_component(&actual_path, &mut warnings)?;
         Ok(OperationResult {
-            component: None,
+            component,
             modified_files: collect_files(&actual_path)?,
             actual_path,
             warnings,
@@ -593,6 +595,21 @@ impl ComponentService {
 
     pub fn get_component(&self, component_id: &str) -> Result<ComponentSummary> {
         self.discovery.get_indexed(component_id)
+    }
+
+    fn register_published_component(
+        &self,
+        path: &Path,
+        warnings: &mut Vec<String>,
+    ) -> Result<Option<ComponentSummary>> {
+        self.index.component_id(path)?;
+        match self.discovery.register_component(path) {
+            Ok(component) => Ok(Some(component)),
+            Err(error) => {
+                warnings.push(format!("组件已保存，但读取组件信息失败：{error}"));
+                Ok(None)
+            }
+        }
     }
 
     fn mcs_identity(&self, namespace: Option<&str>) -> Result<McsTemplateIdentity> {
@@ -1114,14 +1131,8 @@ pub(crate) fn inspect_export(root: &Path) -> Result<(ComponentKind, String)> {
 
 fn duplicate_manifest_uuids(
     imported_root: &Path,
-    existing_components: &[ComponentSummary],
+    existing: &std::collections::HashSet<String>,
 ) -> Result<Vec<String>> {
-    let existing = existing_components
-        .iter()
-        .flat_map(|component| &component.manifests)
-        .filter_map(|manifest| manifest.header_uuid.as_deref())
-        .map(str::to_ascii_lowercase)
-        .collect::<std::collections::HashSet<_>>();
     let mut duplicates = Vec::new();
     for path in manifest_files(imported_root)? {
         let document = read_json(&path)?;
@@ -1748,6 +1759,89 @@ mod tests {
 
     fn write_archive(path: &Path, entries: &[(&str, Vec<u8>)]) {
         fs::write(path, archive_bytes(entries)).unwrap();
+    }
+
+    #[test]
+    fn new_and_imported_components_are_registered_without_discovering_siblings() {
+        let temp = tempfile::tempdir().unwrap();
+        let database = temp.path().join("state/db");
+        let index = LocalIndex::open(&database).unwrap();
+        let library = temp.path().join("library");
+        write_json(
+            &library.join("other/manifest.json"),
+            manifest("Other", "resources", Uuid::new_v4()),
+        );
+        index.add_source(SourceKind::Library, &library).unwrap();
+        let service = ComponentService::new(index.clone());
+        let created = service
+            .create_component(&CreateComponentRequest {
+                name: "Created".into(),
+                kind: ComponentKind::Addon,
+                destination: library.clone(),
+                mcs_compatible: false,
+                namespace: None,
+            })
+            .unwrap();
+        assert_eq!(created.component.unwrap().name, "Created");
+        let package = temp.path().join("incoming.mcpack");
+        write_archive(
+            &package,
+            &[(
+                "manifest.json",
+                serde_json::to_vec(&manifest("Imported", "resources", Uuid::new_v4())).unwrap(),
+            )],
+        );
+        let imported = service
+            .import_component(&ImportComponentRequest {
+                source: package,
+                destination: library,
+                mcs_compatible: false,
+                identity_policy: IdentityPolicy::Error,
+                content_mode: ContentMode::Clean,
+            })
+            .unwrap();
+        assert_eq!(imported.component.unwrap().name, "Imported");
+        let connection = rusqlite::Connection::open(database).unwrap();
+        let count: i64 = connection
+            .query_row("SELECT COUNT(*) FROM component_metadata", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(count, 2);
+        assert_eq!(index.list_sources().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn importing_to_an_unconfigured_directory_registers_only_the_new_component() {
+        let temp = tempfile::tempdir().unwrap();
+        let index = LocalIndex::open(temp.path().join("state/db")).unwrap();
+        let source = temp.path().join("incoming");
+        write_json(
+            &source.join("manifest.json"),
+            manifest("Imported", "resources", Uuid::new_v4()),
+        );
+        let destination = temp.path().join("output");
+        fs::create_dir(&destination).unwrap();
+        let imported = ComponentService::new(index.clone())
+            .import_component(&ImportComponentRequest {
+                source,
+                destination,
+                mcs_compatible: false,
+                identity_policy: IdentityPolicy::Regenerate,
+                content_mode: ContentMode::Clean,
+            })
+            .unwrap();
+        let component = imported.component.unwrap();
+        assert!(matches!(component.origin, ComponentOrigin::Single { .. }));
+        assert_eq!(index.list_sources().unwrap()[0].path, imported.actual_path);
+        assert_eq!(
+            DiscoveryService::new(index)
+                .refresh_with_mcs_work_roots(&[])
+                .unwrap()
+                .components[0]
+                .id,
+            component.id
+        );
     }
 
     #[test]

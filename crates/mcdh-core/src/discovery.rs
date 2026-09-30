@@ -166,7 +166,15 @@ impl DiscoveryService {
             .component_path(id)?
             .ok_or_else(|| CoreError::InvalidInput(format!("找不到组件 ID：{id}")))?;
         let path = canonicalize(&path)?;
-        let target_key = path_key(&path);
+        self.inspect_indexed_path(&path, false)
+    }
+
+    pub(crate) fn register_component(&self, path: &Path) -> Result<ComponentSummary> {
+        self.inspect_indexed_path(&canonicalize(path)?, true)
+    }
+
+    fn inspect_indexed_path(&self, path: &Path, register: bool) -> Result<ComponentSummary> {
+        let target_key = path_key(path);
 
         for source in self.index.list_sources()? {
             let source_key = path_key(&source.path);
@@ -197,15 +205,18 @@ impl DiscoveryService {
                 ),
             };
             if matches {
-                return self.inspect(&path, origin, context, None);
+                return self.inspect(path, origin, context, None);
             }
         }
 
         if let Some(category_path) = path.parent()
             && let Some(context) = mcs_context_for_category(category_path)
         {
+            if register {
+                self.index.add_source(SourceKind::McsAuto, category_path)?;
+            }
             return self.inspect(
-                &path,
+                path,
                 ComponentOrigin::Mcs {
                     source_path: category_path.to_path_buf(),
                 },
@@ -214,10 +225,46 @@ impl DiscoveryService {
             );
         }
 
+        if register {
+            let source = self.index.add_source(SourceKind::Single, path)?;
+            return self.inspect(
+                path,
+                ComponentOrigin::Single {
+                    source_id: source.id,
+                },
+                None,
+                None,
+            );
+        }
+
         Err(CoreError::InvalidInput(format!(
             "组件已不在已配置的来源目录中：{}",
             path.display()
         )))
+    }
+
+    pub(crate) fn manifest_uuids(&self) -> Result<HashSet<String>> {
+        let mut ids = HashSet::new();
+        for source in self.index.list_sources()? {
+            let roots = match source.kind {
+                SourceKind::Single => vec![source.path],
+                SourceKind::Library | SourceKind::McsAuto => {
+                    child_directories(&source.path).unwrap_or_default()
+                }
+            };
+            for root in roots {
+                if let Ok(paths) = find_manifest_paths(&root) {
+                    for path in paths {
+                        if let Ok(manifest) = read_manifest(&path)
+                            && let Some(uuid) = manifest.header_uuid
+                        {
+                            ids.insert(uuid.to_ascii_lowercase());
+                        }
+                    }
+                }
+            }
+        }
+        Ok(ids)
     }
 
     fn scan_mcs(

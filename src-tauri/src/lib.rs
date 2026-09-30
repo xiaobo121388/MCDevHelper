@@ -224,11 +224,12 @@ fn set_settings(state: State<'_, AppState>, settings: AppSettings) -> CommandRes
 }
 
 #[tauri::command]
-fn create_component(
+async fn create_component(
     state: State<'_, AppState>,
     request: CreateComponentRequest,
 ) -> CommandResult<OperationResult> {
-    core_result(state.service().create_component(&request))
+    let index = state.index.clone();
+    background(move || ComponentService::new(index).create_component(&request)).await
 }
 
 #[tauri::command]
