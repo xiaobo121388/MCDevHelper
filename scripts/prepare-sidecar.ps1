@@ -33,6 +33,7 @@ New-Item -ItemType Directory -Force -Path $binaryDirectory, $resourceDirectory |
 Copy-Item -LiteralPath $sourceBinary -Destination (Join-Path $binaryDirectory "mcdh-mcp-$targetTriple.exe") -Force
 Copy-Item -LiteralPath (Join-Path $repoRoot "LICENSE") -Destination (Join-Path $resourceDirectory "LICENSE") -Force
 Copy-Item -LiteralPath (Join-Path $repoRoot "README.md") -Destination (Join-Path $resourceDirectory "README.md") -Force
+Copy-Item -LiteralPath (Join-Path $repoRoot "RELEASE_NOTES.md") -Destination (Join-Path $resourceDirectory "RELEASE_NOTES.md") -Force
 Copy-Item -LiteralPath (Join-Path $repoRoot "THIRD_PARTY_LICENSES.md") -Destination (Join-Path $resourceDirectory "THIRD_PARTY_LICENSES.md") -Force
 
 Write-Output "Prepared mcdh-mcp sidecar for $targetTriple"

@@ -267,6 +267,10 @@ fn initializes_lists_strict_schemas_and_calls_every_tool() {
         }),
     );
     assert_eq!(initialized["result"]["serverInfo"]["name"], "mcdh");
+    assert_eq!(
+        initialized["result"]["serverInfo"]["version"],
+        mcdh_core::VERSION
+    );
     client.notify("notifications/initialized");
 
     let listed = client.request("tools/list", json!({}));

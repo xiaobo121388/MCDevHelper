@@ -26,7 +26,6 @@ struct McdhServer {
 
 #[tool_handler(
     name = "mcdh",
-    version = "1.1.0",
     instructions = "离线管理网易中国版 Minecraft PE 创作组件；所有路径都应使用本机 Windows 绝对路径。",
     router = self.tool_router
 )]
