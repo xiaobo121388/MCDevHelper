@@ -6,6 +6,14 @@ use std::path::{Path, PathBuf};
 
 pub const SESSION_KEY: &str = "mcdk.session";
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SessionMode {
+    #[default]
+    Game,
+    Editor,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct McdkSession {
     pub component_id: String,
@@ -14,6 +22,10 @@ pub struct McdkSession {
     pub version: String,
     pub pid: u32,
     pub created_at: String,
+    #[serde(default)]
+    pub mode: SessionMode,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub launch_directory: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -21,6 +33,10 @@ pub struct McdkExit {
     pub id: String,
     pub component_id: String,
     pub exit_code: Option<u32>,
+    #[serde(default)]
+    pub mode: SessionMode,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub launch_directory: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -66,6 +82,8 @@ pub fn refresh_session(store: &McdkStore) -> Result<SessionState> {
             id: format!("{}:{}", session.pid, session.created_at),
             component_id: session.component_id.clone(),
             exit_code: matching.and_then(|p| p.exit_code),
+            mode: session.mode,
+            launch_directory: session.launch_directory.clone(),
         });
         state.session = None;
         store.write(SESSION_KEY, &state)?;
@@ -176,6 +194,8 @@ mod tests {
             version: "1.6.1".into(),
             pid: 10,
             created_at: "100".into(),
+            mode: SessionMode::Game,
+            launch_directory: None,
         };
         let mut snapshot = ProcessSnapshot {
             executable: "d:\\tools\\MCDK.exe".into(),
@@ -204,6 +224,8 @@ mod tests {
             created_at: process.created_at,
             pid: std::process::id(),
             version: "1.6.1".into(),
+            mode: SessionMode::Game,
+            launch_directory: None,
         };
         store
             .write(

@@ -24,8 +24,8 @@ mod custom_export;
 mod windows;
 use custom_export::*;
 use app_update::{install_app_update, app_update_error};
-use mcdk_launch::launch_component_game;
-use mcdk_manager::{mcdk_status, set_mcdk_auto_update, check_mcdk_update, install_mcdk_update};
+use mcdk_launch::{launch_component_game, launch_component_editor};
+use mcdk_manager::{mcdk_status, set_mcde_directory, set_mcdk_auto_update, check_mcdk_update, install_mcdk_update};
 
 const LATEST_RELEASE_API: &str =
     "https://api.github.com/repos/xiaobo121388/MCDevHelper/releases/latest";
@@ -456,6 +456,8 @@ pub fn run() {
             app_version,
             mcdk_status,
             launch_component_game,
+            launch_component_editor,
+            set_mcde_directory,
             set_mcdk_auto_update,
             check_mcdk_update,
             install_mcdk_update,

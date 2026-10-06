@@ -149,11 +149,22 @@ export interface McdkSession {
   version: string;
   pid: number;
   created_at: string;
+  mode?: "game" | "editor";
+  launch_directory?: string | null;
 }
 
 export interface McdkStatus {
   current_version: string | null;
   available: boolean;
+  mcde: {
+    available: boolean;
+    directory: string | null;
+    configured: boolean;
+    host_available: boolean;
+    host_revision: string | null;
+    plugin_version: string | null;
+    error: string | null;
+  };
   auto_update: boolean;
   phase: "idle" | "checking" | "downloading" | "available" | "updated" | "error";
   latest_version: string | null;
@@ -162,5 +173,5 @@ export interface McdkStatus {
   downloaded_bytes: number;
   download_size: number | null;
   session: McdkSession | null;
-  last_exit: { id: string; component_id: string; exit_code: number | null } | null;
+  last_exit: { id: string; component_id: string; exit_code: number | null; mode?: "game" | "editor"; launch_directory?: string | null } | null;
 }

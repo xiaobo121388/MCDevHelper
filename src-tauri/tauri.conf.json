@@ -39,7 +39,8 @@
       "release-resources/README.md",
       "release-resources/RELEASE_NOTES.md",
       "release-resources/THIRD_PARTY_LICENSES.md",
-      "release-resources/mcdk/"
+      "release-resources/mcdk/",
+      "release-resources/mcde/"
     ],
     "windows": {
       "webviewInstallMode": {

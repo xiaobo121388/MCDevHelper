@@ -49,6 +49,7 @@ pub struct McdkStatus {
     pub error: Option<String>,
     pub downloaded_bytes: u64,
     pub download_size: Option<u64>,
+    pub mcde: mcdh_core::mcde::McdeStatus,
 }
 
 #[derive(Clone)]
@@ -56,14 +57,23 @@ pub struct McdkManager {
     pub index: LocalIndex,
     pub store: McdkStore,
     pub bundled_binary: PathBuf,
+    pub bundled_editor: PathBuf,
+    pub mcde_host: PathBuf,
 }
 
 impl McdkManager {
     pub fn new(index: LocalIndex, bundled_binary: PathBuf) -> Self {
+        let resources = bundled_binary
+            .parent()
+            .and_then(std::path::Path::parent)
+            .unwrap_or(std::path::Path::new("."))
+            .join("mcde");
         Self {
             store: McdkStore::new(index.clone()),
             index,
             bundled_binary,
+            bundled_editor: resources.join("editor"),
+            mcde_host: resources.join("host"),
         }
     }
 
@@ -101,6 +111,8 @@ impl McdkManager {
             error: update.error,
             downloaded_bytes: update.downloaded_bytes,
             download_size: update.candidate.map(|v| v.size),
+            mcde: mcdh_core::mcde::McdeStore::new(self.store.clone())
+                .status(&self.bundled_editor, &self.mcde_host)?,
         })
     }
 
@@ -384,7 +396,28 @@ pub(crate) async fn blocking<T: Send + 'static>(
 
 #[tauri::command]
 pub async fn mcdk_status(manager: State<'_, McdkManager>) -> CommandResult<McdkStatus> {
-    manager.status().map_err(|e| e.payload())
+    let manager = manager.inner().clone();
+    blocking(move || manager.status())
+        .await
+        .map_err(|e| e.payload())
+}
+
+#[tauri::command]
+pub async fn set_mcde_directory(
+    app: tauri::AppHandle,
+    manager: State<'_, McdkManager>,
+    directory: Option<String>,
+) -> CommandResult<McdkStatus> {
+    let manager = manager.inner().clone();
+    blocking(move || {
+        let _lock = manager.store.lock("state")?;
+        mcdh_core::mcde::McdeStore::new(manager.store.clone())
+            .set_directory(directory.as_deref().map(std::path::Path::new))?;
+        manager.emit(&app);
+        manager.status()
+    })
+    .await
+    .map_err(|e| e.payload())
 }
 
 #[tauri::command]

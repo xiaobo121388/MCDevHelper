@@ -1,0 +1,10 @@
+{
+  "schema": 1,
+  "repository": "https://github.com/GitHub-Zero123/MCDevTool",
+  "branch": "feature/plugin-system",
+  "revision": "da038f849a1c23211f5bb793a3450b579275308d",
+  "plugins_enabled": true,
+  "abi": { "major": 1, "minor": 0 },
+  "capabilities": ["mcdk.game.process.create"],
+  "game_versions": ["3.10.0.420447"]
+}

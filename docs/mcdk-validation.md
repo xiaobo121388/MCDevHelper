@@ -1,5 +1,36 @@
 # MCDK verification
 
+## MCDE Integration: 2026-10-06
+
+The separate MCDE path builds `feature/plugin-system` lineage at the exact
+attachment/SDK pin `da038f849a1c23211f5bb793a3450b579275308d`, with plugins and
+CLI enabled. Ordinary bundled release installation/updates remain independent.
+Setup, integrity checks, resource packaging and opt-in native tests are documented
+in [MCDE integration](mcde-integration.md).
+
+Verification passed: 145 frontend tests, 122 enabled Rust workspace tests,
+strict all-target Clippy, TypeScript/Vite production build, the hidden native
+console/log probe, and 15 MCDE headless CTest groups. These checks are distinct
+from real-game acceptance and do not certify all editor authoring features.
+
+An actual source-built MCDH desktop button launched host 64736, game 70932 and
+editor 72616 in an isolated fixture. Live `WGL_NV_DX_interop2` 1440x900 frames,
+CPython/client readiness, distinct bootstrap/client callback threads, increasing
+frame counters and the unchanged original configuration digest were verified.
+Closing MCDH left its owned game/editor running; reopening it restored the same
+host identity and disabled both launch modes. The automatically created QA UI
+document was saved without applying it, and normal MCDE close ended only its
+owned game/editor/host. The unrelated installed MCDH 3.9 session remained alive.
+
+The structured evidence is under ignored `target/native-mcde-qa`, not committed
+screenshots or binaries. Its `desktop-integration-report.json` identifies actual
+Tauri button transport, original configuration digests, process identities,
+live frame metrics and normal cleanup. The read-only startup test still reports
+`fixture_registered: false`; the latest fixture/debug modules did not naturally
+initialize. A successful Python execution envelope is not a passing inner test.
+Full native Save and Apply, generated registration and native UI overlays remain
+pending, alongside MCDE's documented IME/DPI/stability acceptance limits.
+
 ## Automated checks
 
 Run from the repository root on Windows x64 with pnpm and the MSVC Rust toolchain:

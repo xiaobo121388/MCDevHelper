@@ -9,6 +9,7 @@ mod json;
 mod metadata;
 pub mod mcdk;
 pub mod mcdk_session;
+pub mod mcde;
 mod model;
 mod operations;
 mod path_utils;
