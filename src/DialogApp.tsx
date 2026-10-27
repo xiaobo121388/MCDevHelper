@@ -9,10 +9,12 @@ import { UpdateProgress, useAppUpdate } from "./AppUpdate";
 import { useMcdk } from "./Mcdk";
 import { WindowChrome } from "./WindowChrome";
 import { ExportDirectoryForm } from "./ExportLocation";
+import { PluginPanelHost } from "./PluginPanelHost";
+import type { PluginPanelRequest } from "./pluginTypes";
 import { closeDialogWindow, confirmAction, nativeWindows, notifySettings, notifyWorkspace, openDialogWindow, SETTINGS_CHANGED, WORKSPACE_CHANGED, type DialogRequest, type WorkspaceChange } from "./windows";
 import type { AppSettings, ComponentSummary, DiscoveryWarning, OperationResult, SourceRecord } from "./types";
 
-const titles = { settings: "设置", create: "新建组件", import: "导入组件", warnings: "扫描问题", component: "组件配置", startup: "版本更新", confirm: "确认操作", export_directory: "导出目录配置" };
+const titles = { settings: "设置", create: "新建组件", import: "导入组件", warnings: "扫描问题", component: "组件配置", startup: "版本更新", confirm: "确认操作", export_directory: "导出目录配置", plugin_panel: "插件工具" };
 
 export function DialogApp({ request }: { request: DialogRequest }) {
   const initialComponent = request.kind === "component" && request.initialComponent?.id === request.componentId ? request.initialComponent : null;
@@ -73,6 +75,7 @@ export function DialogApp({ request }: { request: DialogRequest }) {
   }, [notice]);
 
   const close = () => { void closeDialogWindow().catch((cause) => setNotice(errorMessage(cause))); };
+  const openPluginPanel = useCallback((value: PluginPanelRequest) => { void emitTo("main", "mcdh:plugin-open-panel", value).catch((cause) => setNotice(errorMessage(cause))); }, []);
   const changed = () => { void notifyWorkspace().catch((cause) => setNotice(errorMessage(cause))); };
   const done = (message: string, operation?: OperationResult, refreshAfter = true) => {
     void notifyWorkspace(message, operation, refreshAfter).then(close).catch((cause) => setNotice(errorMessage(cause)));
@@ -118,6 +121,7 @@ export function DialogApp({ request }: { request: DialogRequest }) {
         {request.kind === "export_directory" && <Modal title={title} subtitle={request.componentName} onClose={close}><ExportDirectoryForm request={request} onSaved={directorySaved} onCancel={close} onBusy={setDirectoryBusy} onNotice={setNotice} /></Modal>}
       </>}
     {updater.error && <div className="app-update-error" role="alert"><strong>更新未完成</strong><p>{updater.error}</p><button className="button secondary" onClick={updater.clearError}>知道了</button></div>}
+    {request.kind === "plugin_panel" && !loading && !error && <PluginPanelHost request={request} standalone onOpenPanel={openPluginPanel} onClose={close} />}
     {notice && <div className="toast" role="status">{notice}</div>}
   </div>;
 }

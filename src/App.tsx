@@ -23,6 +23,7 @@ import {
   MoreHorizontal,
   PackagePlus,
   Palette,
+  Puzzle,
   RefreshCw,
   Save,
   ScanSearch,
@@ -48,6 +49,12 @@ import { AppearanceSettings } from "./AppearanceSettings";
 import { applyAppearance } from "./appearance";
 import { mergeComponent } from "./workspace";
 import { WindowChrome } from "./WindowChrome";
+import { usePlugins } from "./usePlugins";
+import { PluginManager } from "./PluginManager";
+import { PluginPanelHost } from "./PluginPanelHost";
+import { PluginCommandMenu, PluginFeedback } from "./PluginCommands";
+import { PluginCommandPrompt } from "./PluginForms";
+import type { PluginPanelRequest } from "./pluginTypes";
 import appIcon from "../src-tauri/icons/128x128.png";
 import { DialogLauncher } from "./DialogLauncher";
 import { confirmAction, dialogRequest, nativeWindows, openDialogWindow, SETTINGS_CHANGED, WORKSPACE_CHANGED, type StartupDialog, type WorkspaceChange } from "./windows";
@@ -96,6 +103,11 @@ export function App() {
   const [modal, setModal] = useState<"create" | "import" | "settings" | "warnings" | null>(null);
   const [selected, setSelected] = useState<ComponentSummary | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [view, setView] = useState<"components" | "plugins" | "panel">("components");
+  const [pluginPanel, setPluginPanel] = useState<PluginPanelRequest | null>(null);
+  const openPluginPanel = useCallback((request: PluginPanelRequest) => { setPluginPanel(request); setView("panel"); }, []);
+  const plugins = usePlugins(setNotice, openPluginPanel);
+  const selectKind = (value: typeof kind) => { setKind(value); setView("components"); };
   const mcdk = useMcdk(setNotice);
   const updater = useAppUpdate();
   const [ignoredWarningKeys, setIgnoredWarningKeys] = useState<Set<string>>(readIgnoredWarningKeys);
@@ -169,8 +181,9 @@ export function App() {
     const appearance = listen(SETTINGS_CHANGED, () => {
       void api.settings().then((value) => { if (active) setSettings(value); }).catch((error) => setNotice(errorMessage(error)));
     });
-    return () => { active = false; void workspace.then((stop) => stop()); void appearance.then((stop) => stop()); };
-  }, [refresh, acceptComponent]);
+    const panel = listen<PluginPanelRequest>("mcdh:plugin-open-panel", ({ payload }) => { if (active) openPluginPanel(payload); });
+    return () => { active = false; void workspace.then((stop) => stop()); void appearance.then((stop) => stop()); void panel.then((stop) => stop()); };
+  }, [refresh, acceptComponent, openPluginPanel]);
 
   useEffect(() => {
     if (!desktop) return;
@@ -274,25 +287,28 @@ export function App() {
           <span><strong>MCDH</strong><small>MCDevHelper</small></span>
         </div>
         <nav className="category-nav" aria-label="组件分类">
-          <NavItem active={kind === "all"} icon={<Boxes />} label="全部组件" count={result.components.length} onClick={() => setKind("all")} />
-          <NavItem active={kind === "addon"} icon={<Box />} label="模组" count={countKind(result.components, "addon")} onClick={() => setKind("addon")} />
-          <NavItem active={kind === "material"} icon={<Palette />} label="材质" count={countKind(result.components, "material")} onClick={() => setKind("material")} />
-          <NavItem active={kind === "map"} icon={<Map />} label="地图" count={countKind(result.components, "map")} onClick={() => setKind("map")} />
-          <NavItem active={kind === "favorites"} icon={<Star />} label="收藏" count={result.components.filter((component) => component.favorite).length} onClick={() => setKind("favorites")} />
+          <NavItem active={view === "components" && kind === "all"} icon={<Boxes />} label="全部组件" count={result.components.length} onClick={() => selectKind("all")} />
+          <NavItem active={view === "components" && kind === "addon"} icon={<Box />} label="模组" count={countKind(result.components, "addon")} onClick={() => selectKind("addon")} />
+          <NavItem active={view === "components" && kind === "material"} icon={<Palette />} label="材质" count={countKind(result.components, "material")} onClick={() => selectKind("material")} />
+          <NavItem active={view === "components" && kind === "map"} icon={<Map />} label="地图" count={countKind(result.components, "map")} onClick={() => selectKind("map")} />
+          <NavItem active={view === "components" && kind === "favorites"} icon={<Star />} label="收藏" count={result.components.filter((component) => component.favorite).length} onClick={() => selectKind("favorites")} />
+          <button className={view === "plugins" ? "nav-item active" : "nav-item"} onClick={() => setView("plugins")}><span><Puzzle size={18} /></span>插件<small>{plugins.items.length}</small></button>
         </nav>
+        <nav className="plugin-sidebar-tools" aria-label="插件面板">{plugins.items.filter((plugin) => plugin.enabled && plugin.trusted && plugin.compatible).flatMap((plugin) => plugin.manifest.panels.map((panel) => <button key={`${plugin.manifest.id}:${panel.id}`} className={view === "panel" && pluginPanel?.pluginId === plugin.manifest.id && pluginPanel.panelId === panel.id ? "nav-item active" : "nav-item"} title={plugin.manifest.name} onClick={() => openPluginPanel({ pluginId:plugin.manifest.id, panelId:panel.id, fingerprint:plugin.fingerprint })}><span><Puzzle size={16} /></span><span className="plugin-nav-title">{panel.title}</span></button>))}</nav>
         <div className="sidebar-spacer" />
         <button className="sidebar-action" aria-label="设置" title="设置" onClick={() => showModal("settings")}>
           <Settings size={18} /><span>设置</span><ChevronRight size={15} />
         </button>
       </aside>
 
-      <main className="workspace">
+      {view === "plugins" ? <PluginManager controller={plugins} /> : view === "panel" && pluginPanel ? <PluginPanelHost request={pluginPanel} onOpenPanel={openPluginPanel} onClose={() => setView("components")} /> : <main className="workspace">
         <header className="topbar">
           <div>
             <p className="eyebrow">创作组件</p>
             <h1>{kind === "all" ? "全部组件" : kind === "favorites" ? "收藏" : kindText[kind]}</h1>
           </div>
           <div className="top-actions">
+            <PluginCommandMenu controller={plugins} />
             <button className="button secondary" onClick={() => showModal("import")}><Import size={17} />导入</button>
             <button className="button primary" onClick={() => showModal("create")}><PackagePlus size={17} />新建组件</button>
           </div>
@@ -313,7 +329,7 @@ export function App() {
         {quickExport.task && <div className="quick-export-task"><CustomExportTaskPanel controller={quickExport} /></div>}
 
         <section className="component-grid" aria-live="polite">
-          {components.map((component) => <ComponentCard key={component.id} component={component} mcdk={mcdk} settings={settings} quickExport={quickExport} onOpen={() => showComponent(component)} onUpdate={(updated, message) => {
+          {components.map((component) => <ComponentCard key={component.id} component={component} pluginActions={<PluginCommandMenu controller={plugins} componentId={component.id} />} mcdk={mcdk} settings={settings} quickExport={quickExport} onOpen={() => showComponent(component)} onUpdate={(updated, message) => {
             acceptComponent(updated);
             setNotice(message);
           }} onNotice={setNotice} />)}
@@ -326,7 +342,9 @@ export function App() {
             </div>
           )}
         </section>
-      </main>
+      </main>}
+      <PluginCommandPrompt controller={plugins} />
+      <PluginFeedback controller={plugins} managerVisible={view === "plugins"} />
 
       {modal === "create" && <CreateDialog sources={result.sources} settings={settings} onConfigurePaths={() => showModal("settings")} onClose={() => setModal(null)} onDone={(message, operation) => { setModal(null); void done(message, operation, false); }} />}
       {modal === "import" && <ImportDialog onClose={() => setModal(null)} onDone={(message, operation) => { setModal(null); void done(message, operation, false); }} />}
@@ -437,7 +455,7 @@ export function WarningsDialog({ warnings, sources, ignoredKeys, onIgnore, onRem
   );
 }
 
-function ComponentCard({ component, mcdk, settings, quickExport, onOpen, onUpdate, onNotice }: { component: ComponentSummary; mcdk: McdkController; settings: AppSettings; quickExport: QuickExportController; onOpen: () => void; onUpdate: (component: ComponentSummary, message: string) => void; onNotice: (text: string) => void }) {
+function ComponentCard({ component, pluginActions, mcdk, settings, quickExport, onOpen, onUpdate, onNotice }: { component: ComponentSummary; pluginActions?: ReactNode; mcdk: McdkController; settings: AppSettings; quickExport: QuickExportController; onOpen: () => void; onUpdate: (component: ComponentSummary, message: string) => void; onNotice: (text: string) => void }) {
   const [favoriteBusy, setFavoriteBusy] = useState(false);
   const icon = component.kind === "addon" ? <Box /> : component.kind === "material" ? <Palette /> : <Map />;
   const openDirectory = async () => {
@@ -474,7 +492,7 @@ function ComponentCard({ component, mcdk, settings, quickExport, onOpen, onUpdat
       <div className="tag-row">{component.tags.length ? component.tags.map((value) => <span key={value}><Hash size={11} />{value}</span>) : <em>暂无标签</em>}</div>
       <footer>
         <span>{formatDate(component.modified_at)} · {formatBytes(component.size_bytes)}</span>
-        <div><LaunchGameButton componentId={component.id} name={component.name} mcdk={mcdk} disabled={!!quickExport.busyId} /><button title="打开目录" onClick={() => void openDirectory()}><FolderOpen size={16} /></button><button title="用 VS Code 打开" onClick={() => void openCode()}><Code2 size={16} /></button><QuickExportButton component={component} settings={settings} controller={quickExport} running={mcdk.status?.session?.component_id === component.id} /></div>
+        <div>{pluginActions}<LaunchGameButton componentId={component.id} name={component.name} mcdk={mcdk} disabled={!!quickExport.busyId} /><button title="打开目录" onClick={() => void openDirectory()}><FolderOpen size={16} /></button><button title="用 VS Code 打开" onClick={() => void openCode()}><Code2 size={16} /></button><QuickExportButton component={component} settings={settings} controller={quickExport} running={mcdk.status?.session?.component_id === component.id} /></div>
       </footer>
     </article>
   );

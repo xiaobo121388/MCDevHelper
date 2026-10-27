@@ -12,6 +12,15 @@ pub(crate) enum DialogRequest {
     Create,
     Import,
     Warnings,
+    PluginPanel {
+        #[serde(rename = "pluginId")]
+        plugin_id: String,
+        #[serde(rename = "panelId")]
+        panel_id: String,
+        fingerprint: String,
+        #[serde(rename = "componentId", default)]
+        component_id: Option<String>,
+    },
     Component {
         #[serde(rename = "componentId")]
         component_id: String,
@@ -63,6 +72,11 @@ impl DialogRequest {
             Self::Create => ("dialog-create".into(), "新建组件", 600., 640.),
             Self::Import => ("dialog-import".into(), "导入组件", 620., 660.),
             Self::Warnings => ("dialog-warnings".into(), "扫描问题", 760., 620.),
+            Self::PluginPanel { plugin_id, panel_id, fingerprint, component_id } => {
+                let mut hash = DefaultHasher::new();
+                (plugin_id, panel_id, fingerprint, component_id).hash(&mut hash);
+                (format!("dialog-plugin-{:x}", hash.finish()), "插件工具", 960., 720.)
+            },
             Self::Component { component_id, .. } => {
                 let mut hash = DefaultHasher::new();
                 component_id.hash(&mut hash);
@@ -221,6 +235,15 @@ mod tests {
         assert!(
             matches!(request, DialogRequest::Component { component_id, .. } if component_id == "abc")
         );
+    }
+
+    #[test]
+    fn plugin_panel_windows_are_scoped_to_version_panel_and_component() {
+        let request = r#"{"kind":"plugin_panel","pluginId":"example.hello","panelId":"main","fingerprint":"one","componentId":"component"}"#;
+        let first: DialogRequest = serde_json::from_str(request).unwrap();
+        let second: DialogRequest = serde_json::from_str(&request.replace("\"one\"", "\"two\"")).unwrap();
+        assert_ne!(first.specification().0, second.specification().0);
+        assert!(first.specification().0.starts_with("dialog-plugin-"));
     }
 
     #[test]

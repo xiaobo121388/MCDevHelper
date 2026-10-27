@@ -2,6 +2,7 @@ import { invoke, isTauri } from "@tauri-apps/api/core";
 import { emit, listen } from "@tauri-apps/api/event";
 import { getCurrentWindow, Window } from "@tauri-apps/api/window";
 import type { AppSettings, ComponentSummary, OperationResult, UpdateCheckResult } from "./types";
+import type { PluginPanelRequest } from "./pluginTypes";
 
 export type StartupDialog =
   | { kind: "updated"; currentVersion: string; notes: string[] }
@@ -16,6 +17,7 @@ export type ExportDirectoryRequest = {
   owner: string;
 };
 export type DialogRequest =
+  | ({ kind: "plugin_panel" } & PluginPanelRequest)
   | { kind: "settings" | "create" | "import" | "warnings" }
   | { kind: "component"; componentId: string; initialComponent?: ComponentSummary; initialSettings?: AppSettings }
   | { kind: "startup"; dialog: StartupDialog }

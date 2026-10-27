@@ -1,0 +1,115 @@
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { PluginCandidate, PluginPanelInfo, PluginSummary } from "./pluginTypes";
+
+const mocks = vi.hoisted(() => ({ list:vi.fn(), preview:vi.fn(), install:vi.fn(), discard:vi.fn(), configure:vi.fn(), uninstall:vi.fn(), execute:vi.fn(), cancel:vi.fn(), panel:vi.fn(), panelCall:vi.fn(), logs:vi.fn(), load:vi.fn(), open:vi.fn(), confirm:vi.fn(), notice:vi.fn(), onPanel:vi.fn() }));
+vi.mock("./pluginApi", () => ({ pluginDesktop:true, pluginApi:mocks, pluginAssetUrl:(_request: unknown, path: string) => `http://mcdh-plugin.localhost/test/${path}` }));
+vi.mock("./pluginModules", () => ({ loadPluginModule:mocks.load }));
+vi.mock("./windows", () => ({ openDialogWindow:mocks.open, confirmAction:mocks.confirm, notifyWorkspace:vi.fn().mockResolvedValue(undefined) }));
+vi.mock("./App", () => ({ Modal:({ title, children }: { title:string; children:React.ReactNode }) => <section role="dialog" aria-label={title}>{children}</section> }));
+import { PluginManager } from "./PluginManager";
+import { PluginPanelHost } from "./PluginPanelHost";
+import { PluginCommandPrompt } from "./PluginForms";
+import { usePlugins } from "./usePlugins";
+
+const plugin: PluginSummary = { manifest:{ schema_version:1, api_version:1, id:"example.hello", name:"测试插件", version:"1.0.0", description:"测试组件工具", author:"Example", engines:{mcdh:">=1.0.0"}, entry:"main.js",
+  commands:[{id:"inspect",title:"读取组件",description:"Inspect",menus:["global","component"],input_schema:{type:"object",properties:{name:{type:"string",title:"名称"}},required:["name"]}}], panels:[{id:"main",title:"组件概览",entry:"panel.js"}], mcp_tools:[{name:"inspect",command:"inspect",description:"Inspect"}], settings_schema:{type:"object",properties:{label:{type:"string",title:"显示名称",default:"hello"}}} },
+  repository:"owner/repo",source:{kind:"release",reference:"v1.0.0",archive_sha256:"a".repeat(64)},fingerprint:"b".repeat(64),enabled:true,trusted:true,compatible:true,allow_mcp:false,settings:{label:"hello"} };
+const candidate: PluginCandidate = { token:"preview",manifest:plugin.manifest,repository:plugin.repository,source:plugin.source,fingerprint:plugin.fingerprint,compatible:true,already_installed:false };
+const request = { pluginId:plugin.manifest.id, panelId:"main", fingerprint:plugin.fingerprint, componentId:"component-1" };
+const panelInfo: PluginPanelInfo = { plugin,panel:plugin.manifest.panels[0],environment:{caller:"desktop",pluginId:plugin.manifest.id,appVersion:"1.3.0",dataDir:"D:/data",packageDir:"D:/package",componentId:"component-1"} };
+
+function Manager() { const controller = usePlugins(mocks.notice, mocks.onPanel); return <PluginManager controller={controller} />; }
+beforeEach(() => {
+  vi.clearAllMocks();
+  mocks.list.mockResolvedValue([plugin]); mocks.preview.mockResolvedValue(candidate); mocks.install.mockResolvedValue(plugin);
+  mocks.discard.mockResolvedValue(undefined); mocks.configure.mockResolvedValue(plugin); mocks.uninstall.mockResolvedValue(undefined);
+  mocks.cancel.mockResolvedValue(undefined); mocks.panel.mockResolvedValue(panelInfo); mocks.panelCall.mockResolvedValue({value:null,actions:[]});
+  mocks.execute.mockResolvedValue({value:{ok:true},actions:[]}); mocks.logs.mockResolvedValue([]); mocks.confirm.mockResolvedValue(true);
+  mocks.open.mockResolvedValue(undefined);
+});
+afterEach(() => { cleanup(); document.documentElement.removeAttribute("style"); });
+
+describe("plugin management", () => {
+  it("never installs before a preview and explicit trust confirmation", async () => {
+    render(<Manager />);
+    fireEvent.change(screen.getByLabelText("GitHub 插件仓库"), {target:{value:"owner/repo"}});
+    fireEvent.click(screen.getByRole("button", {name:"添加插件"}));
+    const install = await screen.findByRole("button", {name:"确认安装并启用"});
+    expect(install).toBeDisabled(); expect(mocks.install).not.toHaveBeenCalled();
+    expect(screen.getByText(/当前 Windows 用户权限/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("checkbox", {name:/我信任此插件/}));
+    fireEvent.click(install);
+    await waitFor(() => expect(mocks.install).toHaveBeenCalledWith("preview", plugin.fingerprint));
+  });
+  it("shows incompatible previews without offering an executable install", async () => {
+    mocks.preview.mockResolvedValue({...candidate,compatible:false});
+    render(<Manager />);
+    fireEvent.change(screen.getByLabelText("GitHub 插件仓库"), {target:{value:"owner/repo"}});
+    fireEvent.click(screen.getByRole("button", {name:"添加插件"}));
+    await screen.findByText(/不兼容当前/);
+    fireEvent.click(screen.getByRole("checkbox", {name:/我信任此插件/}));
+    expect(screen.getByRole("button", {name:"确认安装并启用"})).toBeDisabled();
+  });
+  it("requires a separate version-bound MCP confirmation and permits revocation", async () => {
+    render(<Manager />);
+    fireEvent.click(await screen.findByRole("checkbox", {name:"允许 MCP 调用 测试插件"}));
+    await waitFor(() => expect(mocks.confirm).toHaveBeenCalledWith(expect.stringContaining("删除文件")));
+    await waitFor(() => expect(mocks.configure).toHaveBeenCalledWith(plugin,true,true,plugin.settings));
+    mocks.configure.mockClear(); mocks.confirm.mockResolvedValue(false);
+    fireEvent.click(screen.getByRole("checkbox", {name:"允许 MCP 调用 测试插件"}));
+    await waitFor(() => expect(mocks.confirm).toHaveBeenCalledTimes(2));
+    expect(mocks.configure).not.toHaveBeenCalled();
+  });
+  it("opens the same declared panel in main or independent surfaces", async () => {
+    render(<Manager />);
+    fireEvent.click(await screen.findByRole("button", {name:"组件概览"}));
+    expect(mocks.onPanel).toHaveBeenCalledWith({pluginId:plugin.manifest.id,panelId:"main",fingerprint:plugin.fingerprint});
+    fireEvent.click(screen.getByRole("button", {name:"独立窗口打开 组件概览"}));
+    expect(mocks.open).toHaveBeenCalledWith({kind:"plugin_panel",pluginId:plugin.manifest.id,panelId:"main",fingerprint:plugin.fingerprint});
+  });
+  it("preserves plugin data unless the user explicitly chooses to clear it", async () => {
+    render(<Manager />);
+    fireEvent.click(await screen.findByRole("button", {name:"卸载 测试插件"}));
+    expect(screen.getByRole("checkbox", {name:/同时清除/})).not.toBeChecked();
+    expect(mocks.uninstall).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", {name:"确认卸载"}));
+    await waitFor(() => expect(mocks.uninstall).toHaveBeenCalledWith(plugin.manifest.id,false));
+  });
+  it("collects command input and retains the component context", async () => {
+    function Prompt() {
+      const controller = usePlugins(mocks.notice,mocks.onPanel);
+      return <><button onClick={() => controller.requestCommand(plugin,plugin.manifest.commands[0],"component-1")}>run</button><PluginCommandPrompt controller={controller} /></>;
+    }
+    render(<Prompt />);
+    fireEvent.click(screen.getByText("run"));
+    fireEvent.change(screen.getByLabelText("名称 *"), {target:{value:"example"}});
+    fireEvent.click(screen.getByRole("button", {name:"执行"}));
+    await waitFor(() => expect(mocks.execute).toHaveBeenCalledWith(plugin.manifest.id,plugin.fingerprint,"inspect",{name:"example"},"component-1",expect.any(String)));
+  });
+});
+
+describe("plugin panel host", () => {
+  it("mounts in Shadow DOM, forwards context/theme, and disposes on close", async () => {
+    const stop = vi.fn();
+    const listener = vi.fn();
+    const mount = vi.fn((element: HTMLElement, context: import("../sdk/mcdh").PanelContext) => {
+      element.textContent = "loaded panel"; context.onThemeChanged(listener); return stop;
+    });
+    mocks.load.mockResolvedValue({mount});
+    const view = render(<PluginPanelHost request={request} onOpenPanel={mocks.onPanel} onClose={vi.fn()} />);
+    await waitFor(() => expect(mount).toHaveBeenCalledOnce());
+    expect(mount.mock.calls[0][1].environment.componentId).toBe("component-1");
+    expect(view.container.querySelector(".plugin-panel-mount")?.shadowRoot?.textContent).toContain("loaded panel");
+    await act(async () => { document.documentElement.style.colorScheme = "dark"; });
+    await waitFor(() => expect(listener).toHaveBeenCalledWith(expect.objectContaining({mode:"dark"})));
+    view.unmount(); expect(stop).toHaveBeenCalledOnce();
+  });
+  it("shows module failures and can reopen an independent panel", async () => {
+    mocks.load.mockRejectedValue(new Error("broken module"));
+    render(<PluginPanelHost request={request} onOpenPanel={mocks.onPanel} onClose={vi.fn()} />);
+    expect(await screen.findByRole("alert")).toHaveTextContent("broken module");
+    fireEvent.click(screen.getByRole("button", {name:"在独立窗口打开"}));
+    expect(mocks.open).toHaveBeenCalledWith({kind:"plugin_panel",...request});
+  });
+});

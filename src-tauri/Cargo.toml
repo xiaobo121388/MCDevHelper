@@ -13,6 +13,8 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 mcdh-core = { path = "../crates/mcdh-core" }
+mcdh-plugins = { path = "../crates/mcdh-plugins" }
+percent-encoding.workspace = true
 reqwest.workspace = true
 semver.workspace = true
 serde.workspace = true

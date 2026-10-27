@@ -2324,6 +2324,8 @@ version = "1.3.0"
 dependencies = [
  "chrono",
  "mcdh-core",
+ "mcdh-plugins",
+ "percent-encoding",
  "reqwest",
  "semver",
  "serde",

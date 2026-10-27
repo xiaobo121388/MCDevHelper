@@ -1,0 +1,90 @@
+.plugin-workspace { min-width: 0; display: flex; flex-direction: column; }
+.workspace.plugin-workspace, .workspace.plugin-panel-workspace { padding: 0; }
+.plugin-workspace > .topbar { padding: 26px 28px 24px; }
+.plugin-workspace > .topbar, .plugin-panel-workspace > .topbar { width: 100%; max-width: none; margin: 0; flex-direction: row; align-items: center; }
+.plugin-manager-body { flex: 1; overflow: auto; padding: 0 28px 32px; }
+.plugin-install-bar { display: flex; gap: 10px; padding: 0 0 24px; }
+.plugin-install-bar > label { display: flex; align-items: center; flex: 1; min-width: 0; gap: 9px; padding: 0 12px; border: 1px solid var(--control-border); border-radius: 6px; color: var(--muted); background: var(--control-bg); }
+.plugin-install-bar input { min-width: 0; width: 100%; padding: 11px 0; border: 0; outline: none; color: var(--text); background: transparent; }
+.plugin-preview { margin-bottom: 24px; border-block: 1px solid var(--border); padding: 20px 0; }
+.plugin-preview > header, .plugin-preview h2, .plugin-row h3 { display: flex; align-items: center; gap: 10px; }
+.plugin-preview > header { align-items: flex-start; justify-content: space-between; }
+.plugin-preview > header > div { min-width: 0; }
+.plugin-preview h2 { font-size: 17px; margin: 0; overflow-wrap: anywhere; flex-wrap: wrap; }
+.plugin-preview h2 span, .plugin-row h3 small { font-size: 11px; font-weight: 400; color: var(--subtle); }
+.plugin-preview p { color: var(--muted); line-height: 1.6; margin: 8px 0; overflow-wrap: anywhere; }
+.plugin-metadata { display: grid; grid-template-columns: 82px minmax(0, 1fr); gap: 9px 14px; margin: 19px 0; font-size: 12px; }
+.plugin-metadata dt { color: var(--subtle); }
+.plugin-metadata dd { min-width: 0; margin: 0; overflow-wrap: anywhere; }
+.plugin-fingerprint { font-family: Consolas, monospace; font-size: 11px; }
+.plugin-trust-warning { display: flex; gap: 10px; padding: 12px 14px; margin: 16px 0; color: var(--warning-text); background: var(--warning-bg); border-left: 3px solid var(--warning-border); }
+.plugin-trust-warning p { margin: 0; color: inherit; font-size: 12px; }
+.plugin-trust-warning svg { margin-top: 2px; }
+.plugin-checkbox, .plugin-enable { display: flex; align-items: center; gap: 8px; font-size: 12px; cursor: pointer; }
+.plugin-checkbox input, .plugin-enable input { width: 16px; height: 16px; margin: 0; flex: none; accent-color: var(--accent); }
+.plugin-list-heading { display: flex; gap: 10px; align-items: center; border-bottom: 1px solid var(--border); padding: 12px 0; }
+.plugin-list-heading h2 { margin: 0; font-size: 13px; }
+.plugin-list-heading > span { color: var(--subtle); font-size: 12px; }
+.plugin-row { padding: 21px 0; border-bottom: 1px solid var(--border); }
+.plugin-row-top { display: flex; gap: 13px; align-items: flex-start; }
+.plugin-row-icon { display: grid; flex: none; width: 38px; height: 38px; border-radius: 7px; place-items: center; color: var(--accent); background: var(--accent-soft); }
+.plugin-row-name { flex: 1; min-width: 0; }
+.plugin-row h3 { margin: 0 0 6px; font-size: 14px; overflow-wrap: anywhere; flex-wrap: wrap; }
+.plugin-row-name p { color: var(--muted); margin: 0 0 7px; font-size: 12px; overflow-wrap: anywhere; }
+.plugin-row-origin { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; color: var(--subtle); font-size: 11px; overflow-wrap: anywhere; }
+.plugin-state { display: inline-flex; align-items: center; gap: 5px; color: var(--subtle); font-size: 11px; }
+.plugin-state.enabled { color: #278365; }
+.plugin-enable { padding-top: 3px; }
+.plugin-row-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 7px; margin-top: 15px; }
+.plugin-action-spacer { flex: 1; }
+.plugin-panel-actions { display: inline-flex; align-items: center; gap: 3px; }
+.plugin-row-actions .button { font-size: 11px; min-height: 29px; padding: 5px 9px; }
+.plugin-row-error { margin: 12px 0 0; color: var(--danger); font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.plugin-settings { margin-top: 14px; }
+.plugin-settings > summary { display: inline-flex; gap: 8px; align-items: center; color: var(--muted); font-size: 12px; cursor: pointer; }
+.plugin-settings > form { padding-top: 16px; max-width: 560px; }
+.plugin-settings > form > button { margin-top: 14px; }
+.plugin-fields { display: grid; gap: 14px; }
+.plugin-field { display: grid; min-width: 0; gap: 7px; font-size: 12px; }
+.plugin-field > input, .plugin-field > select, .plugin-field > textarea { width: 100%; min-width: 0; border: 1px solid var(--control-border); border-radius: 5px; padding: 8px 10px; color: var(--text); background: var(--control-bg); }
+.plugin-field textarea { resize: vertical; font-family: Consolas, monospace; }
+.plugin-logs { max-height: 220px; overflow: auto; padding: 12px; margin-top: 15px; background: var(--panel-soft); font: 11px/1.65 Consolas, monospace; }
+.plugin-logs > div { display: flex; gap: 8px; }
+.plugin-logs time { color: var(--subtle); flex: none; }
+.plugin-logs span { white-space: pre-wrap; overflow-wrap: anywhere; }
+.plugin-remove-confirm { margin-top: 16px; border-left: 3px solid var(--danger); padding-left: 14px; }
+.plugin-task { display: flex; align-items: center; gap: 9px; padding: 10px 0; color: var(--muted); }
+.plugin-task > span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.plugin-error { display: flex; align-items: flex-start; gap: 9px; padding: 12px 0; color: var(--danger); font-size: 12px; }
+.plugin-error > span { flex: 1; min-width: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.plugin-empty { display: grid; justify-items: center; gap: 14px; padding: 64px 16px; color: var(--subtle); }
+.plugin-empty h2 { margin: 0; font-size: 14px; font-weight: 400; }
+.plugin-sidebar-tools { display: grid; flex-shrink: 1; min-height: 0; overflow: auto; gap: 3px; margin-top: 20px; }
+.plugin-sidebar-tools:empty { display: none; }
+.plugin-nav-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.plugin-menu-content { z-index: 100; min-width: 210px; max-width: min(340px, 90vw); padding: 5px; border: 1px solid var(--border); border-radius: 6px; background: var(--panel); box-shadow: var(--shadow); }
+.plugin-menu-item { display: grid; gap: 4px; padding: 8px 10px; border-radius: 3px; outline: none; cursor: pointer; font-size: 12px; overflow-wrap: anywhere; }
+.plugin-menu-item[data-highlighted] { color: var(--accent); background: var(--accent-soft); }
+.plugin-menu-item small { color: var(--subtle); font-size: 10px; }
+.plugin-panel-workspace { display: flex; min-width: 0; min-height: 0; flex-direction: column; overflow: hidden; }
+.plugin-panel-workspace.standalone { flex: 1; }
+.plugin-panel-workspace > .topbar { flex: none; padding: 21px 26px; }
+.plugin-panel-title { display: flex; min-width: 0; align-items: center; gap: 11px; }
+.plugin-panel-title h1 { font-size: 19px; min-width: 0; overflow-wrap: anywhere; margin: 0; }
+.plugin-panel-mount { flex: 1; min-width: 0; min-height: 0; overflow: auto; }
+.plugin-panel-mount[hidden] { display: none; }
+.plugin-panel-status { display: flex; align-items: center; justify-content: center; gap: 9px; padding: 40px; color: var(--muted); }
+.plugin-panel-workspace > .plugin-error { margin: 0 26px; }
+.plugin-feedback { position: fixed; bottom: 12px; left: 232px; max-width: min(540px, calc(100vw - 256px)); z-index: 30; padding: 0 14px; border: 1px solid var(--border); border-radius: 6px; background: var(--panel); box-shadow: var(--shadow); }
+.plugin-command-result { margin: 0; padding: 12px; max-height: 50vh; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; background: var(--panel-soft); font: 12px/1.7 Consolas, monospace; }
+@media (max-width: 700px) {
+  .plugin-manager-body { padding: 0 16px 24px; }
+  .plugin-install-bar { flex-wrap: wrap; }
+  .plugin-install-bar > label { min-width: 180px; }
+  .plugin-row-top { gap: 9px; }
+  .plugin-row-actions { gap: 5px; }
+  .plugin-row-actions > .plugin-checkbox { flex-basis: 100%; margin-bottom: 6px; }
+  .plugin-action-spacer { display: none; }
+  .plugin-panel-workspace > .topbar { padding: 16px; }
+  .plugin-feedback { left: 12px; max-width: calc(100vw - 24px); }
+}

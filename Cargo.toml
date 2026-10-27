@@ -15,6 +15,7 @@ fs2 = "0.4"
 encoding_rs = "0.8"
 jsonc-parser = { version = "0.33.1", features = ["cst", "serde"] }
 jsonschema = { version = "0.33", default-features = false }
+percent-encoding = "2"
 rquickjs = { version = "=0.14.0", features = ["loader", "futures"] }
 rusqlite = { version = "0.40", features = ["bundled"] }
 reqwest = { version = "0.13", default-features = false, features = ["json", "native-tls-no-alpn"] }

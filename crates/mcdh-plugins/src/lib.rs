@@ -12,7 +12,7 @@ pub use error::{PluginError, Result};
 pub use github::{Cancellation, PluginProgress};
 pub use manifest::*;
 pub use runtime::{ExecutionRequest, ExecutionResult, PluginCaller, UiAction};
-pub use sdk::PluginLog;
+pub use sdk::{PluginLog, PluginPanelInfo};
 pub use store::{PluginCandidate, PluginService, PluginSummary};
 
 #[cfg(test)]

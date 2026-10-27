@@ -25,6 +25,13 @@ pub struct PluginLog {
     pub text: String,
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct PluginPanelInfo {
+    pub plugin: crate::PluginSummary,
+    pub panel: crate::PluginPanel,
+    pub environment: Value,
+}
+
 #[derive(Clone)]
 pub(crate) struct Host {
     service: PluginService,
@@ -435,6 +442,34 @@ impl Host {
 }
 
 impl PluginService {
+    pub fn panel_info(
+        &self,
+        id: &str,
+        fingerprint: &str,
+        panel_id: &str,
+        component_id: Option<String>,
+    ) -> Result<PluginPanelInfo> {
+        let _lease = self.lease(id, false)?;
+        let record = self.authorize(id, PluginCaller::Desktop)?;
+        if record.fingerprint != fingerprint {
+            return Err(invalid("Panel version changed; reopen it"));
+        }
+        let panel = record
+            .manifest
+            .panels
+            .iter()
+            .find(|panel| panel.id == panel_id)
+            .ok_or_else(|| invalid("Unknown plugin panel"))?
+            .clone();
+        let environment = json!({"caller":"desktop", "pluginId":id,"appVersion":mcdh_core::VERSION,
+            "packageDir":self.version_directory(&record)?,"dataDir":self.root.join("data").join(id),"componentId":component_id});
+        Ok(PluginPanelInfo {
+            plugin: record.into(),
+            panel,
+            environment,
+        })
+    }
+
     pub async fn panel_call(
         &self,
         id: &str,

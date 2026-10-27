@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "api_version": 1,
+  "id": "example.component-overview",
+  "name": "组件概览",
+  "version": "1.0.0",
+  "description": "组件统计与当前工程信息",
+  "author": "MCDH Example",
+  "engines": { "mcdh": ">=1.3.0" },
+  "entry": "main.js",
+  "commands": [
+    { "id": "inspect", "title": "读取组件概览", "menus": ["global", "component"], "input_schema": { "type": "object", "properties": {}, "additionalProperties": false } },
+    { "id": "open", "title": "打开组件概览", "menus": ["global"], "input_schema": { "type": "object", "properties": {}, "additionalProperties": false } }
+  ],
+  "panels": [ { "id": "overview", "title": "组件概览", "entry": "panel.js" } ],
+  "mcp_tools": [ { "name": "inspect", "description": "Read component statistics and optional current component details", "command": "inspect" } ],
+  "settings_schema": {
+    "type": "object",
+    "properties": { "label": { "type": "string", "title": "面板标题", "default": "组件概览" } },
+    "required": ["label"],
+    "additionalProperties": false
+  }
+}

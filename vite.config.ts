@@ -12,6 +12,7 @@ export default defineConfig({
   server: {
     port: 1420,
     strictPort: true,
+    watch: { ignored: ["**/target/**", "**/release/**", "**/src-tauri/release-resources/**", "**/src-tauri/binaries/**"] },
   },
   test: {
     environment: "jsdom",

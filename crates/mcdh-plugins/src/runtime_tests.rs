@@ -240,7 +240,10 @@ async fn component_sdk_uses_the_existing_core_service_and_version_is_pinned() {
         &manifest(),
         "export function activate(ctx) { ctx.commands.register('hello', () => ctx.components.get(ctx.environment.componentId)); }",
     );
-    service.index.add_source(mcdh_core::SourceKind::Single, &project).unwrap();
+    service
+        .index
+        .add_source(mcdh_core::SourceKind::Single, &project)
+        .unwrap();
     let id = service.index.component_id(&project).unwrap();
     fs::write(project.join("level.dat"), []).unwrap();
     let mut call = request();

@@ -24,7 +24,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; connect-src ipc: http://ipc.localhost; img-src 'self' asset: http://asset.localhost data:; style-src 'self' 'unsafe-inline'"
+      "csp": "default-src 'self'; script-src 'self' http://mcdh-plugin.localhost mcdh-plugin:; connect-src ipc: http://ipc.localhost; img-src 'self' asset: http://asset.localhost data: http://mcdh-plugin.localhost mcdh-plugin:; style-src 'self' 'unsafe-inline' http://mcdh-plugin.localhost mcdh-plugin:; font-src 'self' http://mcdh-plugin.localhost mcdh-plugin:"
     }
   },
   "bundle": {

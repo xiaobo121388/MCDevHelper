@@ -169,6 +169,18 @@ describe("component workspace filters", () => {
     mocks.installMcdkUpdate.mockReset().mockResolvedValue(mcdkReady);
   });
 
+  it("preserves workspace filters when visiting plugin management", async () => {
+    mocks.refresh.mockResolvedValue({ components:[launchComponent], sources:[], warnings:[] });
+    render(<App />);
+    await screen.findByText(launchComponent.name);
+    fireEvent.change(screen.getByPlaceholderText("搜索名称或路径"), {target:{value:"编辑"}});
+    fireEvent.click(screen.getByRole("button", {name:/^插件/}));
+    expect(await screen.findByRole("heading", {name:"插件"})).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", {name:/全部组件/}));
+    expect(screen.getByPlaceholderText("搜索名称或路径")).toHaveValue("编辑");
+    expect(mocks.refresh).toHaveBeenCalledTimes(1);
+  });
+
   it("places launch before open directory and prevents repeated launch requests", async () => {
     mocks.refresh.mockResolvedValue({ components: [{ id: "game", name: "测试模组", kind: "addon", path: "D:\\作品", origin: { kind: "single" }, manifests: [], tags: [], size_bytes: 1 }], sources: [], warnings: [] });
     let complete!: (value: unknown) => void;

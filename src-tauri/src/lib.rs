@@ -22,6 +22,8 @@ mod mcdk_launch;
 mod app_update;
 mod custom_export;
 mod windows;
+mod plugins;
+use plugins::*;
 use custom_export::*;
 use app_update::{install_app_update, app_update_error};
 use mcdk_launch::{launch_component_game, launch_component_editor};
@@ -434,7 +436,9 @@ where
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let state = AppState::open().expect("failed to open MCDH local index");
-    tauri::Builder::default()
+    let plugin_state = DesktopPlugins::new(state.index.clone()).expect("failed to open plugin registry");
+    plugins::register(tauri::Builder::default())
+        .manage(plugin_state)
         .manage(state)
         .setup(mcdk_manager::setup)
         .plugin(tauri_plugin_dialog::init())
@@ -453,6 +457,17 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             windows::open_dialog_window,
+            list_plugins,
+            preview_plugin,
+            install_plugin,
+            discard_plugin_preview,
+            configure_plugin,
+            uninstall_plugin,
+            execute_plugin_command,
+            cancel_plugin_operation,
+            get_plugin_panel,
+            plugin_panel_call,
+            get_plugin_logs,
             app_version,
             mcdk_status,
             launch_component_game,
@@ -508,6 +523,7 @@ pub fn run() {
         .run(|app, event| {
             if matches!(event, tauri::RunEvent::Exit) {
                 app.state::<AppState>().exports.shutdown();
+                app.state::<DesktopPlugins>().shutdown();
             }
         });
 }
