@@ -11,6 +11,7 @@ import { PluginManager } from "./PluginManager";
 import { PluginPanelHost } from "./PluginPanelHost";
 import { PluginCommandPrompt } from "./PluginForms";
 import { usePlugins } from "./usePlugins";
+import { createContext } from "../sdk/context.js";
 
 const plugin: PluginSummary = { manifest:{ schema_version:1, api_version:1, id:"example.hello", name:"测试插件", version:"1.0.0", description:"测试组件工具", author:"Example", engines:{mcdh:">=1.0.0"}, entry:"main.js",
   commands:[{id:"inspect",title:"读取组件",description:"Inspect",menus:["global","component"],input_schema:{type:"object",properties:{name:{type:"string",title:"名称"}},required:["name"]}}], panels:[{id:"main",title:"组件概览",entry:"panel.js"}], mcp_tools:[{name:"inspect",command:"inspect",description:"Inspect"}], settings_schema:{type:"object",properties:{label:{type:"string",title:"显示名称",default:"hello"}}} },
@@ -90,6 +91,35 @@ describe("plugin management", () => {
 });
 
 describe("plugin panel host", () => {
+  it("attempts every subscription even when one cleanup fails", () => {
+    const state = createContext(vi.fn(), {commands:[],environment:panelInfo.environment}, vi.fn());
+    const first = vi.fn(); const last = vi.fn();
+    state.context.subscriptions.push(first, () => { throw new Error("cleanup failure"); }, last);
+    expect(() => state.dispose()).toThrow("cleanup failure");
+    expect(first).toHaveBeenCalledOnce(); expect(last).toHaveBeenCalledOnce();
+    expect(() => state.dispose()).not.toThrow();
+  });
+  it("cleans subscriptions immediately when mounting fails", async () => {
+    const stop = vi.fn();
+    mocks.load.mockResolvedValue({mount:(_element: HTMLElement, context: import("../sdk/mcdh").PanelContext) => {
+      context.subscriptions.push(stop); throw new Error("mount failure");
+    }});
+    const view = render(<PluginPanelHost request={request} onOpenPanel={mocks.onPanel} onClose={vi.fn()} />);
+    expect(await screen.findByRole("alert")).toHaveTextContent("mount failure");
+    expect(stop).toHaveBeenCalledOnce(); view.unmount(); expect(stop).toHaveBeenCalledOnce();
+  });
+  it("does not clear a newer panel when an old module load fails late", async () => {
+    let rejectOld!: (reason: Error) => void;
+    mocks.load.mockImplementationOnce(() => new Promise((_resolve, reject) => { rejectOld = reject; }));
+    const view = render(<PluginPanelHost request={request} onOpenPanel={mocks.onPanel} onClose={vi.fn()} />);
+    await waitFor(() => expect(mocks.load).toHaveBeenCalledOnce());
+    mocks.load.mockResolvedValue({mount:(element: HTMLElement) => { element.textContent = "new panel"; }});
+    view.rerender(<PluginPanelHost request={{...request,componentId:"component-2"}} onOpenPanel={mocks.onPanel} onClose={vi.fn()} />);
+    const content = () => view.container.querySelector(".plugin-panel-mount")?.shadowRoot?.textContent;
+    await waitFor(() => expect(content()).toContain("new panel"));
+    await act(async () => { rejectOld(new Error("stale failure")); });
+    expect(content()).toContain("new panel");
+  });
   it("mounts in Shadow DOM, forwards context/theme, and disposes on close", async () => {
     const stop = vi.fn();
     const listener = vi.fn();

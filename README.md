@@ -22,13 +22,14 @@ MCDH 是面向网易《我的世界》中国版 PE 创作者的 Windows 本地�
 - JSONC 兼容：组件文件、MCS 配置、世界包清单、内置模板和本地 JSON 设置均支持 `//`、`/* ... */` 注释与尾随逗号。
 - MCS 兼容：识别 Type 1/3/4/7；可配置本地开发者身份和命名空间，并生成兼容的 `studio.json` 与 `work.mcscfg`。
 - 自定义导出：可接入本机 EXE 或解释器脚本，新增独立导出按钮，支持实时日志、取消进程树、重名处理和按方案授权 MCP。
-- AI 接口：`mcdh-mcp.exe` 使用标准输入输出，提供 27 个严格 JSON Schema 工具，不提供删除组件或修改导出方案的工具。
+- GitHub 插件：输入仓库名后预览、确认信任并安装，支持命令、组件菜单、设置、主工作区面板和独立工具窗口，普通用户无需 Node.js 或 Git。
+- AI 接口：`mcdh-mcp.exe` 使用标准输入输出，保留 27 个严格 JSON Schema 内置工具，另可调用桌面单独授权的插件工具。内置工具不提供删除组件或修改导出方案；全权限插件不受此功能限制。
 
 ## 系统要求
 
 - Windows 10/11 x64。
 - 已安装系统 WebView2 Runtime。Windows 10 的受支持版本和 Windows 11 通常已随系统提供；MCDH 不联网下载运行时。
-- 安装和管理组件不需要管理员权限，也不需要 Node.js、Rust 或持续网络连接；启动更新检查和打开反馈页面需要网络，检查失败不影响本地功能。
+- 安装和管理组件不需要管理员权限，也不需要 Node.js、Rust 或持续网络连接；启动更新检查、下载 GitHub 插件和打开反馈页面需要网络，检查失败不影响本地功能。
 
 发行包当前未进行商业代码签名，首次运行时 Windows 可能显示 SmartScreen 提示。请核对 `SHA256SUMS.txt` 后再运行。
 
@@ -74,6 +75,14 @@ UUID 重生、版本提升和标签同步会在原 JSONC 文本中定点更新�
 ## 自定义导出
 
 自定义打包程序可在“设置 > 自定义导出”配置。内置游戏 ZIP 和完整 ZIP 不受影响；每个启用的方案会在旁边新增按钮，由程序自行决定最终文件名和格式。默认传入完整临时副本，也可选择原目录模式。完整参数、MCP 工作流和安全边界见 [自定义导出接入协议](docs/custom-export.md)，可运行示例位于 [pack.py](examples/custom-export/pack.py)。外部程序具有当前用户权限，临时副本不是沙箱，仅运行可信程序。
+
+## GitHub 插件
+
+在侧栏“插件”输入 `owner/repo`、`github:owner/repo` 或 GitHub 仓库链接，预览来源、版本、作者声明和权限后确认安装。优先使用最新正式 Release 的 `mcdh-plugin.zip` 并校验 GitHub SHA-256 与大小；没有该发布资产时安装默认分支确定提交中的预构建文件。仓库必须符合 MCDH 自有清单规范，不会自动构建普通源码仓库，也不兼容 MCDK / MCDE 原生插件。
+
+插件可以添加全局及组件命令、设置和面板。同一面板可在主工作区或独立窗口打开，支持主题同步；返回组件视图保留筛选状态。管理页提供启停、更新预览、日志和卸载，更新须再次确认，卸载默认保留数据。
+
+**插件拥有当前用户的完整权限，不是沙箱。** 信任后可能读写或删除文件、联网、执行本机程序；摘要校验不等于安全审核。MCP 调用默认关闭，需要桌面单独确认当前版本授权；更新或代码变化后撤销。完整清单、SDK、权限说明、发布规范及双模式示例见 [插件开发与使用指南](docs/plugins.md)。
 
 ## 组件元数据
 
@@ -150,6 +159,8 @@ MCP 仅使用 stdio；stdout 只输出协议消息，运行日志写入 stderr�
 
 自定义导出新增五个 MCP 工具：`list_custom_export_profiles`、`start_custom_export`、`get_custom_export_task`、`cancel_custom_export`、`resolve_custom_export_conflict`。只允许执行桌面端明确授权的已保存方案，不能通过 MCP 修改程序、参数或授权。任务日志通过工具结果返回，不写入协议 stdout；自定义导出的重名策略默认 `error`，进入等待选择状态，不改变内置 ZIP 导出的默认策略。
 
+可选插件工具使用 `plugin__<插件ID>__<工具名>` 命名空间，动态发现且每次调用重新校验授权和内容，不改变上述内置工具。桌面退出后仍可调用后台命令，界面操作返回 `ui_unavailable`；成功结果放在 `structuredContent.result`。仅在桌面启用并独立授权的当前插件版本可用，更新后须重新授权。全权限插件不受内置工具的功能限制，详见 [插件 MCP 授权](docs/plugins.md#mcp-授权与结果)。
+
 ## 开发与验证
 
 需要 Node.js/pnpm、Rust stable MSVC 工具链和 Visual Studio C++ Build Tools：
@@ -173,15 +184,18 @@ pnpm release:windows
 
 MCDK 原生控制台、离线资源验证命令及人工验收清单见 [MCDK 验证说明](docs/mcdk-validation.md)。
 
+插件另有 `pnpm test:plugins:ui` 浏览器多视口截图测试，以及 `pnpm test:plugins:native` 真实 WebView2 测试。后者须先在隔离数据目录安装示例并编译嵌入生产资源的 Tauri 程序，步骤见 [插件开发验证](docs/plugins.md#开发验证)。嵌入式 QuickJS 锁定为 `rquickjs 0.14.0`，最终用户无需额外 JavaScript 运行时。
+
 ## 数据与隐私
 
 - SQLite 使用 WAL、5 秒 busy timeout 和跨进程文件锁。
 - MCS 模板源码仅包含 `mcdh@local.invalid`、`MCDH`、`0` 等中性默认值；用户可在设置中替换这些本地生成信息，模板除 MCS 必需的实际目标路径外不含本机绝对路径。
 - 应用没有账号系统或遥测。MCDH 本体检查更新及 MCDK 自动更新请求 `api.github.com` 的公开 Release 元数据，从 `github.com` 及其官方 Release 资产域名下载程序；MCDH 本体仅在用户点击“立即更新”后开始下载，完成校验后自动安装并重启。不会上传组件源码、游戏日志或目录内容。MCDK 的游戏网络与可选调试服务由其自身及项目配置管理。
+- 用户预览或更新插件时会请求公开 GitHub 仓库、Release 或提交元数据，并从 GitHub 官方下载域名获取插件归档。插件代码和可写数据位于应用数据目录的独立 `plugins` 子目录，注册、信任和 MCP 授权保存在现有 SQLite。受信任的第三方插件可以自行联网和读取文件，上述本体隐私约束不代表插件行为保证。
 - 设置环境变量 `MCDH_DATA_DIR` 可为自动化测试隔离数据库；设置 `MCDH_DISABLE_MCS_SCAN=1` 可在测试进程中禁用自动 MCS 扫描。
 
 ## 开源参考与许可
 
-架构使用 Tauri 2、React、TypeScript、Vite、Tailwind CSS、rusqlite、zip-rs、uuid-rs 与官方 Rust MCP SDK。组件识别思路参考 MCDevTool 和 BDSAddonManager 的公开设计，但未复制其源码。
+架构使用 Tauri 2、React、TypeScript、Vite、Tailwind CSS、rusqlite、zip-rs、uuid-rs、rquickjs / QuickJS-NG 与官方 Rust MCP SDK。组件识别思路参考 MCDevTool 和 BDSAddonManager 的公开设计，但未复制其源码。
 
 MCDH 源代码采用 [MIT License](LICENSE) 开源。第三方包仍分别遵循其自身许可证，完整声明见 [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md)。

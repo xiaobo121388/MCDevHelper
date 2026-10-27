@@ -7,29 +7,25 @@ use mcdh_core::{
     ExportConflictPolicy, IdentityPolicy, ImportComponentRequest, LocalIndex, MoveComponentRequest,
     SetComponentMetadataRequest, SetComponentTagsRequest, SourceKind, ThemePreference, VersionPart,
 };
+use mcdh_plugins::PluginService;
 use rmcp::{
-    Json, ServerHandler, ServiceExt,
+    Json, ServiceExt,
     handler::server::{router::tool::ToolRouter, wrapper::Parameters},
-    schemars, tool, tool_handler, tool_router,
+    schemars, tool, tool_router,
     transport::stdio,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+mod plugins;
 
 #[derive(Clone)]
 struct McdhServer {
     index: LocalIndex,
     exports: CustomExportService,
+    plugins: PluginService,
     tool_router: ToolRouter<Self>,
 }
-
-#[tool_handler(
-    name = "mcdh",
-    instructions = "离线管理网易中国版 Minecraft PE 创作组件；所有路径都应使用本机 Windows 绝对路径。",
-    router = self.tool_router
-)]
-impl ServerHandler for McdhServer {}
 
 #[tool_router(router = tool_router)]
 impl McdhServer {
@@ -37,6 +33,8 @@ impl McdhServer {
         let index = LocalIndex::open_default()?;
         Ok(Self {
             exports: CustomExportService::new(index.clone())?,
+            plugins: PluginService::new(index.clone())
+                .map_err(|error| mcdh_core::CoreError::InvalidInput(error.to_string()))?,
             index,
             tool_router: Self::tool_router(),
         })

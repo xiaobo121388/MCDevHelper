@@ -66,7 +66,11 @@ export function createContext(bridge, metadata, onLog) {
     subscriptions: disposables,
   };
   return { context, handlers: commandHandlers, dispose() {
-    for (const cleanup of disposables.reverse()) cleanup();
+    let failure;
+    for (const cleanup of disposables.reverse()) {
+      try { cleanup(); } catch (error) { failure ??= error; }
+    }
     disposables.length = 0;
+    if (failure) throw failure;
   } };
 }

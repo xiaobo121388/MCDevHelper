@@ -10,7 +10,7 @@ let occupied = false;
 try { await fetch(`${endpoint}/json/version`, {signal:AbortSignal.timeout(500)}); occupied = true; } catch { /* No debugger owns the isolated test port. */ }
 if (occupied) throw new Error("Port 9224 is already occupied; refusing to attach to an unrelated WebView.");
 await mkdir(output, {recursive:true});
-const executable = path.resolve("target/debug/mcdh-desktop.exe");
+const executable = path.resolve(process.env.MCDH_PLUGIN_QA_EXE ?? "target/debug/mcdh-desktop.exe");
 const child = spawn(executable, [], { windowsHide:true, env:{...process.env,
   MCDH_DATA_DIR:data, MCDH_DISABLE_MCS_SCAN:"1", WEBVIEW2_USER_DATA_FOLDER:path.join(data,"webview"),
   WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS:"--remote-debugging-port=9224 --remote-debugging-address=127.0.0.1",
@@ -50,6 +50,12 @@ try {
     }
     await main.waitForTimeout(200);
   }
+  await main.evaluate(async () => {
+    const settings = await window.__TAURI_INTERNALS__.invoke("get_settings");
+    await window.__TAURI_INTERNALS__.invoke("set_settings", {settings:{...settings,theme:"light"}});
+    await window.__TAURI_INTERNALS__.invoke("plugin:event|emit", {event:"mcdh:settings-changed",payload:null});
+  });
+  await expect(main.locator("html")).toHaveAttribute("data-theme", "light");
   await main.getByRole("button", {name:/^插件(?:\s*\d+)?$/}).click();
   await expect(main.getByRole("heading", {name:/组件概览/})).toBeVisible();
   await main.screenshot({path:path.join(output,"manager.png")});
@@ -79,6 +85,7 @@ try {
     await window.__TAURI_INTERNALS__.invoke("plugin:event|emit", {event:"mcdh:settings-changed",payload:null});
   });
   await expect(panel.locator("html")).toHaveAttribute("data-theme", "dark");
+  await expect(panel.locator(".plugin-panel-mount .overview")).toHaveAttribute("data-theme", "dark");
   await panel.screenshot({path:path.join(output,"independent-dark.png")});
   await panel.getByRole("button", {name:"关闭窗口",exact:true}).click();
   expect(errors).toEqual([]);

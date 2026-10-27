@@ -254,7 +254,25 @@ fn release_asset(repository: &Repository, release: &Value) -> Result<Option<Rele
         .extend(["releases", "download", tag, "mcdh-plugin.zip"]);
     let actual =
         Url::parse(asset["browser_download_url"].as_str().unwrap_or("")).map_err(invalid)?;
-    if actual != expected {
+    let segments: Vec<_> = actual.path_segments().into_iter().flatten().collect();
+    let tail: Vec<_> = expected
+        .path_segments()
+        .into_iter()
+        .flatten()
+        .skip(2)
+        .collect();
+    if actual.scheme() != "https"
+        || actual.host_str() != Some("github.com")
+        || !actual.username().is_empty()
+        || actual.password().is_some()
+        || actual.port().is_some()
+        || actual.query().is_some()
+        || actual.fragment().is_some()
+        || segments.len() != 6
+        || !segments[0].eq_ignore_ascii_case(&repository.owner)
+        || !segments[1].eq_ignore_ascii_case(&repository.repo)
+        || segments[2..] != tail
+    {
         return Err(invalid(
             "Plugin asset URL does not belong to the selected repository Release",
         ));
@@ -330,6 +348,33 @@ pub(crate) async fn download(
         .map_err(invalid)?;
         (url, None, None, "branch", sha)
     };
+    let digest = download_archive(
+        &client,
+        url,
+        destination,
+        size,
+        expected_hash.as_deref(),
+        cancel,
+        progress,
+    )
+    .await?;
+    Ok(DownloadSource {
+        kind: kind.into(),
+        reference,
+        archive_sha256: digest,
+    })
+}
+
+async fn download_archive(
+    client: &Client,
+    url: Url,
+    destination: &Path,
+    size: Option<u64>,
+    expected_hash: Option<&str>,
+    cancel: &Cancellation,
+    progress: &(impl Fn(PluginProgress) + Send + Sync),
+) -> Result<String> {
+    cancel.check()?;
     let operation = async {
         let mut response = client
             .get(url)
@@ -372,7 +417,7 @@ pub(crate) async fn download(
         file.sync_all()?;
         let digest = format!("{:x}", hasher.finalize());
         if size.is_some_and(|size| size != downloaded)
-            || expected_hash.as_ref().is_some_and(|hash| hash != &digest)
+            || expected_hash.is_some_and(|hash| hash != digest)
         {
             return Err(PluginError::new(
                 "integrity_error",
@@ -384,11 +429,7 @@ pub(crate) async fn download(
             downloaded_bytes: downloaded,
             total_bytes: Some(downloaded),
         });
-        Ok(DownloadSource {
-            kind: kind.into(),
-            reference,
-            archive_sha256: digest,
-        })
+        Ok(digest)
     };
     tokio::select! { result = operation => result, () = cancel.cancelled() => Err(PluginError::new("cancelled", "Plugin download cancelled")) }
 }
@@ -397,6 +438,238 @@ pub(crate) async fn download(
 mod tests {
     use super::*;
     use serde_json::json;
+
+    fn response(
+        status: u16,
+        headers: &str,
+        body: Vec<u8>,
+        delay: Duration,
+    ) -> (Url, std::thread::JoinHandle<()>) {
+        use std::io::Read;
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = Url::parse(&format!(
+            "http://{}/fixture",
+            listener.local_addr().unwrap()
+        ))
+        .unwrap();
+        let headers = headers.to_owned();
+        let server = std::thread::spawn(move || {
+            let (mut socket, _) = listener.accept().unwrap();
+            socket
+                .set_read_timeout(Some(Duration::from_secs(2)))
+                .unwrap();
+            let mut request = [0; 4096];
+            assert!(socket.read(&mut request).unwrap() > 0);
+            std::thread::sleep(delay);
+            let _ = write!(
+                socket,
+                "HTTP/1.1 {status} Fixture\r\n{headers}Connection: close\r\n\r\n"
+            );
+            let _ = socket.write_all(&body);
+        });
+        (url, server)
+    }
+
+    #[tokio::test]
+    async fn api_reports_http_failures_optional_release_and_oversized_metadata() {
+        let client = Client::builder().no_proxy().build().unwrap();
+        for (status, optional, expected) in [
+            (404, false, "repository_not_found"),
+            (429, false, "github_rate_limited"),
+            (403, false, "github_rate_limited"),
+            (503, false, "network_error"),
+        ] {
+            let (url, server) = response(status, "Content-Length: 0\r\n", vec![], Duration::ZERO);
+            assert_eq!(
+                api(&client, url, optional, &Cancellation::default())
+                    .await
+                    .unwrap_err()
+                    .code,
+                expected
+            );
+            server.join().unwrap();
+        }
+        let (url, server) = response(404, "Content-Length: 0\r\n", vec![], Duration::ZERO);
+        assert!(
+            api(&client, url, true, &Cancellation::default())
+                .await
+                .unwrap()
+                .is_none()
+        );
+        server.join().unwrap();
+        let (url, server) = response(200, "", vec![b' '; 2 * 1024 * 1024 + 1], Duration::ZERO);
+        assert!(
+            api(&client, url, false, &Cancellation::default())
+                .await
+                .unwrap_err()
+                .message
+                .contains("2 MiB")
+        );
+        server.join().unwrap();
+    }
+
+    #[tokio::test]
+    async fn streamed_archives_verify_size_digest_disconnect_and_cancellation() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("download.zip");
+        let client = Client::builder()
+            .no_proxy()
+            .timeout(Duration::from_secs(3))
+            .build()
+            .unwrap();
+        let digest = format!("{:x}", Sha256::digest(b"archive"));
+        let (url, server) = response(
+            200,
+            "Content-Length: 7\r\n",
+            b"archive".to_vec(),
+            Duration::ZERO,
+        );
+        assert_eq!(
+            download_archive(
+                &client,
+                url,
+                &path,
+                Some(7),
+                Some(&digest),
+                &Cancellation::default(),
+                &|_| {}
+            )
+            .await
+            .unwrap(),
+            digest
+        );
+        server.join().unwrap();
+        let (url, server) = response(
+            200,
+            "Content-Length: 7\r\n",
+            b"archive".to_vec(),
+            Duration::ZERO,
+        );
+        assert_eq!(
+            download_archive(
+                &client,
+                url,
+                &path,
+                Some(7),
+                Some(&"0".repeat(64)),
+                &Cancellation::default(),
+                &|_| {}
+            )
+            .await
+            .unwrap_err()
+            .code,
+            "integrity_error"
+        );
+        server.join().unwrap();
+        let (url, server) = response(
+            200,
+            "Content-Length: 7\r\n",
+            b"archive".to_vec(),
+            Duration::ZERO,
+        );
+        assert!(
+            download_archive(
+                &client,
+                url,
+                &path,
+                Some(8),
+                None,
+                &Cancellation::default(),
+                &|_| {}
+            )
+            .await
+            .unwrap_err()
+            .message
+            .contains("size")
+        );
+        server.join().unwrap();
+        let (url, server) = response(
+            200,
+            &format!("Content-Length: {}\r\n", MAX_DOWNLOAD + 1),
+            vec![],
+            Duration::ZERO,
+        );
+        assert!(
+            download_archive(
+                &client,
+                url,
+                &path,
+                None,
+                None,
+                &Cancellation::default(),
+                &|_| {}
+            )
+            .await
+            .unwrap_err()
+            .message
+            .contains("size")
+        );
+        server.join().unwrap();
+        let (url, server) = response(
+            200,
+            "Content-Length: 7\r\n",
+            b"cut".to_vec(),
+            Duration::ZERO,
+        );
+        assert_eq!(
+            download_archive(
+                &client,
+                url,
+                &path,
+                Some(7),
+                None,
+                &Cancellation::default(),
+                &|_| {}
+            )
+            .await
+            .unwrap_err()
+            .code,
+            "network_error"
+        );
+        server.join().unwrap();
+        let (url, server) = response(
+            200,
+            "Content-Length: 7\r\n",
+            b"archive".to_vec(),
+            Duration::from_millis(200),
+        );
+        let cancel = Cancellation::default();
+        let signal = cancel.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(40)).await;
+            signal.cancel();
+        });
+        assert_eq!(
+            download_archive(&client, url, &path, None, None, &cancel, &|_| {})
+                .await
+                .unwrap_err()
+                .code,
+            "cancelled"
+        );
+        server.join().unwrap();
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = Url::parse(&format!(
+            "http://{}/offline",
+            listener.local_addr().unwrap()
+        ))
+        .unwrap();
+        drop(listener);
+        assert_eq!(
+            download_archive(
+                &client,
+                url,
+                &path,
+                None,
+                None,
+                &Cancellation::default(),
+                &|_| {}
+            )
+            .await
+            .unwrap_err()
+            .code,
+            "network_error"
+        );
+    }
 
     #[test]
     fn accepts_three_repository_forms_and_rejects_ambiguous_inputs() {
@@ -430,6 +703,14 @@ mod tests {
             "browser_download_url":"https://github.com/owner/repo/releases/download/v1.0.0/mcdh-plugin.zip"
         }]});
         assert!(release_asset(&repository, &release).unwrap().is_some());
+        release["assets"][0]["browser_download_url"] =
+            json!("https://github.com/Owner/Repo/releases/download/v1.0.0/mcdh-plugin.zip");
+        assert!(release_asset(&repository, &release).unwrap().is_some());
+        release["assets"][0]["browser_download_url"] =
+            json!("https://github.com/other/repo/releases/download/v1.0.0/mcdh-plugin.zip");
+        assert!(release_asset(&repository, &release).is_err());
+        release["assets"][0]["browser_download_url"] =
+            json!("https://github.com/owner/repo/releases/download/v1.0.0/mcdh-plugin.zip");
         release["assets"][0]["digest"] = Value::Null;
         assert!(release_asset(&repository, &release).is_err());
         release["assets"] = json!([]);

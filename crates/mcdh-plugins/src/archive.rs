@@ -17,7 +17,12 @@ pub(crate) fn relative_path(name: &str) -> Result<PathBuf> {
         return Err(invalid(format!("Unsafe plugin path: {name}")));
     }
     for part in name.split('/') {
-        let stem = part.split('.').next().unwrap_or("").to_ascii_uppercase();
+        let stem = part
+            .split('.')
+            .next()
+            .unwrap_or("")
+            .trim_end_matches(' ')
+            .to_ascii_uppercase();
         if part.is_empty()
             || part == "."
             || part == ".."
@@ -30,8 +35,20 @@ pub(crate) fn relative_path(name: &str) -> Result<PathBuf> {
                 "CON" | "PRN" | "AUX" | "NUL" | "CONIN$" | "CONOUT$"
             )
             || ((stem.starts_with("COM") || stem.starts_with("LPT"))
-                && stem.len() == 4
-                && matches!(stem.as_bytes()[3], b'1'..=b'9'))
+                && matches!(
+                    &stem[3..],
+                    "1" | "2"
+                        | "3"
+                        | "4"
+                        | "5"
+                        | "6"
+                        | "7"
+                        | "8"
+                        | "9"
+                        | "\u{b9}"
+                        | "\u{b2}"
+                        | "\u{b3}"
+                ))
         {
             return Err(invalid(format!("Unsafe plugin path: {name}")));
         }
@@ -69,6 +86,9 @@ pub(crate) fn extract(source: &Path, destination: &Path) -> Result<()> {
                 }
             } else {
                 names.insert(prefix.to_lowercase(), (prefix, directory));
+            }
+            if names.len() > MAX_ENTRIES {
+                return Err(invalid("Too many archive files or implicit directories"));
             }
         }
         let output = destination.join(relative);

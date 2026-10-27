@@ -165,7 +165,10 @@ impl Host {
                 if fs::metadata(&path)?.len() > MAX_IO {
                     return Err(invalid("File exceeds 2 MiB text limit"));
                 }
-                Ok(Value::String(fs::read_to_string(path)?))
+                Ok(Value::String(
+                    String::from_utf8(read_bounded(&path)?)
+                        .map_err(|error| invalid(format!("File is not UTF-8: {error}")))?,
+                ))
             }
             "fs.write_text" => {
                 write_atomic(&absolute_path(&args)?, text(&args, "text")?.as_bytes())?;
@@ -282,7 +285,7 @@ impl Host {
         let _guard = self.service.lease("registry", true)?;
         let path = self.data_directory().join("storage.json");
         let mut data: BTreeMap<String, Value> = if path.exists() {
-            serde_json::from_slice(&fs::read(&path)?)?
+            serde_json::from_slice(&read_bounded(&path)?)?
         } else {
             BTreeMap::new()
         };
@@ -369,6 +372,8 @@ impl Host {
     }
 
     fn process(&self, args: Value) -> Result<Value> {
+        // Retain the cross-process lease until the job and its output readers are gone.
+        let _lease = self.service.lease(&self.record.manifest.id, false)?;
         self.check()?;
         let program = PathBuf::from(text(&args, "program")?);
         if !program.is_absolute() || !program.is_file() {
@@ -478,6 +483,7 @@ impl PluginService {
         args: Value,
         cancel: Cancellation,
     ) -> Result<ExecutionResult> {
+        let _cancel_on_drop = crate::runtime::CancelOnDrop(cancel.clone());
         let _lease = self.lease(id, false)?;
         let record = self.authorize(id, PluginCaller::Desktop)?;
         if record.fingerprint != fingerprint {
@@ -509,7 +515,7 @@ impl PluginService {
         if !path.exists() {
             return Ok(Vec::new());
         }
-        let text = fs::read_to_string(path)?;
+        let text = String::from_utf8(read_bounded(&path)?).map_err(invalid)?;
         let mut logs: Vec<_> = text
             .lines()
             .rev()
@@ -549,7 +555,7 @@ fn absolute_path(args: &Value) -> Result<PathBuf> {
     }
     Ok(path)
 }
-fn write_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
+pub(crate) fn write_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
     if bytes.len() as u64 > MAX_IO {
         return Err(invalid("Write exceeds 2 MiB"));
     }
@@ -562,6 +568,15 @@ fn write_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
         .persist(path)
         .map_err(|error| PluginError::from(error.error))?;
     Ok(())
+}
+
+pub(crate) fn read_bounded(path: &Path) -> Result<Vec<u8>> {
+    let mut bytes = Vec::new();
+    File::open(path)?.take(MAX_IO + 1).read_to_end(&mut bytes)?;
+    if bytes.len() as u64 > MAX_IO {
+        return Err(invalid("Read exceeds 2 MiB"));
+    }
+    Ok(bytes)
 }
 fn json_value(value: impl Serialize) -> Result<Value> {
     serde_json::to_value(value).map_err(Into::into)

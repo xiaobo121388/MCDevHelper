@@ -1,4 +1,5 @@
 {
+  "$schema": "../../../docs/plugin-manifest.schema.json",
   "schema_version": 1,
   "api_version": 1,
   "id": "example.component-overview",

@@ -1,0 +1,184 @@
+{
+  "$defs": {
+    "CommandMenu": {
+      "enum": [
+        "global",
+        "component"
+      ],
+      "type": "string"
+    },
+    "PluginCommand": {
+      "additionalProperties": false,
+      "properties": {
+        "description": {
+          "default": "",
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "input_schema": {
+          "default": {
+            "additionalProperties": false,
+            "properties": {},
+            "type": "object"
+          }
+        },
+        "menus": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/CommandMenu"
+          },
+          "type": "array"
+        },
+        "output_schema": {
+          "default": null
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "title"
+      ],
+      "type": "object"
+    },
+    "PluginEngines": {
+      "additionalProperties": false,
+      "properties": {
+        "mcdh": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "mcdh"
+      ],
+      "type": "object"
+    },
+    "PluginPanel": {
+      "additionalProperties": false,
+      "properties": {
+        "entry": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "title",
+        "entry"
+      ],
+      "type": "object"
+    },
+    "PluginTool": {
+      "additionalProperties": false,
+      "properties": {
+        "command": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "description",
+        "command"
+      ],
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "$schema": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "api_version": {
+      "const": 1,
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "author": {
+      "default": "",
+      "type": "string"
+    },
+    "commands": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/PluginCommand"
+      },
+      "type": "array"
+    },
+    "description": {
+      "default": "",
+      "type": "string"
+    },
+    "engines": {
+      "$ref": "#/$defs/PluginEngines"
+    },
+    "entry": {
+      "type": "string"
+    },
+    "id": {
+      "type": "string"
+    },
+    "mcp_tools": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/PluginTool"
+      },
+      "type": "array"
+    },
+    "name": {
+      "type": "string"
+    },
+    "panels": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/PluginPanel"
+      },
+      "type": "array"
+    },
+    "schema_version": {
+      "const": 1,
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "settings_schema": {
+      "default": {
+        "additionalProperties": false,
+        "properties": {},
+        "type": "object"
+      }
+    },
+    "version": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "schema_version",
+    "api_version",
+    "id",
+    "name",
+    "version",
+    "engines",
+    "entry"
+  ],
+  "title": "PluginManifest",
+  "type": "object"
+}

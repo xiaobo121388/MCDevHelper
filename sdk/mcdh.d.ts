@@ -17,8 +17,17 @@ export interface Component {
   favorite: boolean;
   [key: string]: unknown;
 }
-export interface OperationResult { component?: Component; actual_path: string; modified_files: string[]; warnings: string[] }
-export type CommandHandler = (input: Json, ctx: PluginContext) => Json | void | Promise<Json | void>;
+export interface OperationResult { component: Component | null; actual_path: string; modified_files: string[]; warnings: string[] }
+export type ComponentKind = Component["kind"];
+export type IdentityPolicy = "preserve" | "regenerate" | "error";
+export interface CreateComponentRequest { name: string; kind: ComponentKind; destination: string; mcs_compatible: boolean; namespace?: string }
+export interface ImportComponentRequest { source: string; destination: string; mcs_compatible: boolean; identity_policy: IdentityPolicy; content_mode?: "clean" | "full" }
+export interface CopyComponentRequest { component_id: string; destination: string; mcs_compatible: boolean; identity_policy: IdentityPolicy }
+export interface MoveComponentRequest { component_id: string; destination: string; mcs_compatible: boolean }
+export interface ExportComponentRequest { component_id: string; destination: string; content_mode?: "clean" | "full"; conflict_policy?: "rename" | "overwrite" | "error" }
+export interface ComponentMetadataRequest { component_id: string; display_name: string; tags: string[]; favorite: boolean }
+export interface BumpVersionRequest { component_id: string; part: "major" | "minor" | "patch" }
+export type CommandHandler = (input: { [key: string]: Json }, ctx: PluginContext) => Json | void | Promise<Json | void>;
 export interface PluginContext {
   environment: PluginEnvironment;
   commands: {
@@ -30,14 +39,14 @@ export interface PluginContext {
   components: {
     list(): Promise<Component[]>;
     get(componentId: string): Promise<Component>;
-    create(request: Json): Promise<OperationResult>;
-    import(request: Json): Promise<OperationResult>;
-    copy(request: Json): Promise<OperationResult>;
-    move(request: Json): Promise<OperationResult>;
-    export(request: Json): Promise<OperationResult>;
-    setMetadata(request: Json): Promise<OperationResult>;
+    create(request: CreateComponentRequest): Promise<OperationResult>;
+    import(request: ImportComponentRequest): Promise<OperationResult>;
+    copy(request: CopyComponentRequest): Promise<OperationResult>;
+    move(request: MoveComponentRequest): Promise<OperationResult>;
+    export(request: ExportComponentRequest): Promise<OperationResult>;
+    setMetadata(request: ComponentMetadataRequest): Promise<OperationResult>;
     regenerateUuids(componentId: string): Promise<OperationResult>;
-    bumpVersion(request: Json): Promise<OperationResult>;
+    bumpVersion(request: BumpVersionRequest): Promise<OperationResult>;
   };
   fs: {
     readText(path: string): Promise<string>;

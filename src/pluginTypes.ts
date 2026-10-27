@@ -5,6 +5,7 @@ export type JsonSchema = { type?: string; title?: string; description?: string; 
 export interface PluginCommand { id: string; title: string; description: string; menus: ("global" | "component")[]; input_schema: JsonSchema; output_schema?: JsonSchema | null }
 export interface PluginPanel { id: string; title: string; entry: string }
 export interface PluginManifest {
+  $schema?: string;
   schema_version: number; api_version: number; id: string; name: string; version: string; description: string; author: string;
   engines: { mcdh: string }; entry: string; commands: PluginCommand[]; panels: PluginPanel[];
   mcp_tools: { name: string; description: string; command: string }[]; settings_schema: JsonSchema;

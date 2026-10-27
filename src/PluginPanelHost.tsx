@@ -26,6 +26,7 @@ export function PluginPanelHost({ request, onOpenPanel, onClose, standalone = fa
   const key = JSON.stringify(request);
   useEffect(() => {
     let active = true;
+    let stopped = false;
     let cleanup: (() => void) | undefined;
     let dispose: (() => void) | undefined;
     let observer: MutationObserver | undefined;
@@ -34,8 +35,17 @@ export function PluginPanelHost({ request, onOpenPanel, onClose, standalone = fa
     const shadow = node.shadowRoot ?? node.attachShadow({ mode: "open" });
     shadow.replaceChildren();
     setLoading(true); setError("");
+    const stop = () => {
+      stopped = true;
+      for (const id of jobs) void pluginApi.cancel(id).catch(() => {});
+      try { cleanup?.(); } catch { /* Third-party cleanup must not prevent host cleanup. */ }
+      cleanup = undefined;
+      try { dispose?.(); } catch { /* All subscriptions are attempted by the SDK. */ }
+      dispose = undefined;
+      observer?.disconnect(); if (active) shadow.replaceChildren();
+    };
     const actions = async (result: PluginExecution) => {
-      if (!active) return;
+      if (!active || stopped) return;
       for (const action of result.actions) {
         const next = { ...request, panelId: action.panel_id, componentId: action.component_id };
         if (action.placement === "window") await openDialogWindow({ kind: "plugin_panel", ...next });
@@ -44,7 +54,7 @@ export function PluginPanelHost({ request, onOpenPanel, onClose, standalone = fa
     };
     const bridge = async (method: string, args: Json) => {
       const id = crypto.randomUUID();
-      if (!active) return { ok: false as const, error: { code: "panel_closed", message: "插件面板已关闭。" } };
+      if (!active || stopped) return { ok: false as const, error: { code: "panel_closed", message: "插件面板已关闭。" } };
       jobs.add(id);
       try {
         const values = args as Record<string, Json>;
@@ -59,7 +69,7 @@ export function PluginPanelHost({ request, onOpenPanel, onClose, standalone = fa
     void (async () => {
       try {
         const info = await pluginApi.panel(request);
-        if (!active) return;
+        if (!active || stopped) return;
         setTitle(info.panel.title);
         const state = createContext(bridge, { commands: info.plugin.manifest.commands, environment: info.environment }, (level, text) => {
           void bridge("log.write", { level, text }).catch((cause) => { if (active) setError(errorMessage(cause)); });
@@ -82,30 +92,26 @@ export function PluginPanelHost({ request, onOpenPanel, onClose, standalone = fa
         const root = document.createElement("div"); root.className = "plugin-root";
         shadow.append(style, root);
         const module = await loadPluginModule(pluginAssetUrl(request, info.panel.entry));
-        if (!active) return;
+        if (!active || stopped) return;
         const mounted = await module.mount(root, context);
-        if (!active) { try { if (typeof mounted === "function") mounted(); } finally { state.dispose(); } return; }
+        if (!active || stopped) { try { if (typeof mounted === "function") mounted(); } finally { state.dispose(); } return; }
         cleanup = typeof mounted === "function" ? mounted : undefined;
         setLoading(false);
-      } catch (cause) { if (active) { setError(errorMessage(cause)); setLoading(false); } }
+      } catch (cause) { stop(); if (active) { setError(errorMessage(cause)); setLoading(false); } }
     })();
     const timer = window.setInterval(() => {
+      if (stopped) return;
       void pluginApi.list().then((plugins) => {
         const current = plugins.find((plugin) => plugin.manifest.id === request.pluginId);
         if (!current?.enabled || !current.trusted || !current.compatible || current.fingerprint !== request.fingerprint) throw new Error("插件已停用、更新或信任失效，请重新打开面板。");
       }).catch((cause) => {
         if (!active) return;
         setError(errorMessage(cause));
-        for (const id of jobs) void pluginApi.cancel(id).catch(() => {});
-        if (cleanup) { const stop = cleanup; cleanup = undefined; stop(); }
-        dispose?.(); observer?.disconnect(); shadow.replaceChildren();
+        stop();
       });
     }, 2000);
     return () => {
-      active = false; window.clearInterval(timer); observer?.disconnect();
-      for (const id of jobs) void pluginApi.cancel(id).catch(() => {});
-      try { cleanup?.(); } catch { /* Closing a broken third-party panel must remain possible. */ }
-      dispose?.(); shadow.replaceChildren();
+      active = false; window.clearInterval(timer); stop();
     };
   // The serialized request includes plugin version and component context.
   }, [key, revision]);

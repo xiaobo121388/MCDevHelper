@@ -57,6 +57,25 @@ foreach ($row in $nodeRows) {
     $lines.Add("| $($row.Name) | $($row.Version) | $($row.License) |")
 }
 $lines.Add("")
+$lines.Add("## Embedded JavaScript engine notices")
+$lines.Add("")
+$rquickjs = $cargoMetadata.packages | Where-Object { $_.name -eq "rquickjs" } | Select-Object -First 1
+$rquickjsSys = $cargoMetadata.packages | Where-Object { $_.name -eq "rquickjs-sys" } | Select-Object -First 1
+if (-not $rquickjs -or -not $rquickjsSys) {
+    throw "Could not locate the locked rquickjs sources for license notices."
+}
+foreach ($notice in @(
+    @{ Name = "rquickjs $($rquickjs.version)"; Path = Join-Path (Split-Path -Parent $rquickjs.manifest_path) "LICENSE" },
+    @{ Name = "QuickJS-NG (embedded by rquickjs-sys $($rquickjsSys.version))"; Path = Join-Path (Split-Path -Parent $rquickjsSys.manifest_path) "quickjs\LICENSE" }
+)) {
+    $lines.Add("### $($notice.Name)")
+    $lines.Add("")
+    $lines.Add('```text')
+    $lines.AddRange([string[]](Get-Content -Encoding UTF8 -LiteralPath $notice.Path | ForEach-Object { $_.TrimEnd() }))
+    $lines.Add('```')
+    $lines.Add("")
+}
+$lines.Add("")
 $lines.Add("## Notes")
 $lines.Add("")
 $mcdk = Get-Content -Encoding UTF8 -Raw -LiteralPath (Join-Path $repoRoot "assets\mcdk\bundled.json") | ConvertFrom-Json

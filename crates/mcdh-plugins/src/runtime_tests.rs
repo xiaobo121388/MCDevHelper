@@ -267,6 +267,45 @@ async fn component_sdk_uses_the_existing_core_service_and_version_is_pinned() {
 }
 
 #[tokio::test]
+async fn component_mutations_obey_the_core_lock_and_update_real_manifests() {
+    let temp = tempfile::tempdir().unwrap();
+    let (service, _) = install(
+        temp.path(),
+        &manifest(),
+        "export function activate(ctx) { ctx.commands.register('hello', () => ctx.components.bumpVersion({component_id:ctx.environment.componentId,part:'patch'})); }",
+    );
+    let destination = temp.path().join("projects");
+    fs::create_dir_all(&destination).unwrap();
+    let project = mcdh_core::ComponentService::new(service.index.clone())
+        .create_component(&mcdh_core::CreateComponentRequest {
+            name: "Plugin mutation".into(),
+            kind: mcdh_core::ComponentKind::Addon,
+            destination,
+            mcs_compatible: false,
+            namespace: None,
+        })
+        .unwrap();
+    let mut call = request();
+    call.component_id = Some(project.component.unwrap().id);
+    let guard = service.index.try_lock_mutations().unwrap();
+    assert_eq!(
+        service
+            .execute(call.clone(), PluginCaller::Desktop, Cancellation::default())
+            .await
+            .unwrap_err()
+            .code,
+        "busy"
+    );
+    drop(guard);
+    let result = service
+        .execute(call, PluginCaller::Desktop, Cancellation::default())
+        .await
+        .unwrap();
+    assert!(result.value["modified_files"].as_array().unwrap().len() >= 2);
+    assert!(result.value["component"]["id"].is_string());
+}
+
+#[tokio::test]
 async fn http_sdk_uses_real_local_requests_and_bounds_failure() {
     use std::io::{Read, Write};
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();

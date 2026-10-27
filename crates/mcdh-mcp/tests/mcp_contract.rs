@@ -10,6 +10,7 @@ struct McpClient {
     stdin: Option<ChildStdin>,
     stdout: BufReader<ChildStdout>,
     next_id: u64,
+    notifications: Vec<Value>,
 }
 
 impl McpClient {
@@ -47,6 +48,7 @@ impl McpClient {
             stdin: Some(stdin),
             stdout,
             next_id: 1,
+            notifications: Vec::new(),
         }
     }
 
@@ -59,15 +61,32 @@ impl McpClient {
             "method": method,
             "params": params
         }));
-        let mut line = String::new();
-        self.stdout.read_line(&mut line).expect("read response");
-        assert!(
-            !line.is_empty(),
-            "server closed before responding to {method}"
-        );
-        let response: Value = serde_json::from_str(&line).expect("JSON-RPC response");
-        assert_eq!(response["id"], id, "unexpected response for {method}");
-        response
+        self.receive(id, method)
+    }
+
+    fn receive(&mut self, id: u64, method: &str) -> Value {
+        loop {
+            let mut line = String::new();
+            self.stdout.read_line(&mut line).expect("read response");
+            assert!(
+                !line.is_empty(),
+                "server closed before responding to {method}"
+            );
+            let response: Value =
+                serde_json::from_str(&line).expect("stdout must contain only JSON-RPC");
+            if response.get("id").is_none() {
+                assert!(
+                    response["method"]
+                        .as_str()
+                        .is_some_and(|method| method.starts_with("notifications/")),
+                    "{response}"
+                );
+                self.notifications.push(response);
+                continue;
+            }
+            assert_eq!(response["id"], id, "unexpected response for {method}");
+            return response;
+        }
     }
 
     fn notify(&mut self, method: &str) {
@@ -355,10 +374,16 @@ fn initializes_lists_strict_schemas_and_calls_every_tool() {
     assert_eq!(saved_settings["developer_nickname"], "协议开发者");
     assert_eq!(saved_settings["theme"], "dark");
     assert_eq!(saved_settings["color_preset"], "graphite");
-    assert_eq!(saved_settings["quick_export"]["destination"], path_text(&exports));
+    assert_eq!(
+        saved_settings["quick_export"]["destination"],
+        path_text(&exports)
+    );
     assert_eq!(saved_settings["quick_export"]["regenerate_uuids"], false);
     assert_eq!(saved_settings["quick_export"]["version_part"], "minor");
-    assert_eq!(saved_settings["quick_export"]["custom_profile_id"], "desktop-selected-profile");
+    assert_eq!(
+        saved_settings["quick_export"]["custom_profile_id"],
+        "desktop-selected-profile"
+    );
     let created = client.call(
         "create_component",
         json!({

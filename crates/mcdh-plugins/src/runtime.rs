@@ -57,7 +57,7 @@ pub struct ExecutionResult {
     pub actions: Vec<UiAction>,
 }
 
-struct CancelOnDrop(Cancellation);
+pub(crate) struct CancelOnDrop(pub(crate) Cancellation);
 impl Drop for CancelOnDrop {
     fn drop(&mut self) {
         self.0.cancel();
@@ -78,13 +78,15 @@ impl PluginService {
             return Err(invalid("Plugin arguments exceed 128 KiB"));
         }
         static WORKERS: OnceLock<Arc<Semaphore>> = OnceLock::new();
-        let permit = WORKERS
+        let _cancel_on_drop = CancelOnDrop(cancellation.clone());
+        let acquire = WORKERS
             .get_or_init(|| Arc::new(Semaphore::new(16)))
             .clone()
-            .acquire_owned()
-            .await
-            .map_err(invalid)?;
-        let _cancel_on_drop = CancelOnDrop(cancellation.clone());
+            .acquire_owned();
+        let permit = tokio::select! {
+            permit = acquire => permit.map_err(invalid)?,
+            () = cancellation.cancelled() => return Err(PluginError::new("cancelled", "Plugin command cancelled while queued")),
+        };
         let (sender, receiver) = oneshot::channel();
         let service = self.clone();
         std::thread::Builder::new()
@@ -114,6 +116,7 @@ impl PluginService {
         caller: PluginCaller,
         cancellation: Cancellation,
     ) -> Result<ExecutionResult> {
+        let _cancel_on_drop = CancelOnDrop(cancellation.clone());
         cancellation.check()?;
         let _lease = self.lease(&request.plugin_id, false)?;
         let record = self.authorize(&request.plugin_id, caller)?;
@@ -255,7 +258,9 @@ impl PluginService {
                 "Authorize this exact plugin version in the desktop application first",
             ));
         }
-        self.verify(&record)?;
+        self.verify(&record).inspect_err(|error| {
+            let _ = self.record_error(id, error);
+        })?;
         Ok(record)
     }
 

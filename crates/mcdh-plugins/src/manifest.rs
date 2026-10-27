@@ -12,6 +12,8 @@ pub const API_VERSION: u32 = 1;
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct PluginManifest {
+    #[serde(rename = "$schema", default, skip_serializing_if = "Option::is_none")]
+    pub schema: Option<String>,
     pub schema_version: u32,
     pub api_version: u32,
     pub id: String,
@@ -89,6 +91,7 @@ pub(crate) fn identifier(value: &str) -> bool {
             .bytes()
             .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || b"._-".contains(&c))
         && !value.contains("..")
+        && !value.contains("__")
 }
 
 impl PluginManifest {
@@ -96,9 +99,14 @@ impl PluginManifest {
         if self.schema_version != 1 || self.api_version != API_VERSION {
             return Err(invalid("Unsupported plugin schema_version or api_version"));
         }
-        if !identifier(&self.id) || self.name.trim().is_empty() || self.name.len() > 256 {
+        if !identifier(&self.id)
+            || self.id == "registry"
+            || self.name.trim().is_empty()
+            || self.name.len() > 256
+        {
             return Err(invalid("Invalid plugin id or name"));
         }
+        crate::archive::relative_path(&self.id)?;
         semver::Version::parse(&self.version)
             .map_err(|e| invalid(format!("Invalid plugin version: {e}")))?;
         semver::VersionReq::parse(&self.engines.mcdh)

@@ -9,10 +9,13 @@ Generation command: `pnpm license-report`
 | Package | Version | Declared license |
 | --- | --- | --- |
 | adler2 | 2.0.1 | 0BSD OR MIT OR Apache-2.0 |
+| ahash | 0.8.12 | MIT OR Apache-2.0 |
 | aho-corasick | 1.1.5 | Unlicense OR MIT |
+| allocator-api2 | 0.2.21 | MIT OR Apache-2.0 |
 | alloc-no-stdlib | 2.0.4 | BSD-3-Clause |
 | alloc-stdlib | 0.2.4 | BSD-3-Clause |
 | anyhow | 1.0.104 | MIT OR Apache-2.0 |
+| async-lock | 3.4.2 | Apache-2.0 OR MIT |
 | atomic-waker | 1.1.2 | Apache-2.0 OR MIT |
 | autocfg | 1.5.1 | Apache-2.0 OR MIT |
 | base64 | 0.22.1 | MIT OR Apache-2.0 |
@@ -22,9 +25,11 @@ Generation command: `pnpm license-report`
 | bit-set | 0.8.0 | Apache-2.0 OR MIT |
 | bit-vec | 0.8.0 | Apache-2.0 OR MIT |
 | block-buffer | 0.10.4 | MIT OR Apache-2.0 |
+| borrow-or-share | 0.2.4 | MIT-0 |
 | brotli | 8.0.4 | BSD-3-Clause AND MIT |
 | brotli-decompressor | 5.0.3 | BSD-3-Clause/MIT |
 | bs58 | 0.5.1 | MIT/Apache-2.0 |
+| bytecount | 0.6.9 | Apache-2.0/MIT |
 | byteorder | 1.5.0 | Unlicense OR MIT |
 | bytes | 1.12.1 | MIT |
 | camino | 1.2.5 | MIT OR Apache-2.0 |
@@ -70,19 +75,25 @@ Generation command: `pnpm license-report`
 | dtor-proc-macro | 0.0.6 | Apache-2.0 OR MIT |
 | dunce | 1.0.5 | CC0-1.0 OR MIT-0 OR Apache-2.0 |
 | dyn-clone | 1.0.20 | MIT OR Apache-2.0 |
+| email_address | 0.2.9 | MIT |
 | embed-resource | 3.0.11 | MIT |
 | encoding_rs | 0.8.35 | (Apache-2.0 OR MIT) AND BSD-3-Clause |
 | equivalent | 1.0.2 | Apache-2.0 OR MIT |
 | erased-serde | 0.4.10 | MIT OR Apache-2.0 |
+| event-listener | 5.4.2 | Apache-2.0 OR MIT |
+| event-listener-strategy | 0.5.4 | Apache-2.0 OR MIT |
 | fallible-iterator | 0.3.0 | MIT/Apache-2.0 |
 | fallible-streaming-iterator | 0.1.9 | MIT/Apache-2.0 |
+| fancy-regex | 0.16.2 | MIT |
 | fastrand | 2.5.0 | Apache-2.0 OR MIT |
 | fdeflate | 0.3.7 | MIT OR Apache-2.0 |
 | find-msvc-tools | 0.1.10 | MIT OR Apache-2.0 |
 | flate2 | 1.1.9 | MIT OR Apache-2.0 |
+| fluent-uri | 0.3.2 | MIT |
 | fnv | 1.0.7 | Apache-2.0 / MIT |
 | foldhash | 0.2.0 | Zlib |
 | form_urlencoded | 1.2.2 | MIT OR Apache-2.0 |
+| fraction | 0.15.4 | MIT OR Apache-2.0 |
 | fs2 | 0.4.3 | MIT/Apache-2.0 |
 | futures | 0.3.33 | MIT OR Apache-2.0 |
 | futures-channel | 0.3.33 | MIT OR Apache-2.0 |
@@ -133,7 +144,9 @@ Generation command: `pnpm license-report`
 | jsonc-parser | 0.33.1 | MIT |
 | json-patch | 3.0.1 | MIT/Apache-2.0 |
 | jsonptr | 0.6.3 | MIT OR Apache-2.0 |
+| jsonschema | 0.33.0 | MIT |
 | keyboard-types | 0.7.0 | MIT OR Apache-2.0 |
+| lazy_static | 1.5.1 | MIT OR Apache-2.0 |
 | libc | 0.2.189 | MIT OR Apache-2.0 |
 | libsqlite3-sys | 0.38.2 | MIT |
 | litemap | 0.8.2 | Unicode-3.0 |
@@ -147,12 +160,21 @@ Generation command: `pnpm license-report`
 | muda | 0.19.3 | Apache-2.0 OR MIT |
 | native-tls | 0.2.18 | MIT OR Apache-2.0 |
 | new_debug_unreachable | 1.0.6 | MIT |
+| num | 0.4.3 | MIT OR Apache-2.0 |
+| num-bigint | 0.4.8 | MIT OR Apache-2.0 |
+| num-cmp | 0.1.0 | MIT/Apache-2.0 |
+| num-complex | 0.4.6 | MIT OR Apache-2.0 |
 | num-conv | 0.2.2 | MIT OR Apache-2.0 |
+| num-integer | 0.1.47 | MIT OR Apache-2.0 |
+| num-iter | 0.1.46 | MIT OR Apache-2.0 |
+| num-rational | 0.4.2 | MIT OR Apache-2.0 |
 | num-traits | 0.2.19 | MIT OR Apache-2.0 |
 | once_cell | 1.21.4 | MIT OR Apache-2.0 |
 | open | 5.4.1 | MIT |
 | option-ext | 0.2.0 | MPL-2.0 |
 | os_pipe | 1.2.3 | MIT |
+| outref | 0.5.2 | MIT |
+| parking | 2.2.1 | Apache-2.0 OR MIT |
 | parking_lot | 0.12.5 | MIT OR Apache-2.0 |
 | parking_lot_core | 0.9.12 | MIT OR Apache-2.0 |
 | pastey | 0.2.3 | MIT OR Apache-2.0 |
@@ -175,13 +197,18 @@ Generation command: `pnpm license-report`
 | raw-window-handle | 0.6.2 | MIT OR Apache-2.0 OR Zlib |
 | ref-cast | 1.0.26 | MIT OR Apache-2.0 |
 | ref-cast-impl | 1.0.26 | MIT OR Apache-2.0 |
+| referencing | 0.33.0 | MIT |
 | regex | 1.13.1 | MIT OR Apache-2.0 |
 | regex-automata | 0.4.18 | MIT OR Apache-2.0 |
 | regex-syntax | 0.8.11 | MIT OR Apache-2.0 |
+| relative-path | 2.0.3 | MIT OR Apache-2.0 |
 | reqwest | 0.13.4 | MIT OR Apache-2.0 |
 | rfd | 0.16.0 | MIT |
 | rmcp | 3.1.2 | Apache-2.0 |
 | rmcp-macros | 3.1.2 | Apache-2.0 |
+| rquickjs | 0.14.0 | MIT |
+| rquickjs-core | 0.14.0 | MIT |
+| rquickjs-sys | 0.14.0 | MIT |
 | rusqlite | 0.40.2 | MIT |
 | rustc_version | 0.4.1 | MIT OR Apache-2.0 |
 | rustc-hash | 2.1.3 | Apache-2.0 OR MIT |
@@ -287,8 +314,10 @@ Generation command: `pnpm license-report`
 | urlpattern | 0.3.0 | MIT |
 | utf8_iter | 1.0.4 | Apache-2.0 OR MIT |
 | uuid | 1.24.0 | Apache-2.0 OR MIT |
+| uuid-simd | 0.8.0 | MIT |
 | vcpkg | 0.2.15 | MIT/Apache-2.0 |
 | version_check | 0.9.5 | MIT/Apache-2.0 |
+| vsimd | 0.8.0 | MIT |
 | vswhom | 0.1.0 | MIT |
 | vswhom-sys | 0.1.3 | MIT |
 | walkdir | 2.5.0 | Unlicense/MIT |
@@ -327,6 +356,7 @@ Generation command: `pnpm license-report`
 | wry | 0.55.1 | Apache-2.0 OR MIT |
 | yoke | 0.8.3 | Unicode-3.0 |
 | yoke-derive | 0.8.2 | Unicode-3.0 |
+| zerocopy | 0.8.63 | BSD-2-Clause OR Apache-2.0 OR MIT |
 | zerofrom | 0.1.8 | Unicode-3.0 |
 | zerofrom-derive | 0.1.7 | Unicode-3.0 |
 | zeroize | 1.9.0 | Apache-2.0 OR MIT |
@@ -395,6 +425,65 @@ Generation command: `pnpm license-report`
 | tslib | 2.8.1 | 0BSD |
 | use-callback-ref | 1.3.3 | MIT |
 | use-sidecar | 1.1.3 | MIT |
+
+## Embedded JavaScript engine notices
+
+### rquickjs 0.14.0
+
+```text
+MIT License
+
+Copyright (c) 2020 Mees Delzenne
+Copyright (c) 2025 Rquickjs Contributors
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
+### QuickJS-NG (embedded by rquickjs-sys 0.14.0)
+
+```text
+The MIT License (MIT)
+
+Copyright (c) 2017-2026 Fabrice Bellard
+Copyright (c) 2017-2024 Charlie Gordon
+Copyright (c) 2023-2026 Ben Noordhuis
+Copyright (c) 2023-2026 Saúl Ibarra Corretgé
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
+THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+```
+
 
 ## Notes
 

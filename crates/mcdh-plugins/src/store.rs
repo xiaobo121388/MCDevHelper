@@ -84,6 +84,12 @@ struct PreparedPlugin {
     created: Instant,
 }
 
+#[derive(Serialize, Deserialize)]
+struct RetainedSettings {
+    repository: Repository,
+    settings: Value,
+}
+
 #[derive(Clone)]
 pub struct PluginService {
     pub(crate) index: LocalIndex,
@@ -192,7 +198,7 @@ impl PluginService {
         self.prepare(repository, origin, path, temporary)
     }
 
-    fn prepare(
+    pub(crate) fn prepare(
         &self,
         repository: Repository,
         source: DownloadSource,
@@ -322,6 +328,24 @@ impl PluginService {
         let _plugin = self.lease(&preview.record.manifest.id, true)?;
         let mut records = self.registry()?;
         let mut record = preview.record.clone();
+        let retained = self
+            .root
+            .join("data")
+            .join(&record.manifest.id)
+            .join("settings.retained.json");
+        if !records.contains_key(&record.manifest.id) && retained.is_file() {
+            let settings: RetainedSettings =
+                serde_json::from_slice(&crate::sdk::read_bounded(&retained)?)?;
+            if settings.repository == record.repository
+                && crate::manifest::validate_value(
+                    &record.manifest.settings_schema,
+                    &settings.settings,
+                )
+                .is_ok()
+            {
+                record.settings = settings.settings;
+            }
+        }
         if let Some(previous) = records.get(&record.manifest.id) {
             if previous.repository != record.repository {
                 return Err(invalid("Plugin id belongs to another repository"));
@@ -341,20 +365,72 @@ impl PluginService {
                 .parent()
                 .ok_or_else(|| invalid("Missing version parent"))?,
         )?;
-        if !target.exists() {
-            fs::rename(&preview.root, &target)?;
-        }
-        if archive::inventory(&target)? != record.files {
-            return Err(invalid("Installed version integrity check failed"));
+        let replaced = if target.exists()
+            && !archive::inventory(&target).is_ok_and(|files| files == record.files)
+        {
+            let backup = self.root.join(format!("replaced-{}", uuid::Uuid::new_v4()));
+            fs::rename(&target, &backup)?;
+            Some(backup)
+        } else {
+            None
+        };
+        let published = !target.exists();
+        if published && let Err(error) = fs::rename(&preview.root, &target) {
+            if let Some(backup) = &replaced {
+                fs::rename(backup, &target)?;
+            }
+            return Err(error.into());
         }
         record.enabled = true;
         record.trusted_fingerprint = Some(record.fingerprint.clone());
         record.mcp_fingerprint = records
             .get(&record.manifest.id)
-            .filter(|old| old.fingerprint == record.fingerprint)
+            .filter(|old| replaced.is_none() && old.fingerprint == record.fingerprint)
             .and_then(|old| old.mcp_fingerprint.clone());
         records.insert(record.manifest.id.clone(), record.clone());
-        self.save_registry(&records)?;
+        let commit = (|| {
+            if archive::inventory(&target)? != record.files {
+                return Err(invalid("Installed version integrity check failed"));
+            }
+            self.save_registry(&records)
+        })();
+        if let Err(error) = commit {
+            if published {
+                fs::rename(&target, &preview.root).map_err(|restore| {
+                    PluginError::new(
+                        "rollback_failed",
+                        format!(
+                            "{error}; cannot restore preview {}: {restore}",
+                            preview.root.display()
+                        ),
+                    )
+                })?;
+            }
+            if let Some(backup) = &replaced {
+                fs::rename(backup, &target).map_err(|restore| {
+                    PluginError::new(
+                        "rollback_failed",
+                        format!("{error}; cannot restore {}: {restore}", target.display()),
+                    )
+                })?;
+            }
+            return Err(error);
+        }
+        if let Some(backup) = &replaced
+            && let Err(error) = self.remove_owned(backup)
+        {
+            record.last_error = Some(PluginError::new(
+                "cleanup_pending",
+                format!(
+                    "Installed successfully; old files remain at {}: {error}",
+                    backup.display()
+                ),
+            ));
+            records.insert(record.manifest.id.clone(), record.clone());
+            if let Err(error) = self.save_registry(&records) {
+                eprintln!("Plugin cleanup warning could not be saved: {error}");
+            }
+        }
         prepared.remove(token);
         Ok(record.into())
     }
@@ -378,8 +454,17 @@ impl PluginService {
                 "Plugin version changed; reload before granting trust",
             ));
         }
-        if enabled || allow_mcp {
-            self.verify(record)?;
+        if (enabled || allow_mcp)
+            && let Err(error) = self.verify(record)
+        {
+            if error.code == "integrity_error" {
+                record.enabled = false;
+                record.trusted_fingerprint = None;
+                record.mcp_fingerprint = None;
+                record.last_error = Some(error.clone());
+                self.save_registry(&records)?;
+            }
+            return Err(error);
         }
         if allow_mcp && !enabled {
             return Err(invalid("Disabled plugins cannot be authorized for MCP"));
@@ -398,9 +483,20 @@ impl PluginService {
         let _registry = self.lease("registry", true)?;
         let _plugin = self.lease(id, true)?;
         let mut records = self.registry()?;
-        records
+        let record = records
             .remove(id)
             .ok_or_else(|| invalid("Plugin is not installed"))?;
+        if !clear_data {
+            let data = self.root.join("data").join(id);
+            fs::create_dir_all(&data)?;
+            crate::sdk::write_atomic(
+                &data.join("settings.retained.json"),
+                &serde_json::to_vec(&RetainedSettings {
+                    repository: record.repository,
+                    settings: record.settings,
+                })?,
+            )?;
+        }
         // Detach executable code first. A failed database write restores its original path.
         let directory = self.root.join("installed").join(id);
         let tombstone = self.root.join(format!("removed-{}", uuid::Uuid::new_v4()));
@@ -461,9 +557,13 @@ impl PluginService {
             ));
         }
         let root = self.version_directory(record)?;
-        if archive::inventory(&root)? != record.files
-            || archive::fingerprint(&record.files) != record.fingerprint
-        {
+        let files = archive::inventory(&root).map_err(|error| {
+            PluginError::new(
+                "integrity_error",
+                format!("Cannot verify plugin code; reinstall and confirm trust again: {error}"),
+            )
+        })?;
+        if files != record.files || archive::fingerprint(&record.files) != record.fingerprint {
             return Err(PluginError::new(
                 "integrity_error",
                 "Plugin code changed; reinstall and confirm trust again",
