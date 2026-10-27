@@ -108,7 +108,7 @@ impl PluginService {
         fs::create_dir_all(&root)?;
         Ok(Self {
             index,
-            root: fs::canonicalize(root)?,
+            root: mcdh_core::canonicalize_path(&root)?,
             prepared: Arc::default(),
         })
     }
@@ -120,7 +120,7 @@ impl PluginService {
             .unwrap_or_else(|| Ok(BTreeMap::new()))
     }
 
-    fn save_registry(&self, records: &BTreeMap<String, InstalledPlugin>) -> Result<()> {
+    pub(crate) fn save_registry(&self, records: &BTreeMap<String, InstalledPlugin>) -> Result<()> {
         self.index
             .set_setting(REGISTRY, &serde_json::to_string(records)?)?;
         Ok(())
@@ -424,7 +424,7 @@ impl PluginService {
     }
 
     fn remove_owned(&self, path: &Path) -> Result<()> {
-        let canonical = fs::canonicalize(path)?;
+        let canonical = mcdh_core::canonicalize_path(path)?;
         if !canonical.starts_with(&self.root) || canonical == self.root {
             return Err(invalid("Refusing to remove a path outside plugin data"));
         }
@@ -481,7 +481,9 @@ impl PluginService {
         if !record.enabled || record.fingerprint != fingerprint {
             return Err(invalid("Plugin is disabled or its version changed"));
         }
-        self.verify(&record)?;
+        self.verify(&record).inspect_err(|error| {
+            let _ = self.record_error(id, error);
+        })?;
         let relative = archive::relative_path(path)?;
         if !record.files.contains_key(path) {
             return Err(invalid("Asset is not in the trusted plugin inventory"));

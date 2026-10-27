@@ -2,7 +2,7 @@
 
 mod config;
 mod files;
-mod process;
+pub(crate) mod process;
 mod runtime;
 mod types;
 

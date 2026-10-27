@@ -32,3 +32,6 @@ pub use template::{RenderedFile, RenderedTemplate, TemplateRequest, TemplateServ
 /// Current application version shared by desktop and protocol adapters.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 pub use discovery::DiscoveryService;
+// Shared Windows Job Object process ownership for trusted exporters and plugins.
+pub use custom_export::process::ExportProcess as ManagedProcess;
+pub use path_utils::canonicalize as canonicalize_path;

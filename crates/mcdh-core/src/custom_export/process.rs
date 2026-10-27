@@ -2,10 +2,10 @@ use crate::Result;
 use std::path::Path;
 
 #[cfg(windows)]
-pub(super) use windows::ExportProcess;
+pub use windows::ExportProcess;
 
 #[cfg(not(windows))]
-pub(super) struct ExportProcess {
+pub struct ExportProcess {
     pub stdout: Option<std::fs::File>,
     pub stderr: Option<std::fs::File>,
 }
@@ -52,6 +52,9 @@ mod windows {
 
     // Microsoft CRT argv escaping, not shell syntax. The executable is passed separately.
     fn quote(value: &str) -> String {
+        if !value.is_empty() && !value.chars().any(|c| c.is_whitespace() || c == '"') {
+            return value.to_owned();
+        }
         let mut result = String::from("\"");
         let mut slashes = 0;
         for c in value.chars() {
@@ -171,7 +174,7 @@ mod windows {
         }
     }
 
-    pub(crate) struct ExportProcess {
+    pub struct ExportProcess {
         job: OwnedHandle,
         process: OwnedHandle,
         pub stdout: Option<File>,
@@ -324,6 +327,7 @@ mod windows {
         use super::*;
         #[test]
         fn quotes_literal_argv() {
+            assert_eq!(quote("/d"), "/d");
             assert_eq!(quote(""), "\"\"");
             assert_eq!(quote("a b\\"), "\"a b\\\\\"");
             assert_eq!(quote("a\"b"), "\"a\\\"b\"");

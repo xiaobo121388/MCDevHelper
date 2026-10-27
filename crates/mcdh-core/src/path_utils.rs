@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 
 use crate::{CoreError, Result};
 
-pub(crate) fn canonicalize(path: &Path) -> Result<PathBuf> {
+pub fn canonicalize(path: &Path) -> Result<PathBuf> {
     let canonical = fs::canonicalize(path).map_err(|error| CoreError::io(path, error))?;
     Ok(strip_verbatim_prefix(canonical))
 }
