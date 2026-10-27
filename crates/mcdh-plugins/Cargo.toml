@@ -1,0 +1,26 @@
+[package]
+name = "mcdh-plugins"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+mcdh-core = { path = "../mcdh-core" }
+chrono.workspace = true
+fs2.workspace = true
+jsonschema.workspace = true
+reqwest.workspace = true
+rquickjs.workspace = true
+schemars.workspace = true
+semver.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+tempfile.workspace = true
+tokio = { workspace = true, features = ["sync", "time"] }
+uuid.workspace = true
+walkdir.workspace = true
+zip.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+windows-sys.workspace = true

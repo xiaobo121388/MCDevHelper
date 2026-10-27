@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/mcdh-core", "crates/mcdh-mcp", "src-tauri"]
+members = ["crates/mcdh-core", "crates/mcdh-plugins", "crates/mcdh-mcp", "src-tauri"]
 resolver = "2"
 
 [workspace.package]
@@ -14,6 +14,8 @@ directories = "6"
 fs2 = "0.4"
 encoding_rs = "0.8"
 jsonc-parser = { version = "0.33.1", features = ["cst", "serde"] }
+jsonschema = { version = "0.33", default-features = false }
+rquickjs = { version = "=0.14.0", features = ["loader", "futures"] }
 rusqlite = { version = "0.40", features = ["bundled"] }
 reqwest = { version = "0.13", default-features = false, features = ["json", "native-tls-no-alpn"] }
 rmcp = { version = "3.1.2", features = ["transport-io"] }

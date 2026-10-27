@@ -1,0 +1,491 @@
+use std::{
+    collections::{BTreeMap, HashMap},
+    fs::{self, File, OpenOptions},
+    path::{Path, PathBuf},
+    sync::{Arc, Mutex},
+    time::{Duration, Instant},
+};
+
+use fs2::FileExt;
+use mcdh_core::LocalIndex;
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+use tempfile::TempDir;
+
+use crate::{
+    PluginError, PluginManifest, Result, archive,
+    error::invalid,
+    github::{Cancellation, DownloadSource, PluginProgress, Repository},
+};
+
+const REGISTRY: &str = "plugins.registry.v1";
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(crate) struct InstalledPlugin {
+    pub manifest: PluginManifest,
+    pub repository: Repository,
+    pub source: DownloadSource,
+    pub fingerprint: String,
+    pub files: BTreeMap<String, String>,
+    pub enabled: bool,
+    pub trusted_fingerprint: Option<String>,
+    pub mcp_fingerprint: Option<String>,
+    pub settings: Value,
+    pub last_error: Option<PluginError>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct PluginSummary {
+    pub manifest: PluginManifest,
+    pub repository: String,
+    pub source: DownloadSource,
+    pub fingerprint: String,
+    pub enabled: bool,
+    pub trusted: bool,
+    pub allow_mcp: bool,
+    pub compatible: bool,
+    pub settings: Value,
+    pub last_error: Option<PluginError>,
+}
+
+impl From<InstalledPlugin> for PluginSummary {
+    fn from(plugin: InstalledPlugin) -> Self {
+        Self {
+            compatible: plugin.manifest.compatible(),
+            trusted: plugin.trusted_fingerprint.as_ref() == Some(&plugin.fingerprint),
+            allow_mcp: plugin.mcp_fingerprint.as_ref() == Some(&plugin.fingerprint),
+            manifest: plugin.manifest,
+            repository: plugin.repository.to_string(),
+            source: plugin.source,
+            fingerprint: plugin.fingerprint,
+            enabled: plugin.enabled,
+            settings: plugin.settings,
+            last_error: plugin.last_error,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct PluginCandidate {
+    pub token: String,
+    pub manifest: PluginManifest,
+    pub repository: String,
+    pub source: DownloadSource,
+    pub fingerprint: String,
+    pub compatible: bool,
+    pub already_installed: bool,
+}
+
+struct PreparedPlugin {
+    candidate: PluginCandidate,
+    record: InstalledPlugin,
+    _temporary: TempDir,
+    root: PathBuf,
+    created: Instant,
+}
+
+#[derive(Clone)]
+pub struct PluginService {
+    pub(crate) index: LocalIndex,
+    pub(crate) root: PathBuf,
+    prepared: Arc<Mutex<HashMap<String, PreparedPlugin>>>,
+}
+
+pub(crate) struct Lease(File);
+impl Drop for Lease {
+    fn drop(&mut self) {
+        let _ = FileExt::unlock(&self.0);
+    }
+}
+
+impl PluginService {
+    pub fn new(index: LocalIndex) -> Result<Self> {
+        let root = index
+            .path()
+            .parent()
+            .ok_or_else(|| invalid("Missing application data directory"))?
+            .join("plugins");
+        fs::create_dir_all(&root)?;
+        Ok(Self {
+            index,
+            root: fs::canonicalize(root)?,
+            prepared: Arc::default(),
+        })
+    }
+
+    pub(crate) fn registry(&self) -> Result<BTreeMap<String, InstalledPlugin>> {
+        self.index
+            .setting(REGISTRY)?
+            .map(|text| serde_json::from_str(&text).map_err(Into::into))
+            .unwrap_or_else(|| Ok(BTreeMap::new()))
+    }
+
+    fn save_registry(&self, records: &BTreeMap<String, InstalledPlugin>) -> Result<()> {
+        self.index
+            .set_setting(REGISTRY, &serde_json::to_string(records)?)?;
+        Ok(())
+    }
+
+    pub fn revision(&self) -> Result<String> {
+        Ok(self.index.setting(REGISTRY)?.unwrap_or_default())
+    }
+
+    pub fn list(&self) -> Result<Vec<PluginSummary>> {
+        Ok(self.registry()?.into_values().map(Into::into).collect())
+    }
+
+    pub(crate) fn lease(&self, id: &str, exclusive: bool) -> Result<Lease> {
+        if id != "registry" && !crate::manifest::identifier(id) {
+            return Err(invalid("Invalid plugin id"));
+        }
+        let directory = self.root.join("locks");
+        fs::create_dir_all(&directory)?;
+        let file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(directory.join(format!("{id}.lock")))?;
+        let result = if exclusive {
+            FileExt::try_lock_exclusive(&file)
+        } else {
+            FileExt::try_lock_shared(&file)
+        };
+        result.map_err(|_| {
+            PluginError::new(
+                "plugin_busy",
+                "Plugin is executing or being modified; finish or cancel its tasks first",
+            )
+        })?;
+        Ok(Lease(file))
+    }
+
+    pub async fn preview(
+        &self,
+        source: &str,
+        cancel: &Cancellation,
+        progress: impl Fn(PluginProgress) + Send + Sync,
+    ) -> Result<PluginCandidate> {
+        let repository = Repository::parse(source)?;
+        let temporary = tempfile::Builder::new()
+            .prefix("preview-")
+            .tempdir_in(&self.root)?;
+        let archive_path = temporary.path().join("download.zip");
+        let origin = crate::github::download(&repository, &archive_path, cancel, &progress).await?;
+        cancel.check()?;
+        self.prepare(repository, origin, &archive_path, temporary)
+    }
+
+    pub fn preview_archive(&self, source: &str, path: &Path) -> Result<PluginCandidate> {
+        if fs::metadata(path)?.len() > archive::MAX_DOWNLOAD {
+            return Err(invalid("Plugin download exceeds 128 MiB"));
+        }
+        let repository = Repository::parse(source)?;
+        let temporary = tempfile::Builder::new()
+            .prefix("preview-")
+            .tempdir_in(&self.root)?;
+        let origin = DownloadSource {
+            kind: "local".into(),
+            reference: "local archive".into(),
+            archive_sha256: archive::hash_file(path)?,
+        };
+        self.prepare(repository, origin, path, temporary)
+    }
+
+    fn prepare(
+        &self,
+        repository: Repository,
+        source: DownloadSource,
+        path: &Path,
+        temporary: TempDir,
+    ) -> Result<PluginCandidate> {
+        let extracted = temporary.path().join("extracted");
+        archive::extract(path, &extracted)?;
+        let root = if source.kind == "branch" {
+            let children = fs::read_dir(&extracted)?.collect::<std::io::Result<Vec<_>>>()?;
+            if children.len() != 1 || !children[0].file_type()?.is_dir() {
+                return Err(invalid("Invalid GitHub repository archive"));
+            }
+            children[0].path()
+        } else {
+            extracted
+        };
+        let manifest_path = root.join(crate::MANIFEST_FILE);
+        if !manifest_path.is_file() {
+            return Err(invalid(
+                "Not an MCDH plugin: missing root mcdh-plugin.json or prebuilt files",
+            ));
+        }
+        if fs::metadata(&manifest_path)?.len() > 2 * 1024 * 1024 {
+            return Err(invalid("Plugin manifest exceeds 2 MiB"));
+        }
+        let manifest: PluginManifest = serde_json::from_slice(&fs::read(manifest_path)?)?;
+        manifest.validate()?;
+        let files = archive::inventory(&root)?;
+        for entry in
+            std::iter::once(&manifest.entry).chain(manifest.panels.iter().map(|panel| &panel.entry))
+        {
+            if !files.contains_key(entry) {
+                return Err(invalid(format!("Missing prebuilt entry: {entry}")));
+            }
+        }
+        if source.kind == "release" && source.reference.trim_start_matches('v') != manifest.version
+        {
+            return Err(invalid("Release tag and plugin version do not match"));
+        }
+        let fingerprint = archive::fingerprint(&files);
+        let records = self.registry()?;
+        if records
+            .get(&manifest.id)
+            .is_some_and(|record| record.repository != repository)
+        {
+            return Err(invalid(
+                "Plugin id is already owned by a different repository",
+            ));
+        }
+        let candidate = PluginCandidate {
+            token: uuid::Uuid::new_v4().to_string(),
+            compatible: manifest.compatible(),
+            already_installed: records
+                .get(&manifest.id)
+                .is_some_and(|p| p.fingerprint == fingerprint),
+            manifest: manifest.clone(),
+            repository: repository.to_string(),
+            source: source.clone(),
+            fingerprint: fingerprint.clone(),
+        };
+        let settings = manifest.default_settings();
+        let record = InstalledPlugin {
+            manifest,
+            repository,
+            source,
+            fingerprint,
+            files,
+            enabled: false,
+            trusted_fingerprint: None,
+            mcp_fingerprint: None,
+            settings,
+            last_error: None,
+        };
+        let mut prepared = self
+            .prepared
+            .lock()
+            .map_err(|_| invalid("Preview registry poisoned"))?;
+        prepared.retain(|_, preview| preview.created.elapsed() < Duration::from_secs(900));
+        if prepared.len() >= 4 {
+            return Err(PluginError::new(
+                "too_many_previews",
+                "Close an existing plugin preview first",
+            ));
+        }
+        prepared.insert(
+            candidate.token.clone(),
+            PreparedPlugin {
+                candidate: candidate.clone(),
+                record,
+                _temporary: temporary,
+                root,
+                created: Instant::now(),
+            },
+        );
+        Ok(candidate)
+    }
+
+    pub fn discard_preview(&self, token: &str) -> Result<()> {
+        self.prepared
+            .lock()
+            .map_err(|_| invalid("Preview registry poisoned"))?
+            .remove(token);
+        Ok(())
+    }
+
+    pub fn install(&self, token: &str, fingerprint: &str) -> Result<PluginSummary> {
+        let mut prepared = self
+            .prepared
+            .lock()
+            .map_err(|_| invalid("Preview registry poisoned"))?;
+        let preview = prepared
+            .get(token)
+            .ok_or_else(|| invalid("Preview expired; preview the repository again"))?;
+        if preview.created.elapsed() >= Duration::from_secs(900)
+            || preview.candidate.fingerprint != fingerprint
+        {
+            return Err(invalid("Preview expired or changed"));
+        }
+        if !preview.record.manifest.compatible() {
+            return Err(PluginError::new(
+                "incompatible_plugin",
+                "Plugin does not support this MCDH version",
+            ));
+        }
+        let _registry = self.lease("registry", true)?;
+        let _plugin = self.lease(&preview.record.manifest.id, true)?;
+        let mut records = self.registry()?;
+        let mut record = preview.record.clone();
+        if let Some(previous) = records.get(&record.manifest.id) {
+            if previous.repository != record.repository {
+                return Err(invalid("Plugin id belongs to another repository"));
+            }
+            if crate::manifest::validate_value(&record.manifest.settings_schema, &previous.settings)
+                .is_ok()
+            {
+                record.settings = previous.settings.clone();
+            }
+        }
+        if archive::inventory(&preview.root)? != record.files {
+            return Err(invalid("Preview files have changed"));
+        }
+        let target = self.version_directory(&record)?;
+        fs::create_dir_all(
+            target
+                .parent()
+                .ok_or_else(|| invalid("Missing version parent"))?,
+        )?;
+        if !target.exists() {
+            fs::rename(&preview.root, &target)?;
+        }
+        if archive::inventory(&target)? != record.files {
+            return Err(invalid("Installed version integrity check failed"));
+        }
+        record.enabled = true;
+        record.trusted_fingerprint = Some(record.fingerprint.clone());
+        record.mcp_fingerprint = records
+            .get(&record.manifest.id)
+            .filter(|old| old.fingerprint == record.fingerprint)
+            .and_then(|old| old.mcp_fingerprint.clone());
+        records.insert(record.manifest.id.clone(), record.clone());
+        self.save_registry(&records)?;
+        prepared.remove(token);
+        Ok(record.into())
+    }
+
+    pub fn configure(
+        &self,
+        id: &str,
+        fingerprint: &str,
+        enabled: bool,
+        allow_mcp: bool,
+        settings: Value,
+    ) -> Result<PluginSummary> {
+        let _registry = self.lease("registry", true)?;
+        let _plugin = self.lease(id, true)?;
+        let mut records = self.registry()?;
+        let record = records
+            .get_mut(id)
+            .ok_or_else(|| invalid("Plugin is not installed"))?;
+        if record.fingerprint != fingerprint {
+            return Err(invalid(
+                "Plugin version changed; reload before granting trust",
+            ));
+        }
+        if enabled || allow_mcp {
+            self.verify(record)?;
+        }
+        if allow_mcp && !enabled {
+            return Err(invalid("Disabled plugins cannot be authorized for MCP"));
+        }
+        crate::manifest::validate_value(&record.manifest.settings_schema, &settings)?;
+        record.enabled = enabled;
+        record.mcp_fingerprint = allow_mcp.then(|| fingerprint.to_string());
+        record.settings = settings;
+        record.last_error = None;
+        let summary = record.clone().into();
+        self.save_registry(&records)?;
+        Ok(summary)
+    }
+
+    pub fn uninstall(&self, id: &str, clear_data: bool) -> Result<()> {
+        let _registry = self.lease("registry", true)?;
+        let _plugin = self.lease(id, true)?;
+        let mut records = self.registry()?;
+        records
+            .remove(id)
+            .ok_or_else(|| invalid("Plugin is not installed"))?;
+        // Detach executable code first. A failed database write restores its original path.
+        let directory = self.root.join("installed").join(id);
+        let tombstone = self.root.join(format!("removed-{}", uuid::Uuid::new_v4()));
+        if directory.exists() {
+            fs::rename(&directory, &tombstone)?;
+        }
+        if let Err(error) = self.save_registry(&records) {
+            if tombstone.exists() {
+                fs::rename(&tombstone, &directory)?;
+            }
+            return Err(error);
+        }
+        if tombstone.exists() {
+            self.remove_owned(&tombstone)?;
+        }
+        let data = self.root.join("data").join(id);
+        if clear_data && data.exists() {
+            self.remove_owned(&data)?;
+        }
+        Ok(())
+    }
+
+    fn remove_owned(&self, path: &Path) -> Result<()> {
+        let canonical = fs::canonicalize(path)?;
+        if !canonical.starts_with(&self.root) || canonical == self.root {
+            return Err(invalid("Refusing to remove a path outside plugin data"));
+        }
+        fs::remove_dir_all(path)?;
+        Ok(())
+    }
+
+    pub(crate) fn version_directory(&self, record: &InstalledPlugin) -> Result<PathBuf> {
+        if !crate::manifest::identifier(&record.manifest.id)
+            || record.fingerprint.len() != 64
+            || !record.fingerprint.bytes().all(|c| c.is_ascii_hexdigit())
+        {
+            return Err(invalid("Invalid stored plugin identity"));
+        }
+        Ok(self
+            .root
+            .join("installed")
+            .join(&record.manifest.id)
+            .join(&record.fingerprint))
+    }
+
+    pub(crate) fn verify(&self, record: &InstalledPlugin) -> Result<()> {
+        record.manifest.validate()?;
+        if !record.manifest.compatible() {
+            return Err(PluginError::new(
+                "incompatible_plugin",
+                "Plugin requires a different MCDH version",
+            ));
+        }
+        if record.trusted_fingerprint.as_ref() != Some(&record.fingerprint) {
+            return Err(PluginError::new(
+                "untrusted_plugin",
+                "Plugin has not been explicitly trusted",
+            ));
+        }
+        let root = self.version_directory(record)?;
+        if archive::inventory(&root)? != record.files
+            || archive::fingerprint(&record.files) != record.fingerprint
+        {
+            return Err(PluginError::new(
+                "integrity_error",
+                "Plugin code changed; reinstall and confirm trust again",
+            ));
+        }
+        Ok(())
+    }
+
+    pub fn asset(&self, id: &str, fingerprint: &str, path: &str) -> Result<Vec<u8>> {
+        let _lease = self.lease(id, false)?;
+        let record = self
+            .registry()?
+            .remove(id)
+            .ok_or_else(|| invalid("Plugin is not installed"))?;
+        if !record.enabled || record.fingerprint != fingerprint {
+            return Err(invalid("Plugin is disabled or its version changed"));
+        }
+        self.verify(&record)?;
+        let relative = archive::relative_path(path)?;
+        if !record.files.contains_key(path) {
+            return Err(invalid("Asset is not in the trusted plugin inventory"));
+        }
+        Ok(fs::read(self.version_directory(&record)?.join(relative))?)
+    }
+}
