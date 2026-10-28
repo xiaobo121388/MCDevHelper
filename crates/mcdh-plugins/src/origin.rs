@@ -16,7 +16,8 @@ pub(crate) enum PluginOrigin {
 #[serde(rename_all = "snake_case")]
 pub(crate) enum ManagedOrigin {
     Local,
-    BundledMcde,
+    #[serde(other)]
+    Unsupported,
 }
 
 impl From<Repository> for PluginOrigin {
@@ -33,8 +34,8 @@ impl fmt::Display for PluginOrigin {
                 kind: ManagedOrigin::Local,
             } => f.write_str("Local import"),
             Self::Managed {
-                kind: ManagedOrigin::BundledMcde,
-            } => f.write_str("MCDH"),
+                kind: ManagedOrigin::Unsupported,
+            } => f.write_str("Unsupported legacy origin"),
         }
     }
 }

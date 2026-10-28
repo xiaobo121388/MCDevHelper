@@ -1,25 +1,23 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
-import { Archive, Check, ChevronDown, Download, ExternalLink, FileText, FolderOpen, LoaderCircle, PackagePlus, Plus, Puzzle, RefreshCw, Save, ShieldAlert, Trash2, X } from "lucide-react";
+import { Archive, Check, ChevronDown, Download, ExternalLink, FileText, FolderOpen, LoaderCircle, Plus, Puzzle, RefreshCw, Save, ShieldAlert, Trash2, X } from "lucide-react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { openDialogWindow } from "./windows";
 import { errorMessage } from "./api";
 import { pluginApi } from "./pluginApi";
 import { SchemaFields } from "./PluginForms";
-import { McdeSettings, type McdkController } from "./Mcdk";
 import { PLUGIN_TRUST_WARNING, usePlugins, type PluginController } from "./usePlugins";
-import type { Json, PluginCandidate, PluginLog, PluginManifest, PluginPanelRequest, PluginSummary } from "./pluginTypes";
+import type { Json, PluginCandidate, PluginLog, PluginPanelRequest, PluginSummary } from "./pluginTypes";
 
-export function PluginSettings({ mcdk, onNotice, onOpenPanel }: { mcdk: McdkController; onNotice: (message: string) => void; onOpenPanel: (request: PluginPanelRequest) => void }) {
+export function PluginSettings({ onNotice, onOpenPanel }: { onNotice: (message: string) => void; onOpenPanel: (request: PluginPanelRequest) => void }) {
   const controller = usePlugins(onNotice, onOpenPanel);
-  return <PluginManager controller={controller} mcdk={mcdk} />;
+  return <PluginManager controller={controller} />;
 }
 
-export function PluginManager({ controller, mcdk }: { controller: PluginController; mcdk?: McdkController }) {
+export function PluginManager({ controller }: { controller: PluginController }) {
   const [source, setSource] = useState("");
   const sourceInput = useRef<HTMLInputElement>(null);
   const [candidate, setCandidate] = useState<PluginCandidate | null>(null);
   const [trusted, setTrusted] = useState(false);
-  const [catalog, setCatalog] = useState<PluginManifest[] | null>(null);
   const currentPreview = useRef<string | null>(null);
   const mounted = useRef(true);
   const choosing = useRef(false);
@@ -60,25 +58,9 @@ export function PluginManager({ controller, mcdk }: { controller: PluginControll
     } catch { /* Persistent error belongs to the controller. */ }
   };
   const submit = (event: FormEvent) => { event.preventDefault(); void preview(source); };
-  const browseBuiltins = async () => {
-    try {
-      const items = await controller.operation("读取内置插件", pluginApi.builtins);
-      if (mounted.current) setCatalog(items);
-    } catch { /* The controller keeps the error visible. */ }
-  };
-  const installBuiltin = async (id: string) => {
-    try {
-      await controller.operation("安装内置插件", () => pluginApi.installBuiltin(id));
-      if (mounted.current) setCatalog(null);
-    } catch { /* The controller keeps the error visible. */ }
-  };
   return <section className="plugin-manager" aria-label="插件管理">
-    <header className="plugin-manager-header"><h3>插件</h3><div className="plugin-manager-tools"><button className="icon-button" title="内置插件" aria-label="内置插件" disabled={!!controller.busy} onClick={() => void browseBuiltins()}><PackagePlus size={18} /></button><button className="icon-button" title="刷新插件" aria-label="刷新插件" disabled={!!controller.busy} onClick={() => void controller.reload().catch((cause) => controller.setError(errorMessage(cause)))}><RefreshCw size={18} /></button></div></header>
+    <header className="plugin-manager-header"><h3>插件</h3><div className="plugin-manager-tools"><button className="icon-button" title="刷新插件" aria-label="刷新插件" disabled={!!controller.busy} onClick={() => void controller.reload().catch((cause) => controller.setError(errorMessage(cause)))}><RefreshCw size={18} /></button></div></header>
     <div className="plugin-manager-body">
-      {catalog && <section className="plugin-preview" aria-label="内置插件列表"><header><h2>内置插件</h2><button className="icon-button" title="关闭内置插件列表" aria-label="关闭内置插件列表" onClick={() => setCatalog(null)}><X size={17} /></button></header>{catalog.map((manifest) => {
-        const installed = controller.items.some((plugin) => plugin.manifest.id === manifest.id);
-        return <div className="plugin-catalog-row" key={manifest.id}><div><h3>{manifest.name} <small>v{manifest.version}</small></h3><p>{manifest.description}</p></div><button className="button secondary" disabled={!!controller.busy || installed} aria-label={`${installed ? "已安装" : "安装"} ${manifest.name}`} onClick={() => void installBuiltin(manifest.id)}><Download size={16} />{installed ? "已安装" : "安装"}</button></div>;
-      })}</section>}
       <form className="plugin-install-bar" onSubmit={submit}><label><Puzzle size={18} /><input ref={sourceInput} aria-label="GitHub 插件仓库" value={source} onChange={(event) => setSource(event.target.value)} placeholder="owner/repo" required disabled={!!controller.busy} />{source && <button className="input-clear" type="button" title="清空插件仓库" aria-label="清空插件仓库" disabled={!!controller.busy} onClick={() => { setSource(""); sourceInput.current?.focus(); }}><X size={16} /></button>}</label><button className="button primary" type="submit" aria-busy={!!controller.busy} disabled={!!controller.busy || selecting || !source.trim()}><Plus size={16} />添加插件</button><div className="plugin-local-import"><button className="button secondary" type="button" title="导入插件 ZIP" disabled={!!controller.busy || selecting} onClick={() => void importLocal(false)}><Archive size={16} />本地导入</button><button className="icon-button" type="button" title="导入插件目录" aria-label="导入插件目录" disabled={!!controller.busy || selecting} onClick={() => void importLocal(true)}><FolderOpen size={17} /></button></div></form>
       {controller.busy && <div className="plugin-task" role="status"><LoaderCircle className="spin" size={17} /><span>{controller.busy.title}{controller.progress?.phase === "downloading" ? ` · ${(controller.progress.downloaded_bytes / 1048576).toFixed(1)} MB` : ""}</span><button className="icon-button" title="取消插件任务" aria-label="取消插件任务" onClick={() => void controller.cancel().catch((cause) => controller.setError(errorMessage(cause)))}><X size={16} /></button></div>}
       {candidate && <section className="plugin-preview" aria-label="插件安装预览">
@@ -92,15 +74,13 @@ export function PluginManager({ controller, mcdk }: { controller: PluginControll
       </section>}
       {controller.error && <div className="plugin-error" role="alert"><ShieldAlert size={17} /><span>{controller.error}</span><button className="icon-button" aria-label="关闭插件错误" title="关闭插件错误" onClick={() => controller.setError("")}><X size={15} /></button></div>}
       <div className="plugin-list-heading"><h2>已安装</h2><span>{controller.items.length}</span></div>
-      <div className="plugin-list">{controller.items.map((plugin) => <PluginRow key={plugin.manifest.id} plugin={plugin} controller={controller} mcdk={mcdk} onUpdate={() => void (plugin.source.kind.startsWith("local") ? importLocal(plugin.source.kind === "local_directory", plugin.manifest.id) : preview(plugin.repository, plugin.manifest.id))} />)}</div>
+      <div className="plugin-list">{controller.items.map((plugin) => <PluginRow key={plugin.manifest.id} plugin={plugin} controller={controller} onUpdate={() => void (plugin.source.kind.startsWith("local") ? importLocal(plugin.source.kind === "local_directory", plugin.manifest.id) : preview(plugin.repository, plugin.manifest.id))} />)}</div>
       {!controller.items.length && <div className="plugin-empty"><Puzzle size={30} /><h2>暂无插件</h2></div>}
     </div>
   </section>;
 }
 
-function PluginRow({ plugin, controller, onUpdate, mcdk }: { plugin: PluginSummary; controller: PluginController; onUpdate: () => void; mcdk?: McdkController }) {
-  const builtin = plugin.source.kind === "builtin";
-  const nativeBusy = builtin && (!!mcdk?.launching || mcdk?.status?.session?.mode === "editor");
+function PluginRow({ plugin, controller, onUpdate }: { plugin: PluginSummary; controller: PluginController; onUpdate: () => void }) {
   const [logs, setLogs] = useState<PluginLog[] | null>(null);
   const [removing, setRemoving] = useState(false);
   const [clearData, setClearData] = useState(false);
@@ -110,22 +90,21 @@ function PluginRow({ plugin, controller, onUpdate, mcdk }: { plugin: PluginSumma
   const attempt = async (work: () => Promise<unknown>) => { try { await work(); } catch (cause) { controller.setError(errorMessage(cause)); } };
   const status = !plugin.compatible ? "不兼容" : !plugin.trusted ? "信任失效" : plugin.enabled ? "已启用" : "已禁用";
   return <article className="plugin-row">
-    <div className="plugin-row-top"><span className="plugin-row-icon"><Puzzle size={22} /></span><div className="plugin-row-name"><h3>{plugin.manifest.name}<small>v{plugin.manifest.version}{builtin ? " · 内置" : ""}</small></h3><p>{plugin.manifest.description || plugin.repository}</p><div className="plugin-row-origin">{plugin.repository}<span className={plugin.enabled && plugin.trusted ? "plugin-state enabled" : "plugin-state"}>{status}</span></div></div><label className="plugin-enable" title={nativeBusy ? "请先退出 MCDE 会话" : `启用 ${plugin.manifest.name}`}><input type="checkbox" role="switch" aria-label={`启用 ${plugin.manifest.name}`} checked={plugin.enabled} disabled={!!controller.busy || nativeBusy || !plugin.trusted || !plugin.compatible} onChange={(event) => void attempt(() => controller.configure(plugin, event.target.checked, event.target.checked && plugin.allow_mcp))} /></label></div>
+    <div className="plugin-row-top"><span className="plugin-row-icon"><Puzzle size={22} /></span><div className="plugin-row-name"><h3>{plugin.manifest.name}<small>v{plugin.manifest.version}</small></h3><p>{plugin.manifest.description || plugin.repository}</p><div className="plugin-row-origin">{plugin.repository}<span className={plugin.enabled && plugin.trusted ? "plugin-state enabled" : "plugin-state"}>{status}</span></div></div><label className="plugin-enable" title={`启用 ${plugin.manifest.name}`}><input type="checkbox" role="switch" aria-label={`启用 ${plugin.manifest.name}`} checked={plugin.enabled} disabled={!!controller.busy || !plugin.trusted || !plugin.compatible} onChange={(event) => void attempt(() => controller.configure(plugin, event.target.checked, event.target.checked && plugin.allow_mcp))} /></label></div>
     {plugin.last_error && <p className="plugin-row-error">{plugin.last_error.message}</p>}
     <div className="plugin-row-actions">
-      {!builtin && <label className="plugin-checkbox"><input type="checkbox" checked={plugin.allow_mcp} aria-label={`允许 MCP 调用 ${plugin.manifest.name}`} disabled={!!controller.busy || !plugin.enabled || !plugin.trusted || !plugin.manifest.mcp_tools.length} onChange={(event) => void attempt(() => controller.configure(plugin, plugin.enabled, event.target.checked))} /><span>允许 MCP 调用</span></label>}
+      <label className="plugin-checkbox"><input type="checkbox" checked={plugin.allow_mcp} aria-label={`允许 MCP 调用 ${plugin.manifest.name}`} disabled={!!controller.busy || !plugin.enabled || !plugin.trusted || !plugin.manifest.mcp_tools.length} onChange={(event) => void attempt(() => controller.configure(plugin, plugin.enabled, event.target.checked))} /><span>允许 MCP 调用</span></label>
       <span className="plugin-action-spacer" />
       {plugin.manifest.panels.map((panel) => <span className="plugin-panel-actions" key={panel.id}><button className="button secondary" disabled={!plugin.enabled || !plugin.trusted} onClick={() => controller.openPanel({ pluginId:plugin.manifest.id, fingerprint:plugin.fingerprint, panelId:panel.id })}>{panel.title}</button><button className="icon-button" disabled={!plugin.enabled || !plugin.trusted} title={`独立窗口打开 ${panel.title}`} aria-label={`独立窗口打开 ${panel.title}`} onClick={() => void attempt(() => openDialogWindow({ kind:"plugin_panel", pluginId:plugin.manifest.id, fingerprint:plugin.fingerprint, panelId:panel.id }))}><ExternalLink size={15} /></button></span>)}
-      {!builtin && <button className="icon-button" disabled={!!controller.busy} title={`检查更新 ${plugin.manifest.name}`} aria-label={`检查更新 ${plugin.manifest.name}`} onClick={onUpdate}><RefreshCw size={16} /></button>}
+      <button className="icon-button" disabled={!!controller.busy} title={`检查更新 ${plugin.manifest.name}`} aria-label={`检查更新 ${plugin.manifest.name}`} onClick={onUpdate}><RefreshCw size={16} /></button>
       <button className="icon-button" title={`日志 ${plugin.manifest.name}`} aria-label={`日志 ${plugin.manifest.name}`} aria-expanded={!!logs} onClick={() => void attempt(async () => setLogs(logs ? null : await pluginApi.logs(plugin.manifest.id)))}><FileText size={16} /></button>
-      <button className="icon-button plugin-uninstall" disabled={!!controller.busy || nativeBusy} title={`卸载 ${plugin.manifest.name}`} aria-label={`卸载 ${plugin.manifest.name}`} onClick={() => setRemoving(!removing)}><Trash2 size={16} /></button>
+      <button className="icon-button plugin-uninstall" disabled={!!controller.busy} title={`卸载 ${plugin.manifest.name}`} aria-label={`卸载 ${plugin.manifest.name}`} onClick={() => setRemoving(!removing)}><Trash2 size={16} /></button>
     </div>
-    {builtin && plugin.manifest.id === "mcdh.mcde" && mcdk && <McdeSettings mcdk={mcdk} />}
     {!!Object.keys(plugin.manifest.settings_schema.properties ?? {}).length && <details className="plugin-settings"><summary>设置<ChevronDown size={15} /></summary><form onSubmit={(event) => {
       event.preventDefault();
       void attempt(async () => { await controller.configure(plugin, plugin.enabled, plugin.allow_mcp, settings); editingSettings.current = false; });
     }}><SchemaFields schema={plugin.manifest.settings_schema} value={settings} onChange={(value) => { editingSettings.current = true; setSettings(value); }} disabled={!!controller.busy} /><button className="button secondary" type="submit" disabled={!!controller.busy}><Save size={15} />保存</button></form></details>}
     {logs && <div className="plugin-logs" role="log">{logs.length ? logs.map((log, index) => <div key={index}><time>{log.time}</time><strong>{log.level}</strong><span>{log.text}</span></div>) : <p>暂无运行日志</p>}</div>}
-    {removing && <div className="plugin-remove-confirm"><p>卸载 {plugin.manifest.name}？</p>{builtin && <p>原生资源、编辑器配置和项目文件会保留。</p>}<label className="plugin-checkbox"><input type="checkbox" checked={clearData} onChange={(event) => setClearData(event.target.checked)} /><span>{builtin ? "同时清除插件管理数据和日志" : "同时清除插件设置、存储和日志"}</span></label><div className="dialog-actions"><button className="button secondary" onClick={() => setRemoving(false)}>取消</button><button className="button danger" disabled={!!controller.busy || nativeBusy} onClick={() => void attempt(() => controller.uninstall(plugin.manifest.id, clearData))}><Trash2 size={15} />确认卸载</button></div></div>}
+    {removing && <div className="plugin-remove-confirm"><p>卸载 {plugin.manifest.name}？</p><label className="plugin-checkbox"><input type="checkbox" checked={clearData} onChange={(event) => setClearData(event.target.checked)} /><span>同时清除插件设置、存储和日志</span></label><div className="dialog-actions"><button className="button secondary" onClick={() => setRemoving(false)}>取消</button><button className="button danger" disabled={!!controller.busy} onClick={() => void attempt(() => controller.uninstall(plugin.manifest.id, clearData))}><Trash2 size={15} />确认卸载</button></div></div>}
   </article>;
 }

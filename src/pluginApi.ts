@@ -1,11 +1,9 @@
 import { Channel, convertFileSrc, invoke, isTauri } from "@tauri-apps/api/core";
-import type { Json, PluginCandidate, PluginExecution, PluginLog, PluginManifest, PluginPanelInfo, PluginPanelRequest, PluginProgress, PluginSummary } from "./pluginTypes";
+import type { Json, PluginCandidate, PluginExecution, PluginLog, PluginPanelInfo, PluginPanelRequest, PluginProgress, PluginSummary } from "./pluginTypes";
 
 export const pluginDesktop = isTauri();
 export const pluginApi = {
   list: () => invoke<PluginSummary[]>("list_plugins"),
-  builtins: () => invoke<PluginManifest[]>("list_builtin_plugins"),
-  installBuiltin: (pluginId: string) => invoke<PluginSummary>("install_builtin_plugin", {pluginId}),
   preview(source: string, operationId: string, progress: (value: PluginProgress) => void) {
     const onProgress = new Channel<PluginProgress>();
     onProgress.onmessage = progress;

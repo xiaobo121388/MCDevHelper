@@ -35,6 +35,62 @@ pub(crate) fn service(directory: &Path) -> PluginService {
 }
 
 #[test]
+fn retired_host_registrations_do_not_hide_external_plugins_or_delete_data() {
+    let temp = tempfile::tempdir().unwrap();
+    let service = service(temp.path());
+    let path = package(temp.path(), &manifest(), "export function activate() {}");
+    let preview = service
+        .preview_local(&path, &Cancellation::default())
+        .unwrap();
+    let plugin = service
+        .install(&preview.token, &preview.fingerprint)
+        .unwrap();
+    let mut records = serde_json::to_value(service.registry().unwrap()).unwrap();
+    let mut retired = records[&plugin.manifest.id].clone();
+    retired["manifest"]["id"] = json!("legacy.adapter");
+    retired["repository"] = json!({"kind":"retired_native_adapter"});
+    retired["source"]["kind"] = json!("builtin");
+    records["legacy.adapter"] = retired;
+    let data = service.root.join("data/legacy.adapter");
+    fs::create_dir_all(&data).unwrap();
+    fs::write(data.join("keep.txt"), "user data").unwrap();
+    let stored = records.to_string();
+    service
+        .index
+        .set_setting("plugins.registry.v1", &stored)
+        .unwrap();
+    assert_eq!(service.list().unwrap().len(), 1);
+    assert_eq!(service.list().unwrap()[0].manifest.id, plugin.manifest.id);
+    assert!(
+        service
+            .authorize("legacy.adapter", PluginCaller::Desktop)
+            .is_err()
+    );
+    assert_eq!(
+        service
+            .index
+            .setting("plugins.registry.v1")
+            .unwrap()
+            .unwrap(),
+        stored
+    );
+    service
+        .configure(
+            &plugin.manifest.id,
+            &plugin.fingerprint,
+            false,
+            false,
+            json!({}),
+        )
+        .unwrap();
+    assert_eq!(
+        fs::read_to_string(data.join("keep.txt")).unwrap(),
+        "user data"
+    );
+    assert_eq!(service.registry().unwrap().len(), 1);
+}
+
+#[test]
 fn local_sources_are_snapshots_and_never_execute_before_trust() {
     let temp = tempfile::tempdir().unwrap();
     let service = service(temp.path());

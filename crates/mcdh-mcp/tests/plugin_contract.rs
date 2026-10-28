@@ -158,19 +158,12 @@ fn plugins_are_independent_version_bound_and_never_pollute_stdio() {
     let temp = tempfile::tempdir().unwrap();
     let data = temp.path().join("state");
     let service = PluginService::new(LocalIndex::open(data.join("mcdh.db")).unwrap()).unwrap();
-    service
-        .install_builtin(mcdh_plugins::MCDE_PLUGIN_ID)
-        .unwrap();
     let first = service
         .preview_archive("fixture/plugin", &package(temp.path(), "1.0.0"))
         .unwrap();
     let plugin = service.install(&first.token, &first.fingerprint).unwrap();
     let mut client = Client::start(&data);
     assert_eq!(client.tools().len(), 27);
-    assert_eq!(
-        client.call("plugin__mcdh.mcde__open-editor", json!({}))["result"]["isError"],
-        true
-    );
     assert!(
         !data
             .join("plugins/data/example.contract/executed.txt")

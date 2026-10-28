@@ -2,7 +2,7 @@ import { act, cleanup, fireEvent, render, renderHook, screen, waitFor } from "@t
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { PluginCandidate, PluginPanelInfo, PluginSummary } from "./pluginTypes";
 
-const mocks = vi.hoisted(() => ({ list:vi.fn(), builtins:vi.fn(), installBuiltin:vi.fn(), preview:vi.fn(), previewLocal:vi.fn(), pick:vi.fn(), install:vi.fn(), discard:vi.fn(), configure:vi.fn(), uninstall:vi.fn(), execute:vi.fn(), cancel:vi.fn(), panel:vi.fn(), panelCall:vi.fn(), logs:vi.fn(), load:vi.fn(), open:vi.fn(), confirm:vi.fn(), notice:vi.fn(), onPanel:vi.fn() }));
+const mocks = vi.hoisted(() => ({ list:vi.fn(), preview:vi.fn(), previewLocal:vi.fn(), pick:vi.fn(), install:vi.fn(), discard:vi.fn(), configure:vi.fn(), uninstall:vi.fn(), execute:vi.fn(), cancel:vi.fn(), panel:vi.fn(), panelCall:vi.fn(), logs:vi.fn(), load:vi.fn(), open:vi.fn(), confirm:vi.fn(), notice:vi.fn(), onPanel:vi.fn() }));
 vi.mock("@tauri-apps/plugin-dialog", () => ({open:mocks.pick}));
 vi.mock("./pluginApi", () => ({ pluginDesktop:true, pluginApi:mocks, pluginAssetUrl:(_request: unknown, path: string) => `http://mcdh-plugin.localhost/test/${path}` }));
 vi.mock("./pluginModules", () => ({ loadPluginModule:mocks.load }));
@@ -12,7 +12,6 @@ import { PluginManager } from "./PluginManager";
 import { PluginPanelHost } from "./PluginPanelHost";
 import { PluginCommandPrompt } from "./PluginForms";
 import { usePlugins } from "./usePlugins";
-import type { McdkController } from "./Mcdk";
 import { createContext } from "../sdk/context.js";
 
 const plugin: PluginSummary = { manifest:{ schema_version:1, api_version:1, id:"example.hello", name:"测试插件", version:"1.0.0", description:"测试组件工具", author:"Example", engines:{mcdh:">=1.0.0"}, entry:"main.js",
@@ -26,7 +25,6 @@ function Manager() { const controller = usePlugins(mocks.notice, mocks.onPanel);
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.list.mockResolvedValue([plugin]); mocks.preview.mockResolvedValue(candidate); mocks.install.mockResolvedValue(plugin);
-  mocks.builtins.mockResolvedValue([]); mocks.installBuiltin.mockResolvedValue(plugin);
   mocks.discard.mockResolvedValue(undefined); mocks.configure.mockResolvedValue(plugin); mocks.uninstall.mockResolvedValue(undefined);
   mocks.cancel.mockResolvedValue(undefined); mocks.panel.mockResolvedValue(panelInfo); mocks.panelCall.mockResolvedValue({value:null,actions:[]});
   mocks.execute.mockResolvedValue({value:{ok:true},actions:[]}); mocks.logs.mockResolvedValue([]); mocks.confirm.mockResolvedValue(true);
@@ -63,49 +61,6 @@ describe("plugin management", () => {
     expect(uninstall).toHaveAttribute("title", "卸载 测试插件");
     expect(uninstall.textContent).toBe("");
     expect(uninstall.querySelector("svg")).toBeInTheDocument();
-  });
-  it("uninstalls MCDE with confirmation and removes its registration from the page", async () => {
-    const builtin: PluginSummary = {...plugin,manifest:{...plugin.manifest,id:"mcdh.mcde",name:"MCDE",panels:[],mcp_tools:[],settings_schema:{type:"object"}},source:{...plugin.source,kind:"builtin"}};
-    mocks.list.mockResolvedValue([builtin]);
-    render(<Manager />);
-    fireEvent.click(await screen.findByRole("switch", {name:"启用 MCDE"}));
-    await waitFor(() => expect(mocks.configure).toHaveBeenCalledWith(builtin,false,false,builtin.settings));
-    fireEvent.click(screen.getByRole("button", {name:"卸载 MCDE"}));
-    expect(screen.getByRole("checkbox", {name:/同时清除插件管理数据/})).not.toBeChecked();
-    expect(mocks.uninstall).not.toHaveBeenCalled();
-    mocks.uninstall.mockImplementation(async () => { mocks.list.mockResolvedValue([]); });
-    fireEvent.click(screen.getByRole("button", {name:"确认卸载"}));
-    await waitFor(() => expect(mocks.uninstall).toHaveBeenCalledWith("mcdh.mcde",false));
-    await waitFor(() => expect(screen.queryByRole("switch", {name:"启用 MCDE"})).not.toBeInTheDocument());
-    expect(document.body.textContent).not.toContain("MCDE");
-    expect(screen.queryByRole("button", {name:"检查更新 MCDE"})).not.toBeInTheDocument();
-    expect(screen.queryByRole("checkbox", {name:"允许 MCP 调用 MCDE"})).not.toBeInTheDocument();
-  });
-  it("exposes MCDE directory settings on the plugin page and protects an active editor", async () => {
-    const builtin: PluginSummary = {...plugin,manifest:{...plugin.manifest,id:"mcdh.mcde",name:"MCDE",panels:[],mcp_tools:[],settings_schema:{type:"object"}},source:{...plugin.source,kind:"builtin"}};
-    mocks.list.mockResolvedValue([builtin]);
-    const mcdk = {status:{session:{mode:"editor"},mcde:{available:true,host_available:true,directory:"D:/MCDE",plugin_version:"0.2.0"}},launching:null,error:"",update:vi.fn()} as unknown as McdkController;
-    function NativeManager() { const controller = usePlugins(mocks.notice,mocks.onPanel); return <PluginManager controller={controller} mcdk={mcdk} />; }
-    render(<NativeManager />);
-    expect(await screen.findByRole("switch", {name:"启用 MCDE"})).toBeDisabled();
-    expect(screen.getByRole("button", {name:"卸载 MCDE"})).toBeDisabled();
-    expect(screen.getByRole("textbox", {name:"MCDE 插件目录"})).toHaveValue("D:/MCDE");
-    expect(screen.getByRole("button", {name:"选择 MCDE 插件目录"})).toBeDisabled();
-  });
-  it("only shows an uninstalled native plugin after explicitly opening the catalog", async () => {
-    const builtin: PluginSummary = {...plugin,manifest:{...plugin.manifest,id:"mcdh.mcde",name:"MCDE",panels:[],mcp_tools:[],settings_schema:{type:"object"}},source:{...plugin.source,kind:"builtin"}};
-    mocks.list.mockResolvedValue([]); mocks.builtins.mockResolvedValue([builtin.manifest]);
-    mocks.installBuiltin.mockImplementation(async () => { mocks.list.mockResolvedValue([builtin]); return builtin; });
-    render(<Manager />);
-    expect(document.body.textContent).not.toContain("MCDE");
-    expect(mocks.builtins).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole("button", {name:"内置插件"}));
-    const install = await screen.findByRole("button", {name:"安装 MCDE"});
-    expect(mocks.installBuiltin).not.toHaveBeenCalled();
-    fireEvent.click(install);
-    expect(await screen.findByRole("switch", {name:"启用 MCDE"})).toBeChecked();
-    expect(mocks.installBuiltin).toHaveBeenCalledWith("mcdh.mcde");
-    expect(screen.queryByRole("region", {name:"内置插件列表"})).not.toBeInTheDocument();
   });
   it("does not restore a removed plugin from a late list response", async () => {
     const {result} = renderHook(() => usePlugins(mocks.notice,mocks.onPanel));

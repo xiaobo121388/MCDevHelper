@@ -282,7 +282,7 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px s
 .component-card footer > span { min-width: 0; overflow-wrap: anywhere; }
 .component-card footer > div { flex-shrink: 0; }
 .component-card footer button:disabled { cursor: default; opacity: .45; }
-.component-card footer button.launch-game.active, .component-card footer button.launch-editor.active { color: var(--accent); opacity: 1; background: var(--accent-soft); }
+.component-card footer button.launch-game.active { color: var(--accent); opacity: 1; background: var(--accent-soft); }
 .mcdk-spin { animation: mcdk-spin 1s linear infinite; }
 @keyframes mcdk-spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .mcdk-spin { animation: none; } }
@@ -299,13 +299,6 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px s
 .mcdk-actions > div { display: flex; gap: 7px; flex-wrap: wrap; }
 .mcdk-toggle { display: flex; align-items: center; gap: 8px; font-size: 12px; cursor: pointer; }
 .mcdk-toggle input { width: 16px; height: 16px; accent-color: var(--accent); margin: 0; }
-.mcde-settings { display: grid; min-width: 0; gap: 10px; margin-top: 4px; padding-top: 14px; border-top: 1px solid var(--border); }
-.mcde-directory { min-width: 0; margin: 0; }
-.mcde-directory > span { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; }
-.mcde-directory > span small { font-size: 11px; font-weight: 400; }
-.mcde-directory .path-row button { display: grid; width: 34px; height: 38px; place-items: center; padding: 0; }
-.mcde-directory .path-row button:disabled { cursor: default; opacity: .45; }
-.mcde-host { color: var(--muted); }
 .empty-state { grid-column: 1 / -1; display: flex; min-height: 390px; align-items: center; justify-content: center; flex-direction: column; text-align: center; }
 .empty-state > span { display: grid; width: 62px; height: 62px; place-items: center; border-radius: 8px; color: var(--muted); background: var(--panel); box-shadow: var(--shadow); }
 .empty-state h2 { margin: 20px 0 7px; font-size: 17px; }

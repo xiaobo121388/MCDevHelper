@@ -4,7 +4,7 @@ use crate::{
 };
 use mcdh_core::{
     CoreError, Result,
-    mcdk_session::{McdkSession, SESSION_KEY, SessionMode, SessionState, refresh_session},
+    mcdk_session::{McdkSession, SESSION_KEY, SessionState, refresh_session},
 };
 use tauri::State;
 
@@ -15,29 +15,16 @@ pub async fn launch_component_game(
     component_id: String,
 ) -> CommandResult<McdkSession> {
     let manager = manager.inner().clone();
-    let session = blocking(move || launch(&app, &manager, &component_id, SessionMode::Game)).await;
+    let session = blocking(move || launch(&app, &manager, &component_id)).await;
     session.map_err(|e| e.payload())
 }
 
-#[tauri::command]
-pub async fn launch_component_editor(
-    app: tauri::AppHandle,
-    manager: State<'_, McdkManager>,
-    component_id: String,
-) -> CommandResult<McdkSession> {
-    let manager = manager.inner().clone();
-    blocking(move || launch(&app, &manager, &component_id, SessionMode::Editor))
-        .await
-        .map_err(|e| e.payload())
-}
-
-pub(crate) fn launch(
+fn launch(
     app: &tauri::AppHandle,
     manager: &McdkManager,
     component_id: &str,
-    mode: SessionMode,
 ) -> Result<McdkSession> {
-    let started = start_session(manager, component_id, mode)?;
+    let started = start_session(manager, component_id)?;
     manager.emit(app);
     #[cfg(windows)]
     {
@@ -70,20 +57,7 @@ struct StartedSession {
     process: std::os::windows::io::OwnedHandle,
 }
 
-fn start_session(
-    manager: &McdkManager,
-    component_id: &str,
-    mode: SessionMode,
-) -> Result<StartedSession> {
-    let _plugin = if mode == SessionMode::Editor {
-        Some(
-            mcdh_plugins::PluginService::new(manager.index.clone())
-                .and_then(|service| service.mcde_lease(None))
-                .map_err(|error| CoreError::InvalidInput(format!("MCDE 插件不可用：{error}")))?,
-        )
-    } else {
-        None
-    };
+fn start_session(manager: &McdkManager, component_id: &str) -> Result<StartedSession> {
     let _component_lock = manager.index.try_lock_mutations()?;
     let _state_lock = manager.store.lock("state")?;
     if refresh_session(&manager.store)?.session.is_some() {
@@ -95,34 +69,10 @@ fn start_session(
     if !component.path.is_dir() {
         return Err(CoreError::NotFound(component.path));
     }
-    let editor = if mode == SessionMode::Editor {
-        Some(
-            mcdh_core::mcde::McdeStore::new(manager.store.clone()).prepare_launch(
-                &component.path,
-                &manager.bundled_editor,
-                &manager.mcde_host,
-            )?,
-        )
-    } else {
-        None
-    };
-    let (version, executable, directory) = if let Some(editor) = &editor {
-        (
-            editor.version.clone(),
-            editor.executable.clone(),
-            editor.directory().to_path_buf(),
-        )
-    } else {
-        let (version, executable) = manager.store.ready_executable(&manager.bundled_binary)?;
-        (version.version, executable, component.path.clone())
-    };
+    let (version, executable) = manager.store.ready_executable(&manager.bundled_binary)?;
     #[cfg(windows)]
     {
-        let pending = windows::PendingProcess::create_with_visibility(
-            &executable,
-            &directory,
-            mode == SessionMode::Editor,
-        )?;
+        let pending = windows::PendingProcess::create(&executable, &component.path)?;
         let identity = mcdh_core::mcdk_session::inspect_process(pending.pid)?
             .ok_or_else(|| CoreError::InvalidInput("MCDK 启动器已退出".into()))?;
         let session = McdkSession {
@@ -131,9 +81,7 @@ fn start_session(
             executable: identity.executable,
             created_at: identity.created_at,
             pid: pending.pid,
-            version,
-            mode,
-            launch_directory: editor.as_ref().map(|e| e.directory().to_path_buf()),
+            version: version.version,
         };
         manager.store.write(
             SESSION_KEY,
@@ -143,14 +91,11 @@ fn start_session(
             },
         )?;
         let process = pending.resume()?;
-        if let Some(editor) = editor {
-            editor.persist();
-        }
         Ok(StartedSession { session, process })
     }
     #[cfg(not(windows))]
     {
-        let _ = (version, executable, directory);
+        let _ = (version, executable);
         Err(CoreError::InvalidInput(
             "MCDK 启动仅支持 Windows x64".into(),
         ))
@@ -177,10 +122,6 @@ pub async fn monitor(app: tauri::AppHandle, manager: McdkManager) {
     }
 }
 
-#[cfg(all(test, windows))]
-#[path = "mcde_native_tests.rs"]
-mod native_tests;
-
 #[cfg(windows)]
 mod windows {
     use mcdh_core::{CoreError, Result};
@@ -189,88 +130,10 @@ mod windows {
         io::{AsRawHandle, FromRawHandle, OwnedHandle},
     };
     use std::path::Path;
-    use windows_sys::Win32::Foundation::{HANDLE_FLAG_INHERIT, SetHandleInformation};
     use windows_sys::Win32::System::Threading::{
-        CREATE_NEW_CONSOLE, CREATE_SUSPENDED, CreateProcessW, DeleteProcThreadAttributeList,
-        EXTENDED_STARTUPINFO_PRESENT, INFINITE, InitializeProcThreadAttributeList,
-        LPPROC_THREAD_ATTRIBUTE_LIST, PROC_THREAD_ATTRIBUTE_HANDLE_LIST, PROCESS_INFORMATION,
-        ResumeThread, STARTF_USESHOWWINDOW, STARTF_USESTDHANDLES, STARTUPINFOEXW, STARTUPINFOW,
-        TerminateProcess, UpdateProcThreadAttribute, WaitForSingleObject,
+        CREATE_NEW_CONSOLE, CREATE_SUSPENDED, CreateProcessW, INFINITE, PROCESS_INFORMATION,
+        ResumeThread, STARTUPINFOW, TerminateProcess, WaitForSingleObject,
     };
-
-    struct LaunchLogs {
-        files: [std::fs::File; 3],
-        _handles: Box<[windows_sys::Win32::Foundation::HANDLE; 3]>,
-        attributes: LPPROC_THREAD_ATTRIBUTE_LIST,
-        _storage: Vec<usize>,
-    }
-
-    impl LaunchLogs {
-        fn create(directory: &Path) -> Result<Self> {
-            let output = |name: &str| {
-                let path = directory.join(name);
-                std::fs::OpenOptions::new()
-                    .write(true)
-                    .create_new(true)
-                    .open(&path)
-                    .map_err(|e| CoreError::io(path, e))
-            };
-            let files = [
-                std::fs::File::open("NUL").map_err(|e| CoreError::io("NUL", e))?,
-                output("host.stdout.log")?,
-                output("host.stderr.log")?,
-            ];
-            let mut handles = Box::new(files.each_ref().map(AsRawHandle::as_raw_handle));
-            for handle in handles.iter().copied() {
-                if unsafe { SetHandleInformation(handle, HANDLE_FLAG_INHERIT, HANDLE_FLAG_INHERIT) }
-                    == 0
-                {
-                    return Err(CoreError::io(directory, std::io::Error::last_os_error()));
-                }
-            }
-            let mut size = 0;
-            unsafe {
-                InitializeProcThreadAttributeList(std::ptr::null_mut(), 1, 0, &mut size);
-            }
-            let mut storage = vec![0usize; size.div_ceil(std::mem::size_of::<usize>())];
-            let attributes = storage.as_mut_ptr().cast();
-            if unsafe { InitializeProcThreadAttributeList(attributes, 1, 0, &mut size) } == 0 {
-                return Err(CoreError::io(directory, std::io::Error::last_os_error()));
-            }
-            if unsafe {
-                UpdateProcThreadAttribute(
-                    attributes,
-                    0,
-                    PROC_THREAD_ATTRIBUTE_HANDLE_LIST as usize,
-                    handles.as_mut_ptr().cast(),
-                    std::mem::size_of_val(handles.as_ref()),
-                    std::ptr::null_mut(),
-                    std::ptr::null_mut(),
-                )
-            } == 0
-            {
-                let error = std::io::Error::last_os_error();
-                unsafe {
-                    DeleteProcThreadAttributeList(attributes);
-                }
-                return Err(CoreError::io(directory, error));
-            }
-            Ok(Self {
-                files,
-                _handles: handles,
-                attributes,
-                _storage: storage,
-            })
-        }
-    }
-
-    impl Drop for LaunchLogs {
-        fn drop(&mut self) {
-            unsafe {
-                DeleteProcThreadAttributeList(self.attributes);
-            }
-        }
-    }
 
     pub struct PendingProcess {
         process: Option<OwnedHandle>,
@@ -279,16 +142,7 @@ mod windows {
     }
 
     impl PendingProcess {
-        #[cfg(test)]
         pub fn create(executable: &Path, directory: &Path) -> Result<Self> {
-            Self::create_with_visibility(executable, directory, false)
-        }
-
-        pub fn create_with_visibility(
-            executable: &Path,
-            directory: &Path,
-            hidden: bool,
-        ) -> Result<Self> {
             let exe: Vec<u16> = executable
                 .as_os_str()
                 .encode_wide()
@@ -299,40 +153,21 @@ mod windows {
                 .encode_utf16()
                 .chain(Some(0))
                 .collect();
-            let logs = hidden.then(|| LaunchLogs::create(directory)).transpose()?;
-            let mut startup: STARTUPINFOEXW = unsafe { std::mem::zeroed() };
-            startup.StartupInfo.cb = if hidden {
-                std::mem::size_of::<STARTUPINFOEXW>()
-            } else {
-                std::mem::size_of::<STARTUPINFOW>()
-            } as u32;
-            if let Some(logs) = &logs {
-                startup.StartupInfo.dwFlags = STARTF_USESHOWWINDOW | STARTF_USESTDHANDLES;
-                startup.StartupInfo.wShowWindow = 0;
-                startup.StartupInfo.hStdInput = logs.files[0].as_raw_handle();
-                startup.StartupInfo.hStdOutput = logs.files[1].as_raw_handle();
-                startup.StartupInfo.hStdError = logs.files[2].as_raw_handle();
-                startup.lpAttributeList = logs.attributes;
-            }
+            let mut startup: STARTUPINFOW = unsafe { std::mem::zeroed() };
+            startup.cb = std::mem::size_of::<STARTUPINFOW>() as u32;
             let mut info: PROCESS_INFORMATION = unsafe { std::mem::zeroed() };
-            // Ordinary launches get an interactive console; editor launches inherit only the owned log handles.
+            // Do not inherit GUI stdio handles: Windows initializes interactive handles for the new console.
             let success = unsafe {
                 CreateProcessW(
                     exe.as_ptr(),
                     command.as_mut_ptr(),
                     std::ptr::null(),
                     std::ptr::null(),
-                    i32::from(hidden),
-                    CREATE_NEW_CONSOLE
-                        | CREATE_SUSPENDED
-                        | if hidden {
-                            EXTENDED_STARTUPINFO_PRESENT
-                        } else {
-                            0
-                        },
+                    0,
+                    CREATE_NEW_CONSOLE | CREATE_SUSPENDED,
                     std::ptr::null(),
                     cwd.as_ptr(),
-                    &startup.StartupInfo,
+                    &startup,
                     &mut info,
                 )
             };
@@ -383,64 +218,6 @@ mod windows {
         fn reports_missing_executable_without_creating_process() {
             let temp = tempfile::tempdir().unwrap();
             assert!(PendingProcess::create(&temp.path().join("missing.exe"), temp.path()).is_err());
-        }
-
-        #[test]
-        #[ignore = "runs an isolated hidden console probe; requires rustc"]
-        fn hidden_editor_host_redirects_logs_and_survives_handle_release() {
-            use mcdh_core::mcdk_session::inspect_process;
-            use std::{
-                fs,
-                process::Command,
-                time::{Duration, Instant},
-            };
-            let temp = tempfile::tempdir().unwrap();
-            let exe = temp.path().join("hidden probe.exe");
-            assert!(
-                Command::new("rustc")
-                    .arg("--edition=2024")
-                    .arg(
-                        Path::new(env!("CARGO_MANIFEST_DIR"))
-                            .join("tests/fixtures/launch_probe.rs")
-                    )
-                    .arg("-o")
-                    .arg(&exe)
-                    .status()
-                    .unwrap()
-                    .success()
-            );
-            let pending = PendingProcess::create_with_visibility(&exe, temp.path(), true).unwrap();
-            let pid = pending.pid;
-            let process = pending.resume().unwrap();
-            let deadline = Instant::now() + Duration::from_secs(10);
-            while !temp.path().join("probe-state.txt").is_file() && Instant::now() < deadline {
-                std::thread::sleep(Duration::from_millis(50));
-            }
-            let content = fs::read_to_string(temp.path().join("probe-state.txt")).unwrap();
-            assert!(content.ends_with("\nfalse\nfalse"), "{content}");
-            drop(process);
-            assert!(inspect_process(pid).unwrap().unwrap().exit_code.is_none());
-            let handle = unsafe {
-                OwnedHandle::from_raw_handle(windows_sys::Win32::System::Threading::OpenProcess(
-                    windows_sys::Win32::System::Threading::PROCESS_QUERY_LIMITED_INFORMATION
-                        | windows_sys::Win32::System::Threading::PROCESS_SYNCHRONIZE,
-                    0,
-                    pid,
-                ))
-            };
-            assert!(!handle.as_raw_handle().is_null());
-            fs::write(temp.path().join("probe-stop"), "stop").unwrap();
-            wait(&handle);
-            assert_eq!(inspect_process(pid).unwrap().unwrap().exit_code, Some(7));
-            assert!(
-                fs::read_to_string(temp.path().join("host.stdout.log"))
-                    .unwrap()
-                    .contains("MCDH isolated launch probe")
-            );
-            assert_eq!(
-                fs::read_to_string(temp.path().join("host.stderr.log")).unwrap(),
-                ""
-            );
         }
 
         #[test]

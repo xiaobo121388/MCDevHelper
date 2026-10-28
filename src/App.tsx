@@ -702,7 +702,7 @@ export function SettingsDialog({ settings: initialSettings, mcdk, updater, onSet
 
         <div className="settings-panel">
           <div className="settings-panel-body">
-            {section === "plugins" && <PluginSettings mcdk={mcdk} onNotice={onNotice} onOpenPanel={(request) => { if (!nativeWindows) applyAppearance(initialSettings); onOpenPluginPanel(request); }} />}
+            {section === "plugins" && <PluginSettings onNotice={onNotice} onOpenPanel={(request) => { if (!nativeWindows) applyAppearance(initialSettings); onOpenPluginPanel(request); }} />}
             {section === "quickExport" && <QuickExportOptions value={settings.quick_export ?? DEFAULT_QUICK_EXPORT} disabled={!!busy} onChange={(quick_export) => setSettings((current) => ({ ...current, quick_export }))} />}
             {section === "exports" && <CustomExportSettings />}
             {section === "paths" && <section>

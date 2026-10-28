@@ -15,7 +15,6 @@
     "license-report": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/generate-license-report.ps1",
     "release:prepare": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/prepare-sidecar.ps1",
     "mcdk:prepare": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/prepare-mcdk.ps1",
-    "mcde:prepare": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/prepare-mcde.ps1",
     "release:package": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/package-portable.ps1",
     "release:windows": "pnpm license-report && pnpm release:prepare && tauri build && pnpm release:package"
   },

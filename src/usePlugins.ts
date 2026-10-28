@@ -55,7 +55,7 @@ export function usePlugins(onNotice: (message: string) => void, onPanel: (reques
       const execution = await operation(command.title, (id) => pluginApi.execute(plugin.manifest.id, plugin.fingerprint, command.id, input, componentId, id));
       await applyActions(plugin, execution);
       await notifyWorkspace();
-      if (!execution.actions.length && plugin.source.kind !== "builtin") setResult({ title: command.title, value: execution.value });
+      if (!execution.actions.length) setResult({ title: command.title, value: execution.value });
       onNotice(`${command.title}已完成。`);
     } catch { /* The persistent task error is rendered by the host. */ }
   }, [operation, applyActions, onNotice]);

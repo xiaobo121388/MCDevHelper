@@ -33,7 +33,6 @@ impl Drop for Operation {
 impl DesktopPlugins {
     pub fn new(index: LocalIndex) -> Result<Self> {
         let service = PluginService::new(index)?;
-        service.refresh_builtins()?;
         Ok(Self {
             service,
             operations: Arc::default(),
@@ -77,26 +76,6 @@ impl DesktopPlugins {
 pub(crate) async fn list_plugins(state: State<'_, DesktopPlugins>) -> Result<Vec<PluginSummary>> {
     let service = state.service.clone();
     blocking(move || service.list()).await
-}
-
-#[tauri::command]
-pub(crate) async fn list_builtin_plugins(
-    state: State<'_, DesktopPlugins>,
-) -> Result<Vec<mcdh_plugins::PluginManifest>> {
-    let service = state.service.clone();
-    blocking(move || service.builtin_catalog()).await
-}
-
-#[tauri::command]
-pub(crate) async fn install_builtin_plugin(
-    app: tauri::AppHandle,
-    state: State<'_, DesktopPlugins>,
-    plugin_id: String,
-) -> Result<PluginSummary> {
-    let service = state.service.clone();
-    let result = blocking(move || service.install_builtin(&plugin_id)).await;
-    app.state::<crate::mcdk_manager::McdkManager>().emit(&app);
-    result
 }
 
 #[tauri::command]
@@ -147,7 +126,6 @@ pub(crate) fn discard_plugin_preview(
 
 #[tauri::command]
 pub(crate) async fn configure_plugin(
-    app: tauri::AppHandle,
     state: State<'_, DesktopPlugins>,
     plugin_id: String,
     fingerprint: String,
@@ -156,70 +134,27 @@ pub(crate) async fn configure_plugin(
     settings: Value,
 ) -> Result<PluginSummary> {
     let service = state.service.clone();
-    let native = plugin_id == mcdh_plugins::MCDE_PLUGIN_ID;
-    let result =
-        blocking(move || service.configure(&plugin_id, &fingerprint, enabled, allow_mcp, settings))
-            .await;
-    if native {
-        app.state::<crate::mcdk_manager::McdkManager>().emit(&app);
-    }
-    result
+    blocking(move || service.configure(&plugin_id, &fingerprint, enabled, allow_mcp, settings))
+        .await
 }
 
 #[tauri::command]
 pub(crate) async fn uninstall_plugin(
-    app: tauri::AppHandle,
     state: State<'_, DesktopPlugins>,
     plugin_id: String,
     clear_data: bool,
 ) -> Result<()> {
     let service = state.service.clone();
-    let native = plugin_id == mcdh_plugins::MCDE_PLUGIN_ID;
-    let result = blocking(move || service.uninstall(&plugin_id, clear_data)).await;
-    if native {
-        app.state::<crate::mcdk_manager::McdkManager>().emit(&app);
-    }
-    result
+    blocking(move || service.uninstall(&plugin_id, clear_data)).await
 }
 
 #[tauri::command]
 pub(crate) async fn execute_plugin_command(
-    app: tauri::AppHandle,
-    manager: State<'_, crate::mcdk_manager::McdkManager>,
     state: State<'_, DesktopPlugins>,
     request: ExecutionRequest,
     operation_id: String,
 ) -> Result<ExecutionResult> {
     let operation = state.operation(operation_id)?;
-    if request.plugin_id == mcdh_plugins::MCDE_PLUGIN_ID {
-        let service = state.service.clone();
-        let manager = manager.inner().clone();
-        let cancellation = operation.cancellation.clone();
-        return blocking(move || {
-            let result = (|| {
-                cancellation.check()?;
-                let _lease = service.mcde_command(&request)?;
-                let component_id = request.component_id.as_deref().ok_or_else(|| {
-                    PluginError::new("invalid_input", "Missing component context")
-                })?;
-                let session = crate::mcdk_launch::launch(
-                    &app,
-                    &manager,
-                    component_id,
-                    mcdh_core::mcdk_session::SessionMode::Editor,
-                )?;
-                Ok(ExecutionResult {
-                    value: serde_json::to_value(session)?,
-                    actions: vec![],
-                })
-            })();
-            if let Err(error) = &result {
-                let _ = service.record_mcde_error(error);
-            }
-            result
-        })
-        .await;
-    }
     state
         .service
         .execute(

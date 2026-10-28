@@ -38,8 +38,6 @@ export const api = {
   checkMcdkUpdate: () => invoke<McdkStatus>("check_mcdk_update"),
   installMcdkUpdate: () => invoke<McdkStatus>("install_mcdk_update"),
   launchGame: (componentId: string) => invoke<McdkSession>("launch_component_game", { componentId }),
-  launchEditor: (componentId: string) => invoke<McdkSession>("launch_component_editor", { componentId }),
-  setMcdeDirectory: (directory: string | null) => invoke<McdkStatus>("set_mcde_directory", { directory }),
   version: () => invoke<string>("app_version"),
   checkForUpdates: () => invoke<UpdateCheckResult>("check_for_updates"),
   appUpdateError: (clear = false) => invoke<string | null>("app_update_error", { clear }),

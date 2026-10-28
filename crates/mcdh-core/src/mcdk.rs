@@ -278,7 +278,7 @@ pub fn verify_binary(path: &Path, version: &McdkVersion) -> Result<()> {
     verify_pe(&bytes)
 }
 
-pub(crate) fn verify_pe(bytes: &[u8]) -> Result<()> {
+fn verify_pe(bytes: &[u8]) -> Result<()> {
     let offset = bytes
         .get(0x3c..0x40)
         .map(|b| u32::from_le_bytes(b.try_into().unwrap()) as usize);

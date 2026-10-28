@@ -49,9 +49,6 @@ pub struct McdkStatus {
     pub error: Option<String>,
     pub downloaded_bytes: u64,
     pub download_size: Option<u64>,
-    pub mcde: Option<mcdh_core::mcde::McdeStatus>,
-    pub mcde_plugin_installed: bool,
-    pub mcde_plugin_enabled: bool,
 }
 
 #[derive(Clone)]
@@ -59,23 +56,14 @@ pub struct McdkManager {
     pub index: LocalIndex,
     pub store: McdkStore,
     pub bundled_binary: PathBuf,
-    pub bundled_editor: PathBuf,
-    pub mcde_host: PathBuf,
 }
 
 impl McdkManager {
     pub fn new(index: LocalIndex, bundled_binary: PathBuf) -> Self {
-        let resources = bundled_binary
-            .parent()
-            .and_then(std::path::Path::parent)
-            .unwrap_or(std::path::Path::new("."))
-            .join("mcde");
         Self {
             store: McdkStore::new(index.clone()),
             index,
             bundled_binary,
-            bundled_editor: resources.join("editor"),
-            mcde_host: resources.join("host"),
         }
     }
 
@@ -101,21 +89,7 @@ impl McdkManager {
             .or_else(|| self.bundled_binary.is_file().then(McdkVersion::bundled));
         let session: mcdh_core::mcdk_session::SessionState =
             self.store.read(mcdh_core::mcdk_session::SESSION_KEY)?;
-        let (mcde_plugin_installed, mcde_plugin_enabled) =
-            mcdh_plugins::PluginService::new(self.index.clone())
-                .and_then(|service| service.mcde_state())
-                .map_err(|error| CoreError::InvalidInput(error.to_string()))?;
-        let mcde = if mcde_plugin_enabled {
-            Some(
-                mcdh_core::mcde::McdeStore::new(self.store.clone())
-                    .status(&self.bundled_editor, &self.mcde_host)?,
-            )
-        } else {
-            None
-        };
         Ok(McdkStatus {
-            mcde_plugin_installed,
-            mcde_plugin_enabled,
             session: session.session,
             last_exit: session.last_exit,
             current_version: version.as_ref().map(|v| v.version.clone()),
@@ -127,7 +101,6 @@ impl McdkManager {
             error: update.error,
             downloaded_bytes: update.downloaded_bytes,
             download_size: update.candidate.map(|v| v.size),
-            mcde,
         })
     }
 
@@ -418,36 +391,6 @@ pub async fn mcdk_status(manager: State<'_, McdkManager>) -> CommandResult<McdkS
 }
 
 #[tauri::command]
-pub async fn set_mcde_directory(
-    app: tauri::AppHandle,
-    manager: State<'_, McdkManager>,
-    directory: Option<String>,
-) -> CommandResult<McdkStatus> {
-    let manager = manager.inner().clone();
-    blocking(move || {
-        let _plugin = mcdh_plugins::PluginService::new(manager.index.clone())
-            .and_then(|service| service.mcde_lease(None))
-            .map_err(|error| CoreError::InvalidInput(error.to_string()))?;
-        let _component = manager.index.try_lock_mutations()?;
-        let _lock = manager.store.lock("state")?;
-        if mcdh_core::mcdk_session::refresh_session(&manager.store)?
-            .session
-            .is_some()
-        {
-            return Err(CoreError::InvalidInput(
-                "请先退出正在运行的 MCDK / MCDE 会话".into(),
-            ));
-        }
-        mcdh_core::mcde::McdeStore::new(manager.store.clone())
-            .set_directory(directory.as_deref().map(std::path::Path::new))?;
-        manager.emit(&app);
-        manager.status()
-    })
-    .await
-    .map_err(|e| e.payload())
-}
-
-#[tauri::command]
 pub async fn set_mcdk_auto_update(
     app: tauri::AppHandle,
     manager: State<'_, McdkManager>,
@@ -503,51 +446,6 @@ pub fn setup(app: &mut tauri::App) -> std::result::Result<(), Box<dyn std::error
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn uninstalled_or_disabled_mcde_does_not_probe_native_resources() {
-        let temp = tempfile::tempdir().unwrap();
-        let index = LocalIndex::open(temp.path().join("db")).unwrap();
-        let manager = McdkManager::new(index.clone(), temp.path().join("missing.exe"));
-        index
-            .set_setting("mcde.installation", "invalid JSON must not be read")
-            .unwrap();
-        let plugins = crate::plugins::DesktopPlugins::new(index.clone()).unwrap();
-        let absent = manager.status().unwrap();
-        assert!(!absent.mcde_plugin_installed && !absent.mcde_plugin_enabled);
-        assert!(absent.mcde.is_none());
-        index.set_setting("mcde.installation", "{}").unwrap();
-        let record = plugins
-            .service
-            .install_builtin(mcdh_plugins::MCDE_PLUGIN_ID)
-            .unwrap();
-        let installed = manager.status().unwrap();
-        assert!(installed.mcde_plugin_installed && installed.mcde_plugin_enabled);
-        assert!(installed.mcde.unwrap().error.is_some());
-        plugins
-            .service
-            .configure(
-                mcdh_plugins::MCDE_PLUGIN_ID,
-                &record.fingerprint,
-                false,
-                false,
-                serde_json::json!({}),
-            )
-            .unwrap();
-        index
-            .set_setting("mcde.installation", "invalid JSON must not be read")
-            .unwrap();
-        let disabled = manager.status().unwrap();
-        assert!(disabled.mcde_plugin_installed && !disabled.mcde_plugin_enabled);
-        assert!(disabled.mcde.is_none());
-        plugins
-            .service
-            .uninstall(mcdh_plugins::MCDE_PLUGIN_ID, false)
-            .unwrap();
-        let reopened = crate::plugins::DesktopPlugins::new(index).unwrap();
-        assert!(reopened.service.list().unwrap().is_empty());
-        assert!(manager.status().unwrap().mcde.is_none());
-    }
 
     #[tokio::test]
     async fn automatic_download_cancels_but_manual_download_remains_allowed() {

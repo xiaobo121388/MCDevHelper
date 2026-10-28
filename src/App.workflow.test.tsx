@@ -36,8 +36,6 @@ const mocks = vi.hoisted(() => ({
   mcdkStatus: vi.fn(),
   onMcdkStatus: vi.fn(),
   launchGame: vi.fn(),
-  launchEditor: vi.fn(),
-  setMcdeDirectory: vi.fn(),
   setMcdkAutoUpdate: vi.fn(),
   checkMcdkUpdate: vi.fn(),
   installMcdkUpdate: vi.fn(),
@@ -82,8 +80,6 @@ vi.mock("./api", () => ({
     mcdkStatus: mocks.mcdkStatus,
     onMcdkStatus: mocks.onMcdkStatus,
     launchGame: mocks.launchGame,
-    launchEditor: mocks.launchEditor,
-    setMcdeDirectory: mocks.setMcdeDirectory,
     setMcdkAutoUpdate: mocks.setMcdkAutoUpdate,
     checkMcdkUpdate: mocks.checkMcdkUpdate,
     installMcdkUpdate: mocks.installMcdkUpdate,
@@ -97,18 +93,17 @@ import { releaseNotesFor } from "./releaseNotes";
 import type { ComponentSummary, McdkSession, McdkStatus } from "./types";
 import type { AppUpdateProgress } from "./types";
 
-const mcdkReady: McdkStatus & {mcde: NonNullable<McdkStatus["mcde"]>} = {
+const mcdkReady: McdkStatus = {
   available: true, current_version: "1.6.1", auto_update: true, phase: "idle", latest_version: null,
   last_checked_at: null, error: null, downloaded_bytes: 0, download_size: null, session: null, last_exit: null,
-  mcde: { available: true, directory: "D:/Bundled/MCDE", configured: false, host_available: true, host_revision: "abc1234", plugin_version: "0.1.0", error: null },
 };
 
 const launchComponent: ComponentSummary = {
   id: "game", name: "编辑测试", kind: "addon", path: "D:/Project", origin: { kind: "single" }, manifests: [], tags: [], favorite: false, size_bytes: 1,
 };
-const editorSession: McdkSession = {
-  component_id: "game", component_path: "D:/Project", executable: "D:/Bundled/MCDEHost.exe", version: "1.6.1", pid: 100,
-  created_at: "2026-10-06T12:00:00Z", mode: "editor", launch_directory: "D:/Project",
+const gameSession: McdkSession = {
+  component_id: "game", component_path: "D:/Project", executable: "D:/Bundled/MCDK.exe", version: "1.6.1", pid: 100,
+  created_at: "2026-10-06T12:00:00Z",
 };
 
 describe("component workspace filters", () => {
@@ -162,8 +157,6 @@ describe("component workspace filters", () => {
     mocks.mcdkStatus.mockReset().mockResolvedValue(mcdkReady);
     mocks.onMcdkStatus.mockReset().mockResolvedValue(() => undefined);
     mocks.launchGame.mockReset();
-    mocks.launchEditor.mockReset();
-    mocks.setMcdeDirectory.mockReset().mockResolvedValue(mcdkReady);
     mocks.setMcdkAutoUpdate.mockReset().mockResolvedValue({ ...mcdkReady, auto_update: false });
     mocks.checkMcdkUpdate.mockReset().mockResolvedValue(mcdkReady);
     mocks.installMcdkUpdate.mockReset().mockResolvedValue(mcdkReady);
@@ -197,154 +190,14 @@ describe("component workspace filters", () => {
     render(<App />);
     const launch = await screen.findByRole("button", { name: "启动游戏 测试模组" });
     await waitFor(() => expect(launch).toBeEnabled());
-    expect(launch.previousElementSibling).toBe(screen.getByRole("button", { name: "在 MCDE 中打开 测试模组" }));
     expect(launch.nextElementSibling).toHaveAttribute("title", "打开目录");
     fireEvent.click(launch);
     fireEvent.click(launch);
     expect(mocks.launchGame).toHaveBeenCalledTimes(1);
     expect(mocks.launchGame).toHaveBeenCalledWith("game");
-    expect(mocks.launchEditor).not.toHaveBeenCalled();
     expect(launch).toBeDisabled();
     complete({ component_id: "game", pid: 100, version: "1.6.1" });
     expect(await screen.findByText("已打开 MCDK 启动器")).toBeInTheDocument();
-  });
-
-  it.each(["editor", "game"] as const)("shares the launch guard when %s is in flight", async (mode) => {
-    mocks.refresh.mockResolvedValue({ components: [launchComponent, { ...launchComponent, id: "other", name: "另一个组件" }], sources: [], warnings: [] });
-    const session = { ...editorSession, mode };
-    const start = mode === "editor" ? mocks.launchEditor : mocks.launchGame;
-    let complete!: (value: McdkSession) => void;
-    start.mockReturnValue(new Promise((resolve) => { complete = resolve; }));
-    render(<App />);
-    const editor = await screen.findByRole("button", { name: "在 MCDE 中打开 编辑测试" });
-    const game = screen.getByRole("button", { name: "启动游戏 编辑测试" });
-    await waitFor(() => expect(editor).toBeEnabled());
-    expect(editor.nextElementSibling).toBe(game);
-    expect(editor).toHaveAttribute("title", "在 MCDE 中打开 编辑测试");
-    expect(editor.textContent).toBe("");
-    const selected = mode === "editor" ? editor : game;
-    fireEvent.click(selected);
-    fireEvent.click(selected);
-    fireEvent.click(mode === "editor" ? game : editor);
-    fireEvent.click(screen.getByRole("button", { name: "在 MCDE 中打开 另一个组件" }));
-    fireEvent.click(screen.getByRole("button", { name: "启动游戏 另一个组件" }));
-    expect(start).toHaveBeenCalledExactlyOnceWith("game");
-    expect(mode === "editor" ? mocks.launchGame : mocks.launchEditor).not.toHaveBeenCalled();
-    expect(selected).toHaveAttribute("aria-busy", "true");
-    expect(mode === "editor" ? game : editor).toHaveAttribute("aria-busy", "false");
-    for (const button of [editor, game, screen.getByRole("button", { name: "在 MCDE 中打开 另一个组件" })]) expect(button).toBeDisabled();
-    mocks.mcdkStatus.mockResolvedValue({ ...mcdkReady, session });
-    await act(async () => complete(session));
-    expect(await screen.findByText(mode === "editor" ? "已启动 MCDE 宿主（游戏就绪状态未确认）" : "已打开 MCDK 启动器")).toBeInTheDocument();
-    expect(editor).toBeDisabled();
-    expect(game).toBeDisabled();
-    expect(mode === "editor" ? editor : game).toHaveClass("active");
-    expect(mode === "editor" ? game : editor).not.toHaveClass("active");
-  });
-
-  it("reports editor launch errors and allows a retry without launching the game", async () => {
-    mocks.refresh.mockResolvedValue({ components: [launchComponent], sources: [], warnings: [] });
-    mocks.launchEditor.mockRejectedValueOnce("MCDE 插件启动失败").mockResolvedValue(editorSession);
-    render(<App />);
-    const editor = await screen.findByRole("button", { name: "在 MCDE 中打开 编辑测试" });
-    await waitFor(() => expect(editor).toBeEnabled());
-    fireEvent.click(editor);
-    expect(await screen.findByText("MCDE 插件启动失败")).toBeInTheDocument();
-    await waitFor(() => expect(editor).toBeEnabled());
-    mocks.mcdkStatus.mockResolvedValue({ ...mcdkReady, session: editorSession });
-    fireEvent.click(editor);
-    expect(await screen.findByText("已启动 MCDE 宿主（游戏就绪状态未确认）")).toBeInTheDocument();
-    expect(mocks.launchEditor).toHaveBeenCalledTimes(2);
-    expect(mocks.launchGame).not.toHaveBeenCalled();
-    expect(screen.getByRole("button", { name: "启动游戏 编辑测试" })).toBeDisabled();
-  });
-
-  it("can launch the validated editor host independently of the ordinary MCDK binary", async () => {
-    const status = { ...mcdkReady, available: false, current_version: null };
-    mocks.refresh.mockResolvedValue({ components: [launchComponent], sources: [], warnings: [] });
-    mocks.mcdkStatus.mockResolvedValue(status);
-    mocks.launchEditor.mockResolvedValue(editorSession);
-    render(<App />);
-    const editor = await screen.findByRole("button", { name: "在 MCDE 中打开 编辑测试" });
-    await waitFor(() => expect(editor).toBeEnabled());
-    expect(screen.getByRole("button", { name: "启动游戏 编辑测试" })).toBeDisabled();
-    mocks.mcdkStatus.mockResolvedValue({ ...status, session: editorSession });
-    fireEvent.click(editor);
-    expect(await screen.findByText("已启动 MCDE 宿主（游戏就绪状态未确认）")).toBeInTheDocument();
-    expect(mocks.launchEditor).toHaveBeenCalledExactlyOnceWith("game");
-    expect(mocks.launchGame).not.toHaveBeenCalled();
-  });
-
-  it.each([
-    ["missing plugin", { available: false }, "MCDE 插件不可用，请在开发工具中配置插件目录"],
-    ["missing host", { available: false, host_available: false, host_revision: null }, "MCDE 宿主不可用"],
-    ["invalid plugin", { available: false, error: "MCDE 插件缺少入口文件" }, "MCDE 插件缺少入口文件"],
-  ] as const)("disables only the editor launch for a %s and exposes its setup error", async (_reason, mcde, issue) => {
-    mocks.refresh.mockResolvedValue({ components: [launchComponent], sources: [], warnings: [] });
-    mocks.mcdkStatus.mockResolvedValue({ ...mcdkReady, mcde: { ...mcdkReady.mcde, ...mcde } });
-    render(<App />);
-    const editor = await screen.findByRole("button", { name: "在 MCDE 中打开 编辑测试" });
-    await waitFor(() => expect(editor).toHaveAttribute("title", issue));
-    expect(editor).toBeDisabled();
-    fireEvent.click(editor);
-    expect(mocks.launchEditor).not.toHaveBeenCalled();
-    expect(screen.getByRole("button", { name: "启动游戏 编辑测试" })).toBeEnabled();
-    fireEvent.click(screen.getByRole("button", { name: "设置" }));
-    fireEvent.click(within(screen.getByRole("navigation", { name: "设置分类" })).getByRole("button", { name: "开发工具" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent(issue);
-    expect(screen.getByRole("textbox", { name: "MCDE 插件目录" })).toHaveAttribute("aria-invalid", "true");
-  });
-
-  it.each(["disabled", "uninstalled", "loading"])("hides editor controls and settings while MCDE is %s", async (state) => {
-    mocks.refresh.mockResolvedValue({components:[launchComponent],sources:[],warnings:[]});
-    if (state === "loading") mocks.mcdkStatus.mockReturnValue(new Promise(() => {}));
-    else mocks.mcdkStatus.mockResolvedValue({...mcdkReady,mcde:state === "disabled" ? mcdkReady.mcde : null,mcde_plugin_installed:state !== "uninstalled",mcde_plugin_enabled:false});
-    render(<App />);
-    await screen.findByRole("heading", {name:"编辑测试"});
-    expect(screen.queryByRole("button", {name:"在 MCDE 中打开 编辑测试"})).not.toBeInTheDocument();
-    expect(mocks.launchEditor).not.toHaveBeenCalled();
-    if (state !== "loading") expect(screen.getByRole("button", {name:"启动游戏 编辑测试"})).toBeEnabled();
-    fireEvent.click(screen.getByRole("button", {name:"设置"}));
-    fireEvent.click(within(screen.getByRole("navigation", {name:"设置分类"})).getByRole("button", {name:"开发工具"}));
-    expect(screen.queryByRole("textbox", {name:"MCDE 插件目录"})).not.toBeInTheDocument();
-    expect(screen.queryByText(/MCDE/)).not.toBeInTheDocument();
-  });
-
-  it("removes the active editor UI on an uninstall event without emitting an old editor error", async () => {
-    const notice = vi.fn();
-    const { result } = renderHook(() => useMcdk(notice));
-    await waitFor(() => expect(result.current.status).toEqual(mcdkReady));
-    const view = render(<><LaunchGameButton componentId="game" name="编辑测试" mcdk={result.current} /><McdkSettings mcdk={result.current} /></>);
-    expect(screen.getByRole("button", {name:"在 MCDE 中打开 编辑测试"})).toBeInTheDocument();
-    await act(async () => {
-      mocks.onMcdkStatus.mock.calls[0][0]({...mcdkReady,mcde:null,mcde_plugin_installed:false,mcde_plugin_enabled:false,last_exit:{id:"old-editor",component_id:"game",exit_code:1,mode:"editor"}});
-    });
-    view.rerender(<><LaunchGameButton componentId="game" name="编辑测试" mcdk={result.current} /><McdkSettings mcdk={result.current} /></>);
-    expect(screen.queryByRole("button", {name:"在 MCDE 中打开 编辑测试"})).not.toBeInTheDocument();
-    expect(screen.queryByText(/MCDE/)).not.toBeInTheDocument();
-    expect(notice).not.toHaveBeenCalled();
-    await act(async () => { await result.current.launchEditor("game"); });
-    expect(mocks.launchEditor).not.toHaveBeenCalled();
-  });
-
-  it("does not dispatch launches or plugin configuration outside the desktop app", async () => {
-    mocks.desktop = false;
-    const notice = vi.fn();
-    const { result } = renderHook(() => useMcdk(notice));
-    const mcdk = { ...result.current, status: mcdkReady };
-    render(<><LaunchGameButton componentId="game" name="编辑测试" mcdk={mcdk} /><McdkSettings mcdk={mcdk} /></>);
-    const editor = screen.getByRole("button", { name: "在 MCDE 中打开 编辑测试" });
-    expect(editor).toBeDisabled();
-    expect(editor).toHaveAttribute("title", "请在桌面应用中打开 MCDE");
-    expect(screen.getByRole("button", { name: "启动游戏 编辑测试" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "选择 MCDE 插件目录" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "恢复内置 MCDE 插件" })).toBeDisabled();
-    await act(async () => { await result.current.launchEditor("game"); await result.current.launch("game"); });
-    expect(mocks.launchEditor).not.toHaveBeenCalled();
-    expect(mocks.launchGame).not.toHaveBeenCalled();
-    expect(mocks.open).not.toHaveBeenCalled();
-    expect(mocks.setMcdeDirectory).not.toHaveBeenCalled();
-    expect(mocks.mcdkStatus).not.toHaveBeenCalled();
   });
 
   it.each(["create", "import"] as const)("adds the %s result without refreshing or resetting filters", async (action) => {
@@ -383,9 +236,6 @@ describe("component workspace filters", () => {
     fireEvent.click(button);
     await waitFor(() => expect(mocks.quickExport).toHaveBeenCalledOnce());
     expect(screen.getByRole("button", { name: "启动游戏 快捷导出" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "在 MCDE 中打开 快捷导出" })).toBeDisabled();
-    fireEvent.click(screen.getByRole("button", { name: "在 MCDE 中打开 快捷导出" }));
-    expect(mocks.launchEditor).not.toHaveBeenCalled();
     expect(screen.getByRole("button", { name: "配置 快捷导出" })).toBeDisabled();
     await act(async () => complete({ actual_path: "D:/Exports/快捷导出.zip", modified_files: [], warnings: [], component: { ...component, version: [1, 0, 1] } }));
     expect(screen.getByText("v1.0.1")).toBeInTheDocument();
@@ -484,96 +334,15 @@ describe("component workspace filters", () => {
     expect(await screen.findByText("v1.7.0")).toBeInTheDocument();
   });
 
-  it("persists the plugin directory independently, retains it on reopening, and resets to the bundled default", async () => {
-    mocks.refresh.mockResolvedValue({ components: [], sources: [], warnings: [] });
-    const custom = { ...mcdkReady, mcde: { ...mcdkReady.mcde, directory: "D:/Plugins/MCDE", configured: true, host_revision: "def4567", plugin_version: "0.2.0" } };
-    mocks.setMcdeDirectory.mockResolvedValueOnce(custom).mockResolvedValueOnce(mcdkReady);
-    let choose!: (value: string) => void;
-    mocks.open.mockReturnValue(new Promise((resolve) => { choose = resolve; }));
-    render(<App />);
-    fireEvent.click(await screen.findByRole("button", { name: "设置" }));
-    fireEvent.click(within(screen.getByRole("navigation", { name: "设置分类" })).getByRole("button", { name: "开发工具" }));
-    const directory = await screen.findByRole("textbox", { name: "MCDE 插件目录" });
-    await waitFor(() => expect(directory).toHaveValue("D:/Bundled/MCDE"));
-    expect(directory).toHaveAttribute("readonly");
-    expect(screen.getByText("宿主分支 / 修订：feature/plugin-system · abc1234")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "恢复内置 MCDE 插件" })).toBeDisabled();
-    const picker = screen.getByRole("button", { name: "选择 MCDE 插件目录" });
-    fireEvent.click(picker);
-    fireEvent.click(picker);
-    expect(mocks.open).toHaveBeenCalledExactlyOnceWith({ title: "选择 MCDE 插件目录", directory: true, multiple: false, defaultPath: "D:/Bundled/MCDE" });
-    expect(picker).toBeDisabled();
-    expect(picker).toHaveAttribute("aria-busy", "true");
-    await act(async () => choose("D:/Plugins/MCDE"));
-    await waitFor(() => expect(directory).toHaveValue("D:/Plugins/MCDE"));
-    expect(mocks.setMcdeDirectory).toHaveBeenCalledExactlyOnceWith("D:/Plugins/MCDE");
-    expect(screen.getByText("自定义")).toBeInTheDocument();
-    expect(screen.getByText("宿主分支 / 修订：feature/plugin-system · def4567")).toBeInTheDocument();
-    expect(within(screen.getByRole("region", { name: "MCDE" })).getByText("v0.2.0")).toBeInTheDocument();
-    expect(mocks.setSettings).not.toHaveBeenCalled();
-    expect(mocks.setMcdkAutoUpdate).not.toHaveBeenCalled();
-    fireEvent.click(within(screen.getByRole("dialog", { name: "设置" })).getByText("关闭", { selector: "button" }));
-    fireEvent.click(screen.getByRole("button", { name: "设置" }));
-    fireEvent.click(within(screen.getByRole("navigation", { name: "设置分类" })).getByRole("button", { name: "开发工具" }));
-    expect(screen.getByRole("textbox", { name: "MCDE 插件目录" })).toHaveValue("D:/Plugins/MCDE");
-    fireEvent.click(screen.getByRole("button", { name: "恢复内置 MCDE 插件" }));
-    await waitFor(() => expect(screen.getByRole("textbox", { name: "MCDE 插件目录" })).toHaveValue("D:/Bundled/MCDE"));
-    expect(mocks.setMcdeDirectory).toHaveBeenLastCalledWith(null);
-    expect(mocks.setMcdeDirectory).toHaveBeenCalledTimes(2);
-    expect(screen.getByRole("button", { name: "恢复内置 MCDE 插件" })).toBeDisabled();
-    expect(screen.getByText("内置默认")).toBeInTheDocument();
-    expect(mocks.setSettings).not.toHaveBeenCalled();
-  });
-
-  it("leaves the plugin configuration unchanged when its directory picker is cancelled", async () => {
-    mocks.refresh.mockResolvedValue({ components: [], sources: [], warnings: [] });
-    mocks.open.mockResolvedValue(null);
-    render(<App />);
-    fireEvent.click(await screen.findByRole("button", { name: "设置" }));
-    fireEvent.click(within(screen.getByRole("navigation", { name: "设置分类" })).getByRole("button", { name: "开发工具" }));
-    const picker = await screen.findByRole("button", { name: "选择 MCDE 插件目录" });
-    await waitFor(() => expect(picker).toBeEnabled());
-    fireEvent.click(picker);
-    await waitFor(() => expect(picker).toBeEnabled());
-    expect(mocks.open).toHaveBeenCalledOnce();
-    expect(mocks.setMcdeDirectory).not.toHaveBeenCalled();
-    expect(screen.getByRole("textbox", { name: "MCDE 插件目录" })).toHaveValue("D:/Bundled/MCDE");
-    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
-  });
-
-  it.each(["picker", "validation"] as const)("shows a plugin directory %s error and unlocks the controls", async (failure) => {
-    mocks.refresh.mockResolvedValue({ components: [], sources: [], warnings: [] });
-    if (failure === "picker") mocks.open.mockRejectedValue("无法打开 MCDE 目录选择器");
-    else {
-      mocks.open.mockResolvedValue("D:/Invalid/MCDE");
-      mocks.setMcdeDirectory.mockRejectedValue("MCDE 插件目录校验失败");
-    }
-    render(<App />);
-    fireEvent.click(await screen.findByRole("button", { name: "设置" }));
-    fireEvent.click(within(screen.getByRole("navigation", { name: "设置分类" })).getByRole("button", { name: "开发工具" }));
-    const picker = await screen.findByRole("button", { name: "选择 MCDE 插件目录" });
-    await waitFor(() => expect(picker).toBeEnabled());
-    fireEvent.click(picker);
-    expect(await screen.findByRole("alert")).toHaveTextContent(failure === "picker" ? "无法打开 MCDE 目录选择器" : "MCDE 插件目录校验失败");
-    await waitFor(() => expect(picker).toBeEnabled());
-    expect(screen.getByRole("textbox", { name: "MCDE 插件目录" })).toHaveValue("D:/Bundled/MCDE");
-    expect(mocks.setSettings).not.toHaveBeenCalled();
-    if (failure === "picker") expect(mocks.setMcdeDirectory).not.toHaveBeenCalled();
-    else expect(mocks.setMcdeDirectory).toHaveBeenCalledExactlyOnceWith("D:/Invalid/MCDE");
-  });
-
-  it.each([undefined, "game", "editor"] as const)("restores a %s session and protects component controls, including legacy sessions", async (mode) => {
+  it("restores a running session and protects component controls", async () => {
     mocks.refresh.mockResolvedValue({ components: [{ id: "game", name: "运行模组", kind: "addon", path: "D:\\作品", origin: { kind: "single" }, manifests: [], tags: [], size_bytes: 1 }], sources: [], warnings: [] });
-    mocks.mcdkStatus.mockResolvedValue({ ...mcdkReady, session: { component_id: "game", pid: 100, version: "1.6.1", ...(mode ? { mode, launch_directory: "D:/Project" } : {}) } });
+    mocks.mcdkStatus.mockResolvedValue({ ...mcdkReady, session: { component_id: "game", pid: 100, version: "1.6.1" } });
     render(<App />);
     const launch = await screen.findByRole("button", { name: "启动游戏 运行模组" });
-    await waitFor(() => expect(launch).toHaveAttribute("title", mode === "editor" ? "MCDE 宿主运行中" : "MCDK 会话运行中"));
+    await waitFor(() => expect(launch).toHaveAttribute("title", "MCDK 会话运行中"));
     expect(launch).toBeDisabled();
-    expect(screen.getByRole("button", { name: "在 MCDE 中打开 运行模组" })).toBeDisabled();
-    fireEvent.click(screen.getByRole("button", { name: "在 MCDE 中打开 运行模组" }));
     fireEvent.click(launch);
     expect(mocks.launchGame).not.toHaveBeenCalled();
-    expect(mocks.launchEditor).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: "配置 运行模组" }));
     for (const name of ["删除", "移动", "随机重生", "提升版本"]) expect(screen.getByRole("button", { name })).toBeDisabled();
     expect(screen.getByRole("button", { name: "复制" })).toBeEnabled();
@@ -589,36 +358,33 @@ describe("component workspace filters", () => {
     await waitFor(() => expect(mocks.mcdkStatus).toHaveBeenCalledOnce());
     act(() => receive(mcdkReady));
     const launch = result.current.launch;
-    const launchEditor = result.current.launchEditor;
     const legacy: McdkSession = { component_id: "game", component_path: "D:/Project", executable: "D:/MCDK.exe", version: "1.6.1", pid: 100, created_at: "2026-10-06T12:00:00Z" };
     act(() => {
       receive({ ...mcdkReady, session: legacy });
       void launch("game");
-      void launchEditor("game");
     });
     await act(async () => complete(mcdkReady));
     expect(result.current.status?.session).toBe(legacy);
     expect(mocks.launchGame).not.toHaveBeenCalled();
-    expect(mocks.launchEditor).not.toHaveBeenCalled();
     expect(notice).not.toHaveBeenCalled();
   });
 
-  it("does not replace a newer running session with an older configuration response", async () => {
+  it("does not replace a newer running session with an older settings response", async () => {
     let complete!: (status: McdkStatus) => void;
     let receive!: (status: McdkStatus) => void;
     mocks.onMcdkStatus.mockImplementation(async (handler) => { receive = handler; return () => undefined; });
-    mocks.setMcdeDirectory.mockReturnValue(new Promise((resolve) => { complete = resolve; }));
+    mocks.setMcdkAutoUpdate.mockReturnValue(new Promise((resolve) => { complete = resolve; }));
     const notice = vi.fn();
     const { result } = renderHook(() => useMcdk(notice));
     await waitFor(() => expect(result.current.status).toBe(mcdkReady));
     let update!: Promise<void>;
-    act(() => { update = result.current.update(() => mocks.setMcdeDirectory("D:/Plugins/MCDE")); });
-    const running = { ...mcdkReady, session: editorSession, mcde: { ...mcdkReady.mcde, directory: "D:/Plugins/MCDE", configured: true } };
+    act(() => { update = result.current.update(() => mocks.setMcdkAutoUpdate(false)); });
+    const running = { ...mcdkReady, session: gameSession, auto_update: false };
     act(() => receive(running));
     mocks.mcdkStatus.mockResolvedValue(running);
     await act(async () => { complete({ ...running, session: null }); await update; });
-    expect(result.current.status?.session).toBe(editorSession);
-    expect(result.current.status?.mcde?.directory).toBe("D:/Plugins/MCDE");
+    expect(result.current.status?.session).toBe(gameSession);
+    expect(result.current.status?.auto_update).toBe(false);
     expect(mocks.mcdkStatus).toHaveBeenCalledTimes(2);
   });
 

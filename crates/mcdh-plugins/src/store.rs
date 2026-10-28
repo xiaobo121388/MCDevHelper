@@ -121,10 +121,21 @@ impl PluginService {
     }
 
     pub(crate) fn registry(&self) -> Result<BTreeMap<String, InstalledPlugin>> {
-        self.index
+        let mut records: BTreeMap<String, InstalledPlugin> = self
+            .index
             .setting(REGISTRY)?
-            .map(|text| serde_json::from_str(&text).map_err(Into::into))
-            .unwrap_or_else(|| Ok(BTreeMap::new()))
+            .map(|text| serde_json::from_str(&text).map_err(PluginError::from))
+            .unwrap_or_else(|| Ok(BTreeMap::new()))?;
+        // Ignore retired host adapters without touching their files or plugin data.
+        records.retain(|_, record| {
+            !matches!(
+                record.repository,
+                PluginOrigin::Managed {
+                    kind: ManagedOrigin::Unsupported
+                }
+            )
+        });
+        Ok(records)
     }
 
     pub(crate) fn save_registry(&self, records: &BTreeMap<String, InstalledPlugin>) -> Result<()> {
@@ -283,9 +294,6 @@ impl PluginService {
         }
         let manifest: PluginManifest = serde_json::from_slice(&fs::read(manifest_path)?)?;
         manifest.validate()?;
-        if manifest.id == crate::MCDE_PLUGIN_ID {
-            return Err(invalid("This id is reserved for the built-in MCDE plugin"));
-        }
         let files = archive::inventory(&root)?;
         for entry in
             std::iter::once(&manifest.entry).chain(manifest.panels.iter().map(|panel| &panel.entry))
@@ -528,14 +536,6 @@ impl PluginService {
         if allow_mcp && !enabled {
             return Err(invalid("Disabled plugins cannot be authorized for MCP"));
         }
-        if id == crate::MCDE_PLUGIN_ID {
-            if allow_mcp {
-                return Err(invalid(
-                    "Native MCDE is desktop-only and does not expose MCP tools",
-                ));
-            }
-            self.ensure_mcde_idle()?;
-        }
         crate::manifest::validate_value(&record.manifest.settings_schema, &settings)?;
         record.enabled = enabled;
         record.mcp_fingerprint = allow_mcp.then(|| fingerprint.to_string());
@@ -549,9 +549,6 @@ impl PluginService {
     pub fn uninstall(&self, id: &str, clear_data: bool) -> Result<()> {
         let _registry = self.lease("registry", true)?;
         let _plugin = self.lease(id, true)?;
-        if id == crate::MCDE_PLUGIN_ID {
-            self.ensure_mcde_idle()?;
-        }
         let mut records = self.registry()?;
         let record = records
             .remove(id)
@@ -625,9 +622,6 @@ impl PluginService {
                 "untrusted_plugin",
                 "Plugin has not been explicitly trusted",
             ));
-        }
-        if record.manifest.id == crate::MCDE_PLUGIN_ID {
-            return crate::builtin::verify_mcde(record);
         }
         let root = self.version_directory(record)?;
         let files = archive::inventory(&root).map_err(|error| {

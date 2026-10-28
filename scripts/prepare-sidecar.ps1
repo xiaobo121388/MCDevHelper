@@ -2,12 +2,6 @@ $ErrorActionPreference = "Stop"
 
 $repoRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "..")).Path
 & (Join-Path $PSScriptRoot "prepare-mcdk.ps1")
-$mcdeResources = Join-Path $repoRoot "src-tauri\release-resources\mcde"
-if (Test-Path -LiteralPath (Join-Path $mcdeResources "host\manifest.json")) {
-    & (Join-Path $PSScriptRoot "prepare-mcde.ps1") -VerifyOnly
-} else {
-    New-Item -ItemType Directory -Force -Path $mcdeResources | Out-Null
-}
 $cargoPath = Join-Path $env:USERPROFILE ".cargo\bin\cargo.exe"
 $rustcPath = Join-Path $env:USERPROFILE ".cargo\bin\rustc.exe"
 if (-not (Test-Path -LiteralPath $cargoPath -PathType Leaf)) {

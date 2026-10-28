@@ -452,8 +452,6 @@ fn quick_custom_game_allows_pure_snapshot_but_rejects_source_or_manifest_changes
                     version: "1.6.1".into(),
                     pid: std::process::id(),
                     created_at: process.created_at,
-                    mode: crate::mcdk_session::SessionMode::Game,
-                    launch_directory: None,
                 }),
                 last_exit: None,
             },

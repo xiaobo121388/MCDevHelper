@@ -2298,7 +2298,6 @@ mod tests {
         crate::mcdk::McdkStore::new(index.clone()).write(SESSION_KEY, &SessionState { session: Some(McdkSession {
             component_id: component.id.clone(), component_path: component.path.clone(), executable: process.executable,
             version: "1.6.1".into(), pid: std::process::id(), created_at: process.created_at,
-            mode: crate::mcdk_session::SessionMode::Game, launch_directory: None,
         }), last_exit: None }).unwrap();
         assert!(service.delete_component(&component.id).is_err());
         assert!(service.move_component(&MoveComponentRequest { component_id: component.id.clone(), destination: temp.path().into(), mcs_compatible: false }).is_err());
