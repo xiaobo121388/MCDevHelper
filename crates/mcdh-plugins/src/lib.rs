@@ -4,6 +4,7 @@ mod archive;
 mod error;
 mod github;
 mod manifest;
+mod origin;
 mod runtime;
 mod sdk;
 mod store;

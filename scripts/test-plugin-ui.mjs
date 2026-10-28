@@ -58,6 +58,8 @@ try {
           if (command === "mcdk_status") return {available:false,current_version:null,auto_update:false,phase:"idle",latest_version:null,last_checked_at:null,error:null,downloaded_bytes:0,download_size:null,session:null,last_exit:null,mcde:{available:false,configured:false,host_available:false,host_revision:null,plugin_version:null,error:null,directory:null}};
           if (command === "refresh_components") return {components,sources:[],warnings:[]};
           if (command === "list_plugins") return [plugin];
+          if (command === "plugin:dialog|open") return args.options?.directory ? "D:/plugins/source" : "D:/plugins/example.zip";
+          if (command === "preview_local_plugin") return {token:"local-preview",...plugin,repository:"Local import",source:{kind:args.path.endsWith(".zip") ? "local_zip" : "local_directory",reference:args.path,archive_sha256:"a".repeat(64)},already_installed:false};
           if (command === "preview_plugin") { args.onProgress.onmessage({phase:"validating",downloaded_bytes:1024,total_bytes:1024}); return {token:"preview",...plugin,already_installed:false}; }
           if (command === "get_plugin_panel") return {plugin,panel:manifest.panels[0],environment:{caller:"desktop",pluginId:manifest.id,appVersion:"1.3.0",packageDir:"D:/plugins/hello",dataDir:"D:/plugins/data",componentId:args.componentId ?? null}};
           if (command === "execute_plugin_command") return {value:{label:"组件概览",total:3,addon:1,map:1,material:1,current:null,components},actions:[]};
@@ -92,6 +94,13 @@ try {
     await page.getByRole("button", {name:"添加插件"}).click();
     await expect(page.getByRole("button", {name:"确认安装并启用"})).toBeDisabled();
     await page.screenshot({path:path.join(output,`${name}-preview.png`)});
+    await page.getByRole("button", {name:"关闭安装预览"}).click();
+    await page.getByRole("button", {name:"本地导入"}).click();
+    await expect(page.getByText("本地包 · D:/plugins/example.zip")).toBeVisible();
+    await expect(page.getByRole("button", {name:"确认安装并启用"})).toBeDisabled();
+    await page.getByRole("button", {name:"关闭安装预览"}).click();
+    await page.getByRole("button", {name:"导入插件目录"}).click();
+    await expect(page.getByText("本地包 · D:/plugins/source")).toBeVisible();
     await page.getByRole("button", {name:"关闭安装预览"}).click();
     await page.getByRole("button", {name:"组件概览",exact:true}).last().click();
     await expect(page.locator(".plugin-panel-mount .stats")).toBeVisible();

@@ -94,6 +94,18 @@ pub(crate) async fn preview_plugin(
 }
 
 #[tauri::command]
+pub(crate) async fn preview_local_plugin(
+    state: State<'_, DesktopPlugins>,
+    path: String,
+    operation_id: String,
+) -> Result<PluginCandidate> {
+    let operation = state.operation(operation_id)?;
+    let service = state.service.clone();
+    let cancellation = operation.cancellation.clone();
+    blocking(move || service.preview_local(std::path::Path::new(&path), &cancellation)).await
+}
+
+#[tauri::command]
 pub(crate) async fn install_plugin(
     state: State<'_, DesktopPlugins>,
     token: String,

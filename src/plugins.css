@@ -7,6 +7,9 @@
 .plugin-install-bar > label { display: flex; align-items: center; flex: 1; min-width: 0; gap: 9px; padding: 0 12px; border: 1px solid var(--control-border); border-radius: 6px; color: var(--muted); background: var(--control-bg); }
 .plugin-install-bar input { min-width: 0; width: 100%; padding: 11px 0; border: 0; outline: none; color: var(--text); background: transparent; }
 .plugin-install-bar > label:focus-within { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.plugin-local-import { display: flex; align-items: stretch; gap: 6px; }
+.plugin-local-import .icon-button { height: auto; }
+.plugin-install-bar .button { white-space: nowrap; }
 .plugin-preview { margin-bottom: 24px; border-block: 1px solid var(--border); padding: 20px 0; }
 .plugin-preview > header, .plugin-preview h2, .plugin-row h3 { display: flex; align-items: center; gap: 10px; }
 .plugin-preview > header { align-items: flex-start; justify-content: space-between; }

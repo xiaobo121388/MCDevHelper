@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
-import { Check, ChevronDown, Download, ExternalLink, FileText, LoaderCircle, Plus, Puzzle, RefreshCw, Save, ShieldAlert, Trash2, X } from "lucide-react";
+import { Archive, Check, ChevronDown, Download, ExternalLink, FileText, FolderOpen, LoaderCircle, Plus, Puzzle, RefreshCw, Save, ShieldAlert, Trash2, X } from "lucide-react";
+import { open } from "@tauri-apps/plugin-dialog";
 import { openDialogWindow } from "./windows";
 import { errorMessage } from "./api";
 import { pluginApi } from "./pluginApi";
@@ -14,6 +15,8 @@ export function PluginManager({ controller }: { controller: PluginController }) 
   const [trusted, setTrusted] = useState(false);
   const currentPreview = useRef<string | null>(null);
   const mounted = useRef(true);
+  const choosing = useRef(false);
+  const [selecting, setSelecting] = useState(false);
   useEffect(() => { mounted.current = true; return () => {
     mounted.current = false;
     if (currentPreview.current) void pluginApi.discard(currentPreview.current).catch(() => {});
@@ -22,14 +25,25 @@ export function PluginManager({ controller }: { controller: PluginController }) 
     if (currentPreview.current) await pluginApi.discard(currentPreview.current);
     currentPreview.current = null; setCandidate(null); setTrusted(false);
   };
-  const preview = async (repository: string, expectedId?: string) => {
+  const preview = async (repository: string, expectedId?: string, local = false) => {
     try {
       await discard();
-      const next = await controller.preview(repository);
+      const next = await (local ? controller.previewLocal(repository) : controller.preview(repository));
       if (!mounted.current) { await pluginApi.discard(next.token); return; }
-      if (expectedId && next.manifest.id !== expectedId) { await pluginApi.discard(next.token); throw new Error("仓库中的插件 ID 已变化，无法作为原插件更新。"); }
+      if (expectedId && next.manifest.id !== expectedId) { await pluginApi.discard(next.token); throw new Error("所选来源的插件 ID 已变化，无法作为原插件更新。"); }
       currentPreview.current = next.token; setCandidate(next); setTrusted(false);
     } catch (cause) { if (mounted.current) controller.setError(errorMessage(cause)); }
+  };
+  const importLocal = async (directory: boolean, expectedId?: string) => {
+    if (choosing.current || controller.busy) return;
+    choosing.current = true; setSelecting(true);
+    try {
+      const selected = await open(directory
+        ? { title:"导入插件目录", directory:true, multiple:false }
+        : { title:"导入插件 ZIP", multiple:false, filters:[{name:"MCDH 插件包",extensions:["zip"]}] });
+      if (typeof selected === "string" && mounted.current) await preview(selected, expectedId, true);
+    } catch (cause) { if (mounted.current) controller.setError(errorMessage(cause)); }
+    finally { choosing.current = false; if (mounted.current) setSelecting(false); }
   };
   const install = async () => {
     if (!candidate || !trusted) return;
@@ -42,7 +56,7 @@ export function PluginManager({ controller }: { controller: PluginController }) 
   return <main className="workspace plugin-workspace">
     <header className="topbar"><div><p className="eyebrow">扩展</p><h1>插件</h1></div><button className="icon-button" title="刷新插件" aria-label="刷新插件" disabled={!!controller.busy} onClick={() => void controller.reload().catch((cause) => controller.setError(errorMessage(cause)))}><RefreshCw size={18} /></button></header>
     <div className="plugin-manager-body">
-      <form className="plugin-install-bar" onSubmit={submit}><label><Puzzle size={18} /><input ref={sourceInput} aria-label="GitHub 插件仓库" value={source} onChange={(event) => setSource(event.target.value)} placeholder="owner/repo" required disabled={!!controller.busy} />{source && <button className="input-clear" type="button" title="清空插件仓库" aria-label="清空插件仓库" disabled={!!controller.busy} onClick={() => { setSource(""); sourceInput.current?.focus(); }}><X size={16} /></button>}</label><button className="button primary" type="submit" aria-busy={!!controller.busy} disabled={!!controller.busy || !source.trim()}><Plus size={16} />添加插件</button></form>
+      <form className="plugin-install-bar" onSubmit={submit}><label><Puzzle size={18} /><input ref={sourceInput} aria-label="GitHub 插件仓库" value={source} onChange={(event) => setSource(event.target.value)} placeholder="owner/repo" required disabled={!!controller.busy} />{source && <button className="input-clear" type="button" title="清空插件仓库" aria-label="清空插件仓库" disabled={!!controller.busy} onClick={() => { setSource(""); sourceInput.current?.focus(); }}><X size={16} /></button>}</label><button className="button primary" type="submit" aria-busy={!!controller.busy} disabled={!!controller.busy || selecting || !source.trim()}><Plus size={16} />添加插件</button><div className="plugin-local-import"><button className="button secondary" type="button" title="导入插件 ZIP" disabled={!!controller.busy || selecting} onClick={() => void importLocal(false)}><Archive size={16} />本地导入</button><button className="icon-button" type="button" title="导入插件目录" aria-label="导入插件目录" disabled={!!controller.busy || selecting} onClick={() => void importLocal(true)}><FolderOpen size={17} /></button></div></form>
       {controller.busy && <div className="plugin-task" role="status"><LoaderCircle className="spin" size={17} /><span>{controller.busy.title}{controller.progress?.phase === "downloading" ? ` · ${(controller.progress.downloaded_bytes / 1048576).toFixed(1)} MB` : ""}</span><button className="icon-button" title="取消插件任务" aria-label="取消插件任务" onClick={() => void controller.cancel().catch((cause) => controller.setError(errorMessage(cause)))}><X size={16} /></button></div>}
       {candidate && <section className="plugin-preview" aria-label="插件安装预览">
         <header><div><h2>{candidate.manifest.name}<span>v{candidate.manifest.version}</span></h2><p>{candidate.manifest.description}</p></div><button className="icon-button" title="关闭安装预览" aria-label="关闭安装预览" disabled={!!controller.busy} onClick={() => void discard().catch((cause) => controller.setError(errorMessage(cause)))}><X size={17} /></button></header>
@@ -55,7 +69,7 @@ export function PluginManager({ controller }: { controller: PluginController }) 
       </section>}
       {controller.error && <div className="plugin-error" role="alert"><ShieldAlert size={17} /><span>{controller.error}</span><button className="icon-button" aria-label="关闭插件错误" title="关闭插件错误" onClick={() => controller.setError("")}><X size={15} /></button></div>}
       <div className="plugin-list-heading"><h2>已安装</h2><span>{controller.items.length}</span></div>
-      <div className="plugin-list">{controller.items.map((plugin) => <PluginRow key={plugin.manifest.id} plugin={plugin} controller={controller} onUpdate={() => void preview(plugin.repository, plugin.manifest.id)} />)}</div>
+      <div className="plugin-list">{controller.items.map((plugin) => <PluginRow key={plugin.manifest.id} plugin={plugin} controller={controller} onUpdate={() => void (plugin.source.kind.startsWith("local") ? importLocal(plugin.source.kind === "local_directory", plugin.manifest.id) : preview(plugin.repository, plugin.manifest.id))} />)}</div>
       {!controller.items.length && <div className="plugin-empty"><Puzzle size={30} /><h2>暂无插件</h2></div>}
     </div>
   </main>;

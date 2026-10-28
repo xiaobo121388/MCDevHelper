@@ -35,6 +35,138 @@ pub(crate) fn service(directory: &Path) -> PluginService {
 }
 
 #[test]
+fn local_sources_are_snapshots_and_never_execute_before_trust() {
+    let temp = tempfile::tempdir().unwrap();
+    let service = service(temp.path());
+    let path = package(
+        temp.path(),
+        &manifest(),
+        "throw Error('not during import');",
+    );
+    let directory = temp.path().join("source");
+    crate::archive::extract(&path, &directory).unwrap();
+    let zip = service
+        .preview_local(&path, &Cancellation::default())
+        .unwrap();
+    let folder = service
+        .preview_local(&directory, &Cancellation::default())
+        .unwrap();
+    assert_eq!(zip.fingerprint, folder.fingerprint);
+    assert_eq!(zip.source.kind, "local_zip");
+    assert_eq!(folder.source.kind, "local_directory");
+    assert_eq!(zip.repository, "Local import");
+    assert!(service.list().unwrap().is_empty());
+    fs::write(directory.join("main.js"), "// modified after preview").unwrap();
+    fs::remove_file(path).unwrap();
+    let installed = service.install(&folder.token, &folder.fingerprint).unwrap();
+    assert!(installed.enabled && installed.trusted && !installed.allow_mcp);
+    assert_eq!(installed.fingerprint, zip.fingerprint);
+    service.discard_preview(&zip.token).unwrap();
+    service
+        .configure(
+            "example.hello",
+            &installed.fingerprint,
+            true,
+            true,
+            json!({}),
+        )
+        .unwrap();
+    let update = service
+        .preview_local(&directory, &Cancellation::default())
+        .unwrap();
+    assert!(!update.already_installed);
+    assert!(
+        !service
+            .install(&update.token, &update.fingerprint)
+            .unwrap()
+            .allow_mcp
+    );
+    let remote = package(temp.path(), &manifest(), "// remote");
+    assert!(service.preview_archive("o/r", &remote).is_err());
+    assert_eq!(
+        service.registry().unwrap()["example.hello"].source.kind,
+        "local_directory"
+    );
+}
+
+#[test]
+fn local_import_does_not_replace_github_identity_or_keep_cancelled_previews() {
+    let temp = tempfile::tempdir().unwrap();
+    let service = service(temp.path());
+    let path = package(temp.path(), &manifest(), "// remote");
+    let preview = service.preview_archive("o/r", &path).unwrap();
+    service
+        .install(&preview.token, &preview.fingerprint)
+        .unwrap();
+    assert!(
+        service
+            .preview_local(&path, &Cancellation::default())
+            .is_err()
+    );
+    let token = Cancellation::default();
+    token.cancel();
+    assert_eq!(
+        service.preview_local(&path, &token).unwrap_err().code,
+        "cancelled"
+    );
+    assert_eq!(service.list().unwrap()[0].repository, "o/r");
+    let other = PluginService::new(service.index.clone()).unwrap();
+    assert_eq!(other.list().unwrap()[0].fingerprint, preview.fingerprint);
+}
+
+#[test]
+fn local_import_rejects_invalid_packages_and_unsafe_directory_names() {
+    let temp = tempfile::tempdir().unwrap();
+    let service = service(temp.path());
+    let directory = temp.path().join("ordinary-repo");
+    fs::create_dir_all(&directory).unwrap();
+    fs::write(directory.join("README.md"), "not a plugin").unwrap();
+    assert!(
+        service
+            .preview_local(&directory, &Cancellation::default())
+            .is_err()
+    );
+    let path = package(temp.path(), &manifest(), "");
+    crate::archive::extract(&path, &directory).unwrap();
+    fs::remove_file(directory.join("main.js")).unwrap();
+    assert!(
+        service
+            .preview_local(&directory, &Cancellation::default())
+            .is_err()
+    );
+    fs::write(directory.join("main.js"), "").unwrap();
+    fs::create_dir(directory.join("COM1.assets")).unwrap();
+    assert!(
+        service
+            .preview_local(&directory, &Cancellation::default())
+            .is_err()
+    );
+    assert!(
+        service
+            .preview_local(&service.root, &Cancellation::default())
+            .is_err()
+    );
+    let oversized = fs::File::create(temp.path().join("huge.zip")).unwrap();
+    oversized.set_len(crate::archive::MAX_DOWNLOAD + 1).unwrap();
+    assert!(
+        service
+            .preview_local(&temp.path().join("huge.zip"), &Cancellation::default())
+            .is_err()
+    );
+    let file = fs::File::create(temp.path().join("link.zip")).unwrap();
+    let mut zip = ZipWriter::new(file);
+    zip.add_symlink("main.js", "../../outside", SimpleFileOptions::default())
+        .unwrap();
+    zip.finish().unwrap();
+    assert!(
+        service
+            .preview_local(&temp.path().join("link.zip"), &Cancellation::default())
+            .is_err()
+    );
+    assert!(service.list().unwrap().is_empty());
+}
+
+#[test]
 fn installation_is_explicit_atomic_and_repository_bound() {
     let temp = tempfile::tempdir().unwrap();
     let service = service(temp.path());

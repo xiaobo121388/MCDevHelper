@@ -2,7 +2,8 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-libra
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { PluginCandidate, PluginPanelInfo, PluginSummary } from "./pluginTypes";
 
-const mocks = vi.hoisted(() => ({ list:vi.fn(), preview:vi.fn(), install:vi.fn(), discard:vi.fn(), configure:vi.fn(), uninstall:vi.fn(), execute:vi.fn(), cancel:vi.fn(), panel:vi.fn(), panelCall:vi.fn(), logs:vi.fn(), load:vi.fn(), open:vi.fn(), confirm:vi.fn(), notice:vi.fn(), onPanel:vi.fn() }));
+const mocks = vi.hoisted(() => ({ list:vi.fn(), preview:vi.fn(), previewLocal:vi.fn(), pick:vi.fn(), install:vi.fn(), discard:vi.fn(), configure:vi.fn(), uninstall:vi.fn(), execute:vi.fn(), cancel:vi.fn(), panel:vi.fn(), panelCall:vi.fn(), logs:vi.fn(), load:vi.fn(), open:vi.fn(), confirm:vi.fn(), notice:vi.fn(), onPanel:vi.fn() }));
+vi.mock("@tauri-apps/plugin-dialog", () => ({open:mocks.pick}));
 vi.mock("./pluginApi", () => ({ pluginDesktop:true, pluginApi:mocks, pluginAssetUrl:(_request: unknown, path: string) => `http://mcdh-plugin.localhost/test/${path}` }));
 vi.mock("./pluginModules", () => ({ loadPluginModule:mocks.load }));
 vi.mock("./windows", () => ({ openDialogWindow:mocks.open, confirmAction:mocks.confirm, notifyWorkspace:vi.fn().mockResolvedValue(undefined) }));
@@ -28,10 +29,36 @@ beforeEach(() => {
   mocks.cancel.mockResolvedValue(undefined); mocks.panel.mockResolvedValue(panelInfo); mocks.panelCall.mockResolvedValue({value:null,actions:[]});
   mocks.execute.mockResolvedValue({value:{ok:true},actions:[]}); mocks.logs.mockResolvedValue([]); mocks.confirm.mockResolvedValue(true);
   mocks.open.mockResolvedValue(undefined);
+  mocks.pick.mockResolvedValue(null); mocks.previewLocal.mockResolvedValue({...candidate,repository:"Local import",source:{...candidate.source,kind:"local_zip",reference:"D:/plugin.zip"}});
 });
 afterEach(() => { cleanup(); document.documentElement.removeAttribute("style"); });
 
 describe("plugin management", () => {
+  it.each([false,true])("previews a local import and still requires trust (directory=%s)", async (directory) => {
+    mocks.pick.mockResolvedValue("D:/plugin.zip");
+    render(<Manager />);
+    fireEvent.click(screen.getByRole("button", {name:directory ? "导入插件目录" : "本地导入"}));
+    expect(await screen.findByText("D:/plugin.zip", {exact:false})).toBeInTheDocument();
+    expect(mocks.previewLocal).toHaveBeenCalledWith("D:/plugin.zip",expect.any(String));
+    expect(mocks.pick).toHaveBeenCalledWith(expect.objectContaining(directory ? {directory:true} : {filters:[{name:"MCDH 插件包",extensions:["zip"]}]}));
+    expect(mocks.preview).not.toHaveBeenCalled(); expect(mocks.install).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", {name:"确认安装并启用"})).toBeDisabled();
+  });
+  it("does not start a task when the local picker is cancelled", async () => {
+    render(<Manager />);
+    fireEvent.click(screen.getByRole("button", {name:"本地导入"}));
+    await waitFor(() => expect(screen.getByRole("button", {name:"本地导入"})).toBeEnabled());
+    expect(mocks.previewLocal).not.toHaveBeenCalled();
+  });
+  it("uses the local picker for local updates and rejects a different plugin id", async () => {
+    mocks.list.mockResolvedValue([{...plugin,source:{...plugin.source,kind:"local_zip"}}]);
+    mocks.pick.mockResolvedValue("D:/plugin.zip");
+    mocks.previewLocal.mockResolvedValue({...candidate,manifest:{...plugin.manifest,id:"other.id"}});
+    render(<Manager />);
+    fireEvent.click(await screen.findByRole("button", {name:"检查更新 测试插件"}));
+    expect(await screen.findByRole("alert")).toHaveTextContent("插件 ID 已变化");
+    expect(mocks.discard).toHaveBeenCalledWith("preview"); expect(mocks.preview).not.toHaveBeenCalled();
+  });
   it("clears the repository without submitting and only reports busy during a task", async () => {
     render(<Manager />);
     const input = screen.getByLabelText("GitHub 插件仓库");

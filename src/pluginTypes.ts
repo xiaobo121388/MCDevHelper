@@ -10,7 +10,7 @@ export interface PluginManifest {
   engines: { mcdh: string }; entry: string; commands: PluginCommand[]; panels: PluginPanel[];
   mcp_tools: { name: string; description: string; command: string }[]; settings_schema: JsonSchema;
 }
-export interface PluginSource { kind: "release" | "branch" | "local"; reference: string; archive_sha256: string }
+export interface PluginSource { kind: "release" | "branch" | "local" | "local_zip" | "local_directory"; reference: string; archive_sha256: string }
 export interface PluginSummary {
   manifest: PluginManifest; repository: string; source: PluginSource; fingerprint: string;
   enabled: boolean; trusted: boolean; compatible: boolean; allow_mcp: boolean; settings: Json;

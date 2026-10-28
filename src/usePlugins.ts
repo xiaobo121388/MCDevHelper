@@ -68,6 +68,7 @@ export function usePlugins(onNotice: (message: string) => void, onPanel: (reques
   };
   return { items, error, setError, busy, progress, result, setResult, prompt, setPrompt, reload, operation, applyActions, execute, requestCommand, configure,
     preview: (source: string) => operation("获取插件", (id) => pluginApi.preview(source, id, setProgress)),
+    previewLocal: (path: string) => operation("校验本地插件", (id) => pluginApi.previewLocal(path, id)),
     cancel: () => active.current ? pluginApi.cancel(active.current) : Promise.resolve(),
     openPanel: onPanel,
   };

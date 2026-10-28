@@ -16,6 +16,7 @@ use crate::{
     PluginError, PluginManifest, Result, archive,
     error::invalid,
     github::{Cancellation, DownloadSource, PluginProgress, Repository},
+    origin::{ManagedOrigin, PluginOrigin},
 };
 
 const REGISTRY: &str = "plugins.registry.v1";
@@ -23,7 +24,7 @@ const REGISTRY: &str = "plugins.registry.v1";
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct InstalledPlugin {
     pub manifest: PluginManifest,
-    pub repository: Repository,
+    pub repository: PluginOrigin,
     pub source: DownloadSource,
     pub fingerprint: String,
     pub files: BTreeMap<String, String>,
@@ -86,7 +87,7 @@ struct PreparedPlugin {
 
 #[derive(Serialize, Deserialize)]
 struct RetainedSettings {
-    repository: Repository,
+    repository: PluginOrigin,
     settings: Value,
 }
 
@@ -200,7 +201,7 @@ impl PluginService {
 
     pub(crate) fn prepare(
         &self,
-        repository: Repository,
+        repository: impl Into<PluginOrigin>,
         source: DownloadSource,
         path: &Path,
         temporary: TempDir,
@@ -216,6 +217,61 @@ impl PluginService {
         } else {
             extracted
         };
+        self.prepare_root(repository.into(), source, root, temporary)
+    }
+
+    pub fn preview_local(&self, path: &Path, cancel: &Cancellation) -> Result<PluginCandidate> {
+        cancel.check()?;
+        archive::regular_metadata(path)?;
+        let path = mcdh_core::canonicalize_path(path)?;
+        let temporary = tempfile::Builder::new()
+            .prefix("preview-")
+            .tempdir_in(&self.root)?;
+        let root = temporary.path().join("extracted");
+        let (kind, digest) = if path.is_dir() {
+            if self.root.starts_with(&path) || path.starts_with(&self.root) {
+                return Err(invalid(
+                    "Select a plugin source directory outside MCDH plugin storage",
+                ));
+            }
+            archive::snapshot(&path, &root, cancel)?;
+            (
+                "local_directory",
+                archive::fingerprint(&archive::inventory(&root)?),
+            )
+        } else {
+            let snapshot = temporary.path().join("import.zip");
+            archive::copy_bounded(&path, &snapshot, archive::MAX_DOWNLOAD, cancel)?;
+            archive::extract_cancelled(&snapshot, &root, cancel)?;
+            ("local_zip", archive::hash_file(&snapshot)?)
+        };
+        cancel.check()?;
+        let candidate = self.prepare_root(
+            PluginOrigin::Managed {
+                kind: ManagedOrigin::Local,
+            },
+            DownloadSource {
+                kind: kind.into(),
+                reference: path.to_string_lossy().into_owned(),
+                archive_sha256: digest,
+            },
+            root,
+            temporary,
+        )?;
+        if let Err(error) = cancel.check() {
+            self.discard_preview(&candidate.token)?;
+            return Err(error);
+        }
+        Ok(candidate)
+    }
+
+    fn prepare_root(
+        &self,
+        repository: PluginOrigin,
+        source: DownloadSource,
+        root: PathBuf,
+        temporary: TempDir,
+    ) -> Result<PluginCandidate> {
         let manifest_path = root.join(crate::MANIFEST_FILE);
         if !manifest_path.is_file() {
             return Err(invalid(
@@ -246,7 +302,7 @@ impl PluginService {
             .is_some_and(|record| record.repository != repository)
         {
             return Err(invalid(
-                "Plugin id is already owned by a different repository",
+                "Plugin id is already owned by a different source; uninstall it explicitly before switching sources",
             ));
         }
         let candidate = PluginCandidate {
@@ -348,7 +404,7 @@ impl PluginService {
         }
         if let Some(previous) = records.get(&record.manifest.id) {
             if previous.repository != record.repository {
-                return Err(invalid("Plugin id belongs to another repository"));
+                return Err(invalid("Plugin id belongs to another source"));
             }
             if crate::manifest::validate_value(&record.manifest.settings_schema, &previous.settings)
                 .is_ok()

@@ -459,6 +459,7 @@ pub fn run() {
             windows::open_dialog_window,
             list_plugins,
             preview_plugin,
+            preview_local_plugin,
             install_plugin,
             discard_plugin_preview,
             configure_plugin,

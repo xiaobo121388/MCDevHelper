@@ -10,6 +10,7 @@ export const pluginApi = {
     return invoke<PluginCandidate>("preview_plugin", { source, operationId, onProgress });
   },
   install: (token: string, fingerprint: string) => invoke<PluginSummary>("install_plugin", { token, fingerprint }),
+  previewLocal: (path: string, operationId: string) => invoke<PluginCandidate>("preview_local_plugin", { path, operationId }),
   discard: (token: string) => invoke<void>("discard_plugin_preview", { token }),
   configure: (plugin: PluginSummary, enabled: boolean, allowMcp: boolean, settings: Json) =>
     invoke<PluginSummary>("configure_plugin", { pluginId: plugin.manifest.id, fingerprint: plugin.fingerprint, enabled, allowMcp, settings }),

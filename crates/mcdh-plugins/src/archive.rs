@@ -5,7 +5,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use crate::{Result, error::invalid};
+use crate::{Cancellation, Result, error::invalid};
 use sha2::{Digest, Sha256};
 
 pub const MAX_DOWNLOAD: u64 = 128 * 1024 * 1024;
@@ -57,6 +57,14 @@ pub(crate) fn relative_path(name: &str) -> Result<PathBuf> {
 }
 
 pub(crate) fn extract(source: &Path, destination: &Path) -> Result<()> {
+    extract_cancelled(source, destination, &Cancellation::default())
+}
+
+pub(crate) fn extract_cancelled(
+    source: &Path,
+    destination: &Path,
+    cancel: &Cancellation,
+) -> Result<()> {
     let mut zip = zip::ZipArchive::new(File::open(source)?).map_err(invalid)?;
     if zip.len() > MAX_ENTRIES {
         return Err(invalid("Too many archive entries"));
@@ -65,6 +73,7 @@ pub(crate) fn extract(source: &Path, destination: &Path) -> Result<()> {
     let mut expanded = 0u64;
     fs::create_dir_all(destination)?;
     for index in 0..zip.len() {
+        cancel.check()?;
         let mut entry = zip.by_index(index).map_err(invalid)?;
         let name = entry.name().trim_end_matches('/').to_owned();
         let relative = relative_path(&name)?;
@@ -108,15 +117,105 @@ pub(crate) fn extract(source: &Path, destination: &Path) -> Result<()> {
             .write(true)
             .create_new(true)
             .open(output)?;
-        let copied = std::io::copy(
-            &mut (&mut entry).take(MAX_EXPANDED - expanded + 1),
-            &mut file,
-        )?;
+        let copied = copy_stream(&mut entry, &mut file, MAX_EXPANDED - expanded, cancel)?;
         expanded += copied;
         if expanded > MAX_EXPANDED {
             return Err(invalid("Expanded plugin exceeds 512 MiB"));
         }
         file.flush()?;
+    }
+    Ok(())
+}
+
+pub(crate) fn regular_metadata(path: &Path) -> Result<fs::Metadata> {
+    let metadata = fs::symlink_metadata(path)?;
+    if metadata.file_type().is_symlink() || (!metadata.is_file() && !metadata.is_dir()) {
+        return Err(invalid("Plugin links and special files are not allowed"));
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        if metadata.file_attributes() & 0x400 != 0 {
+            return Err(invalid("Plugin reparse points are not allowed"));
+        }
+    }
+    Ok(metadata)
+}
+
+fn copy_stream(
+    input: &mut impl Read,
+    output: &mut impl Write,
+    limit: u64,
+    cancel: &Cancellation,
+) -> Result<u64> {
+    let mut size = 0u64;
+    let mut buffer = [0u8; 64 * 1024];
+    loop {
+        cancel.check()?;
+        let read = input.read(&mut buffer)?;
+        if read == 0 {
+            break;
+        }
+        size += read as u64;
+        if size > limit {
+            return Err(invalid("Plugin exceeds the import size limit"));
+        }
+        output.write_all(&buffer[..read])?;
+    }
+    Ok(size)
+}
+
+pub(crate) fn copy_bounded(
+    source: &Path,
+    destination: &Path,
+    limit: u64,
+    cancel: &Cancellation,
+) -> Result<u64> {
+    let metadata = regular_metadata(source)?;
+    if !metadata.is_file() || metadata.len() > limit {
+        return Err(invalid("Plugin exceeds the import size limit"));
+    }
+    let mut input = File::open(source)?;
+    let mut output = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(destination)?;
+    copy_stream(&mut input, &mut output, limit, cancel)
+}
+
+pub(crate) fn snapshot(source: &Path, destination: &Path, cancel: &Cancellation) -> Result<()> {
+    let mut names = BTreeMap::new();
+    let mut size = 0;
+    let mut count = 0;
+    fs::create_dir_all(destination)?;
+    for entry in walkdir::WalkDir::new(source).follow_links(false) {
+        cancel.check()?;
+        let entry = entry.map_err(invalid)?;
+        let metadata = regular_metadata(entry.path())?;
+        if entry.path() == source {
+            continue;
+        }
+        count += 1;
+        if count > MAX_ENTRIES {
+            return Err(invalid("Too many plugin entries"));
+        }
+        let name = entry
+            .path()
+            .strip_prefix(source)
+            .map_err(invalid)?
+            .to_str()
+            .ok_or_else(|| invalid("Plugin paths must be valid UTF-8"))?
+            .replace('\\', "/");
+        let relative = relative_path(&name)?;
+        if names.insert(name.to_lowercase(), ()).is_some() {
+            return Err(invalid("Case-colliding plugin path"));
+        }
+        let target = destination.join(relative);
+        if metadata.is_dir() {
+            fs::create_dir(&target)?;
+        } else {
+            size += copy_bounded(entry.path(), &target, MAX_EXPANDED - size, cancel)?;
+        }
     }
     Ok(())
 }
@@ -139,19 +238,10 @@ pub(crate) fn inventory(root: &Path) -> Result<BTreeMap<String, String>> {
     let mut files = BTreeMap::new();
     let mut size = 0;
     let mut count = 0;
+    let mut names = BTreeMap::new();
     for entry in walkdir::WalkDir::new(root).follow_links(false) {
         let entry = entry.map_err(invalid)?;
-        let metadata = fs::symlink_metadata(entry.path())?;
-        if metadata.file_type().is_symlink() {
-            return Err(invalid("Plugin links are not allowed"));
-        }
-        #[cfg(windows)]
-        {
-            use std::os::windows::fs::MetadataExt;
-            if metadata.file_attributes() & 0x400 != 0 {
-                return Err(invalid("Plugin reparse points are not allowed"));
-            }
-        }
+        let metadata = regular_metadata(entry.path())?;
         if entry.path() == root {
             continue;
         }
@@ -159,18 +249,22 @@ pub(crate) fn inventory(root: &Path) -> Result<BTreeMap<String, String>> {
         if count > MAX_ENTRIES || entry.file_type().is_symlink() {
             return Err(invalid("Invalid plugin file tree"));
         }
-        if entry.file_type().is_file() {
-            size += entry.metadata().map_err(invalid)?.len();
+        let name = entry
+            .path()
+            .strip_prefix(root)
+            .map_err(invalid)?
+            .to_str()
+            .ok_or_else(|| invalid("Plugin paths must be valid UTF-8"))?
+            .replace('\\', "/");
+        relative_path(&name)?;
+        if names.insert(name.to_lowercase(), ()).is_some() {
+            return Err(invalid("Case-colliding plugin path"));
+        }
+        if metadata.is_file() {
+            size += metadata.len();
             if size > MAX_EXPANDED {
                 return Err(invalid("Expanded plugin exceeds 512 MiB"));
             }
-            let name = entry
-                .path()
-                .strip_prefix(root)
-                .map_err(invalid)?
-                .to_string_lossy()
-                .replace('\\', "/");
-            relative_path(&name)?;
             files.insert(name, hash_file(entry.path())?);
         }
     }
