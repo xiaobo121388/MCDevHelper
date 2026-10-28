@@ -31,7 +31,7 @@ pub async fn launch_component_editor(
         .map_err(|e| e.payload())
 }
 
-fn launch(
+pub(crate) fn launch(
     app: &tauri::AppHandle,
     manager: &McdkManager,
     component_id: &str,
@@ -75,6 +75,15 @@ fn start_session(
     component_id: &str,
     mode: SessionMode,
 ) -> Result<StartedSession> {
+    let _plugin = if mode == SessionMode::Editor {
+        Some(
+            mcdh_plugins::PluginService::new(manager.index.clone())
+                .and_then(|service| service.mcde_lease(None))
+                .map_err(|error| CoreError::InvalidInput(format!("MCDE 插件不可用：{error}")))?,
+        )
+    } else {
+        None
+    };
     let _component_lock = manager.index.try_lock_mutations()?;
     let _state_lock = manager.store.lock("state")?;
     if refresh_session(&manager.store)?.session.is_some() {

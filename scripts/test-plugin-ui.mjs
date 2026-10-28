@@ -34,6 +34,7 @@ try {
     page.on("pageerror", (error) => { errors.push(`${name}: ${error.message}`); console.error(error.message); });
     await page.addInitScript(({ manifest, base }) => {
       const plugin = { manifest, repository:"mcdh-examples/hello",source:{kind:"release",reference:"v1.0.0",archive_sha256:"a".repeat(64)},fingerprint:"b".repeat(64),enabled:true,trusted:true,compatible:true,allow_mcp:false,settings:{label:"组件概览"},last_error:null };
+      const mcde = {...plugin, manifest:{...manifest,id:"mcdh.mcde",name:"MCDE",description:"MCDevEditor 原生编辑器",commands:[{id:"open-editor",title:"在 MCDE 中打开",menus:["component"],input_schema:{type:"object",properties:{}}}],panels:[],mcp_tools:[],settings_schema:{type:"object"}},repository:"MCDH",source:{kind:"builtin",reference:"MCDH 1.3.0",archive_sha256:""},settings:{}};
       const components = [
         {id:"one",name:"光影工作室",kind:"addon",path:"D:/Projects/Studio"},
         {id:"two",name:"海岛地图",kind:"map",path:"D:/Projects/Island"},
@@ -57,7 +58,8 @@ try {
           if (command === "check_for_updates") return {current_version:"1.3.0",update_available:false,no_release:false};
           if (command === "mcdk_status") return {available:false,current_version:null,auto_update:false,phase:"idle",latest_version:null,last_checked_at:null,error:null,downloaded_bytes:0,download_size:null,session:null,last_exit:null,mcde:{available:false,configured:false,host_available:false,host_revision:null,plugin_version:null,error:null,directory:null}};
           if (command === "refresh_components") return {components,sources:[],warnings:[]};
-          if (command === "list_plugins") return [plugin];
+          if (command === "list_plugins") return [mcde,plugin];
+          if (command === "configure_plugin" && args.pluginId === "mcdh.mcde") { mcde.enabled = args.enabled; return mcde; }
           if (command === "plugin:dialog|open") return args.options?.directory ? "D:/plugins/source" : "D:/plugins/example.zip";
           if (command === "preview_local_plugin") return {token:"local-preview",...plugin,repository:"Local import",source:{kind:args.path.endsWith(".zip") ? "local_zip" : "local_directory",reference:args.path,archive_sha256:"a".repeat(64)},already_installed:false};
           if (command === "preview_plugin") { args.onProgress.onmessage({phase:"validating",downloaded_bytes:1024,total_bytes:1024}); return {token:"preview",...plugin,already_installed:false}; }
@@ -80,6 +82,13 @@ try {
     await page.getByRole("button", {name:/^插件(?:\s*\d+)?$/}).click();
     await expect(page.getByRole("heading", {name:"插件",exact:true})).toBeVisible();
     await expect(page.getByRole("heading", {name:/组件概览/})).toBeVisible();
+    const mcdeSwitch = page.getByRole("switch", {name:"启用 MCDE"});
+    await expect(mcdeSwitch).toBeChecked();
+    await mcdeSwitch.click();
+    await expect(mcdeSwitch).not.toBeChecked();
+    await mcdeSwitch.click();
+    await expect(mcdeSwitch).toBeChecked();
+    await expect(page.getByRole("button", {name:"卸载 MCDE"})).toHaveCount(0);
     const repository = page.getByLabel("GitHub 插件仓库");
     await expect(page.getByRole("button", {name:"添加插件"})).toHaveCSS("cursor", "not-allowed");
     await repository.fill("owner/repo");

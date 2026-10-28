@@ -1,6 +1,7 @@
 //! Shared, explicitly trusted MCDH plugins. This is not a security sandbox.
 
 mod archive;
+mod builtin;
 mod error;
 mod github;
 mod manifest;
@@ -9,6 +10,7 @@ mod runtime;
 mod sdk;
 mod store;
 
+pub use builtin::{MCDE_PLUGIN_ID, McdePluginLease};
 pub use error::{PluginError, Result};
 pub use github::{Cancellation, PluginProgress};
 pub use manifest::*;

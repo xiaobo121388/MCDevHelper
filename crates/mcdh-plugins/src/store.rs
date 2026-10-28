@@ -283,6 +283,9 @@ impl PluginService {
         }
         let manifest: PluginManifest = serde_json::from_slice(&fs::read(manifest_path)?)?;
         manifest.validate()?;
+        if manifest.id == crate::MCDE_PLUGIN_ID {
+            return Err(invalid("This id is reserved for the built-in MCDE plugin"));
+        }
         let files = archive::inventory(&root)?;
         for entry in
             std::iter::once(&manifest.entry).chain(manifest.panels.iter().map(|panel| &panel.entry))
@@ -525,6 +528,14 @@ impl PluginService {
         if allow_mcp && !enabled {
             return Err(invalid("Disabled plugins cannot be authorized for MCP"));
         }
+        if id == crate::MCDE_PLUGIN_ID {
+            if allow_mcp {
+                return Err(invalid(
+                    "Native MCDE is desktop-only and does not expose MCP tools",
+                ));
+            }
+            self.ensure_mcde_idle()?;
+        }
         crate::manifest::validate_value(&record.manifest.settings_schema, &settings)?;
         record.enabled = enabled;
         record.mcp_fingerprint = allow_mcp.then(|| fingerprint.to_string());
@@ -536,6 +547,12 @@ impl PluginService {
     }
 
     pub fn uninstall(&self, id: &str, clear_data: bool) -> Result<()> {
+        if id == crate::MCDE_PLUGIN_ID {
+            return Err(PluginError::new(
+                "builtin_plugin",
+                "MCDE is bundled with MCDH; disable it instead of uninstalling",
+            ));
+        }
         let _registry = self.lease("registry", true)?;
         let _plugin = self.lease(id, true)?;
         let mut records = self.registry()?;
@@ -611,6 +628,9 @@ impl PluginService {
                 "untrusted_plugin",
                 "Plugin has not been explicitly trusted",
             ));
+        }
+        if record.manifest.id == crate::MCDE_PLUGIN_ID {
+            return crate::builtin::verify_mcde(record);
         }
         let root = self.version_directory(record)?;
         let files = archive::inventory(&root).map_err(|error| {

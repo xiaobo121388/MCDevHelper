@@ -12,6 +12,7 @@ import { PluginManager } from "./PluginManager";
 import { PluginPanelHost } from "./PluginPanelHost";
 import { PluginCommandPrompt } from "./PluginForms";
 import { usePlugins } from "./usePlugins";
+import type { McdkController } from "./Mcdk";
 import { createContext } from "../sdk/context.js";
 
 const plugin: PluginSummary = { manifest:{ schema_version:1, api_version:1, id:"example.hello", name:"测试插件", version:"1.0.0", description:"测试组件工具", author:"Example", engines:{mcdh:">=1.0.0"}, entry:"main.js",
@@ -34,6 +35,26 @@ beforeEach(() => {
 afterEach(() => { cleanup(); document.documentElement.removeAttribute("style"); });
 
 describe("plugin management", () => {
+  it("manages the native MCDE registration without exposing package or MCP actions", async () => {
+    const builtin: PluginSummary = {...plugin,manifest:{...plugin.manifest,id:"mcdh.mcde",name:"MCDE",panels:[],mcp_tools:[],settings_schema:{type:"object"}},source:{...plugin.source,kind:"builtin"}};
+    mocks.list.mockResolvedValue([builtin]);
+    render(<Manager />);
+    fireEvent.click(await screen.findByRole("switch", {name:"启用 MCDE"}));
+    await waitFor(() => expect(mocks.configure).toHaveBeenCalledWith(builtin,false,false,builtin.settings));
+    expect(screen.queryByRole("button", {name:"卸载 MCDE"})).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", {name:"检查更新 MCDE"})).not.toBeInTheDocument();
+    expect(screen.queryByRole("checkbox", {name:"允许 MCP 调用 MCDE"})).not.toBeInTheDocument();
+  });
+  it("exposes MCDE directory settings on the plugin page and protects an active editor", async () => {
+    const builtin: PluginSummary = {...plugin,manifest:{...plugin.manifest,id:"mcdh.mcde",name:"MCDE",panels:[],mcp_tools:[],settings_schema:{type:"object"}},source:{...plugin.source,kind:"builtin"}};
+    mocks.list.mockResolvedValue([builtin]);
+    const mcdk = {status:{session:{mode:"editor"},mcde:{available:true,host_available:true,directory:"D:/MCDE",plugin_version:"0.2.0"}},launching:null,error:"",update:vi.fn()} as unknown as McdkController;
+    function NativeManager() { const controller = usePlugins(mocks.notice,mocks.onPanel); return <PluginManager controller={controller} mcdk={mcdk} />; }
+    render(<NativeManager />);
+    expect(await screen.findByRole("switch", {name:"启用 MCDE"})).toBeDisabled();
+    expect(screen.getByRole("textbox", {name:"MCDE 插件目录"})).toHaveValue("D:/MCDE");
+    expect(screen.getByRole("button", {name:"选择 MCDE 插件目录"})).toBeDisabled();
+  });
   it.each([false,true])("previews a local import and still requires trust (directory=%s)", async (directory) => {
     mocks.pick.mockResolvedValue("D:/plugin.zip");
     render(<Manager />);

@@ -4,6 +4,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 const data = path.resolve(process.env.MCDH_PLUGIN_QA_DATA ?? "target/plugin-qa/native-data");
+if (!data.startsWith(`${path.resolve("target/plugin-qa")}${path.sep}`)) throw new Error("Native plugin QA must use an isolated directory under target/plugin-qa.");
 const output = path.resolve("target/plugin-qa/native");
 const endpoint = "http://127.0.0.1:9224";
 let occupied = false;
@@ -56,8 +57,42 @@ try {
     await window.__TAURI_INTERNALS__.invoke("plugin:event|emit", {event:"mcdh:settings-changed",payload:null});
   });
   await expect(main.locator("html")).toHaveAttribute("data-theme", "light");
+  const imported = await main.evaluate(async (directory) => {
+    const invoke = window.__TAURI_INTERNALS__.invoke;
+    const previous = (await invoke("list_plugins")).find(plugin => plugin.manifest.id === "example.component-overview");
+    if (previous && previous.source.kind !== "local_directory") await invoke("uninstall_plugin", {pluginId:previous.manifest.id,clearData:false});
+    const preview = await invoke("preview_local_plugin", {path:directory,operationId:crypto.randomUUID()});
+    if (preview.manifest.id !== "example.component-overview") throw new Error("Unexpected QA fixture identity");
+    const installed = await invoke("install_plugin", {token:preview.token,fingerprint:preview.fingerprint});
+    return installed.source.kind;
+  }, path.resolve("examples/plugins/hello"));
+  expect(imported).toBe("local_directory");
   await main.getByRole("button", {name:/^插件(?:\s*\d+)?$/}).click();
   await expect(main.getByRole("heading", {name:/组件概览/})).toBeVisible();
+  const mcdeSwitch = main.getByRole("switch", {name:"启用 MCDE"});
+  await expect(mcdeSwitch).toBeChecked();
+  await mcdeSwitch.click();
+  await expect(mcdeSwitch).not.toBeChecked();
+  const blocked = await main.evaluate(async () => {
+    const invoke = window.__TAURI_INTERNALS__.invoke;
+    const mcde = (await invoke("list_plugins")).find(plugin => plugin.manifest.id === "mcdh.mcde");
+    const errors = [];
+    try { await invoke("launch_component_editor", {componentId:"qa-never-launch"}); } catch (error) { errors.push(error); }
+    try { await invoke("execute_plugin_command", {request:{plugin_id:mcde.manifest.id,fingerprint:mcde.fingerprint,command:"open-editor",input:{},component_id:"qa-never-launch"},operationId:crypto.randomUUID()}); } catch (error) { errors.push(error); }
+    return errors;
+  });
+  expect(blocked).toHaveLength(2);
+  expect(blocked[0].message).toContain("Plugin is disabled");
+  expect(blocked[1].code).toBe("plugin_disabled");
+  await mcdeSwitch.click();
+  await expect(mcdeSwitch).toBeChecked();
+  const repository = main.getByLabel("GitHub 插件仓库");
+  await repository.fill("owner/repo");
+  await main.getByRole("button", {name:"清空插件仓库"}).click();
+  await expect(repository).toHaveValue("");
+  await expect(repository).toBeFocused();
+  await expect(repository).toHaveCSS("outline-style", "none");
+  await expect(main.getByRole("button", {name:"添加插件"})).toHaveCSS("cursor", "not-allowed");
   await main.screenshot({path:path.join(output,"manager.png")});
   await main.getByRole("button", {name:"组件概览",exact:true}).last().click();
   await expect(main.locator(".plugin-panel-mount .stats")).toBeVisible({timeout:20_000});
@@ -88,6 +123,9 @@ try {
   await expect(panel.locator(".plugin-panel-mount .overview")).toHaveAttribute("data-theme", "dark");
   await panel.screenshot({path:path.join(output,"independent-dark.png")});
   await panel.getByRole("button", {name:"关闭窗口",exact:true}).click();
+  await main.getByRole("button", {name:/^插件(?:\s*\d+)?$/}).click();
+  await main.getByLabel("GitHub 插件仓库").fill("owner/repo");
+  await main.screenshot({path:path.join(output,"manager-dark.png")});
   expect(errors).toEqual([]);
   await main.getByRole("button", {name:"关闭窗口",exact:true}).click();
   await expect.poll(() => child.exitCode, {timeout:10_000}).not.toBeNull();

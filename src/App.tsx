@@ -301,7 +301,7 @@ export function App() {
         </button>
       </aside>
 
-      {view === "plugins" ? <PluginManager controller={plugins} /> : view === "panel" && pluginPanel ? <PluginPanelHost request={pluginPanel} onOpenPanel={openPluginPanel} onClose={() => setView("components")} /> : <main className="workspace">
+      {view === "plugins" ? <PluginManager controller={plugins} mcdk={mcdk} /> : view === "panel" && pluginPanel ? <PluginPanelHost request={pluginPanel} onOpenPanel={openPluginPanel} onClose={() => setView("components")} /> : <main className="workspace">
         <header className="topbar">
           <div>
             <p className="eyebrow">创作组件</p>

@@ -286,6 +286,17 @@ describe("component workspace filters", () => {
     expect(screen.getByRole("textbox", { name: "MCDE 插件目录" })).toHaveAttribute("aria-invalid", "true");
   });
 
+  it("disables the legacy editor shortcut when the MCDE plugin is disabled", async () => {
+    mocks.refresh.mockResolvedValue({components:[launchComponent],sources:[],warnings:[]});
+    mocks.mcdkStatus.mockResolvedValue({...mcdkReady,mcde_plugin_enabled:false});
+    render(<App />);
+    const editor = await screen.findByRole("button", {name:"在 MCDE 中打开 编辑测试"});
+    await waitFor(() => expect(editor).toHaveAttribute("title", "MCDE 插件已禁用，请在插件页启用"));
+    expect(editor).toBeDisabled(); fireEvent.click(editor);
+    expect(mocks.launchEditor).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", {name:"启动游戏 编辑测试"})).toBeEnabled();
+  });
+
   it("does not dispatch launches or plugin configuration outside the desktop app", async () => {
     mocks.desktop = false;
     const notice = vi.fn();

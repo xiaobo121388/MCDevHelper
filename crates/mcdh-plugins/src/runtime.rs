@@ -71,6 +71,14 @@ impl PluginService {
         caller: PluginCaller,
         cancellation: Cancellation,
     ) -> Result<ExecutionResult> {
+        if request.plugin_id == crate::MCDE_PLUGIN_ID {
+            let _lease = self.lease(crate::MCDE_PLUGIN_ID, false)?;
+            self.authorize(crate::MCDE_PLUGIN_ID, caller)?;
+            return Err(PluginError::new(
+                "ui_unavailable",
+                "Native MCDE commands require the desktop application",
+            ));
+        }
         if request.timeout_ms == 0 || request.timeout_ms > 600_000 {
             return Err(invalid("timeout_ms must be between 1 and 600000"));
         }

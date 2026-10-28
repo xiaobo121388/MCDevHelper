@@ -89,6 +89,10 @@ fn mcdk_test_mcde_native_backend() {
     let index = mcdh_core::LocalIndex::open(data.join("mcdh.db")).unwrap();
     let binary = Path::new(env!("CARGO_MANIFEST_DIR")).join("release-resources/mcdk/mcdk.exe");
     let manager = McdkManager::new(index.clone(), binary);
+    mcdh_plugins::PluginService::new(index.clone())
+        .unwrap()
+        .register_builtins()
+        .unwrap();
     assert!(manager.status().unwrap().mcde.available);
     let source = fs::read(project.join(".mcdev.json")).unwrap();
     let source_digest = format!("{:x}", Sha256::digest(&source));

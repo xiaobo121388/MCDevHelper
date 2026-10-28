@@ -7,6 +7,15 @@ the editor or a game, rewrite project configuration, or touch shared runtime pac
 
 ## Source Lock
 
+MCDH registers the native adapter as the bundled application plugin `mcdh.mcde`.
+The plugin page owns its persistent enable switch and reuses the existing MCDE
+directory configuration. Both the component plugin command and the legacy quick
+launch check the registration before creating a process. A live editor session
+blocks disabling the adapter; normal MCDK launches are unaffected. This does not
+change the native MCDK plugin ID, ABI, packaging or host verification described
+below. The adapter is desktop-only, cannot be granted MCP access, and updates with
+MCDH rather than through GitHub/local package installation.
+
 `assets/mcde/host-source.json` is the committed input lock:
 
 - Repository: `https://github.com/GitHub-Zero123/MCDevTool`

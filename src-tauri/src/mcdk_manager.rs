@@ -50,6 +50,7 @@ pub struct McdkStatus {
     pub downloaded_bytes: u64,
     pub download_size: Option<u64>,
     pub mcde: mcdh_core::mcde::McdeStatus,
+    pub mcde_plugin_enabled: bool,
 }
 
 #[derive(Clone)]
@@ -100,6 +101,9 @@ impl McdkManager {
         let session: mcdh_core::mcdk_session::SessionState =
             self.store.read(mcdh_core::mcdk_session::SESSION_KEY)?;
         Ok(McdkStatus {
+            mcde_plugin_enabled: mcdh_plugins::PluginService::new(self.index.clone())
+                .and_then(|service| service.mcde_enabled())
+                .map_err(|error| CoreError::InvalidInput(error.to_string()))?,
             session: session.session,
             last_exit: session.last_exit,
             current_version: version.as_ref().map(|v| v.version.clone()),
@@ -410,7 +414,16 @@ pub async fn set_mcde_directory(
 ) -> CommandResult<McdkStatus> {
     let manager = manager.inner().clone();
     blocking(move || {
+        let _component = manager.index.try_lock_mutations()?;
         let _lock = manager.store.lock("state")?;
+        if mcdh_core::mcdk_session::refresh_session(&manager.store)?
+            .session
+            .is_some()
+        {
+            return Err(CoreError::InvalidInput(
+                "请先退出正在运行的 MCDK / MCDE 会话".into(),
+            ));
+        }
         mcdh_core::mcde::McdeStore::new(manager.store.clone())
             .set_directory(directory.as_deref().map(std::path::Path::new))?;
         manager.emit(&app);

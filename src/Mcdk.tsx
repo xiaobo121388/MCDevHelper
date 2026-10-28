@@ -9,6 +9,7 @@ const MCDE_HOST_BRANCH = "feature/plugin-system";
 
 function mcdeIssue(status: McdkStatus | null): string | null {
   if (!status) return "正在读取 MCDE 状态";
+  if (status.mcde_plugin_enabled === false) return "MCDE 插件已禁用，请在插件页启用";
   if (!status.mcde) return "未检测到 MCDE 插件，请在开发工具中配置插件目录";
   if (status.mcde.error) return status.mcde.error;
   if (!status.mcde.host_available) return "MCDE 宿主不可用";
@@ -127,9 +128,6 @@ export function McdkSettings({ mcdk }: { mcdk: McdkController }) {
   const { status } = mcdk;
   const [busy, setBusy] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [configuring, setConfiguring] = useState(false);
-  const [directoryError, setDirectoryError] = useState("");
-  const directoryPending = useRef(false);
   const run = async (action: () => Promise<McdkStatus>) => {
     setBusy(true);
     try { await mcdk.update(action); } finally { setBusy(false); }
@@ -138,6 +136,29 @@ export function McdkSettings({ mcdk }: { mcdk: McdkController }) {
     setSaving(true);
     try { await mcdk.update(() => api.setMcdkAutoUpdate(enabled)); } finally { setSaving(false); }
   };
+  const working = busy || status?.phase === "checking" || status?.phase === "downloading";
+  const percent = status?.download_size ? Math.min(100, Math.floor(status.downloaded_bytes / status.download_size * 100)) : 0;
+  return <div className="mcdk-settings">
+    <div className="mcdk-heading"><strong>MCDK</strong><span>{status?.current_version ? "v" + status.current_version : "未就绪"}</span></div>
+    <div className="mcdk-status" role="status">{status ? (status.last_checked_at ? phaseText[status.phase] : "尚未检查更新") : "正在读取状态"}{status?.latest_version && " · v" + status.latest_version}</div>
+    {status?.phase === "downloading" && <progress aria-label="MCDK 下载进度" max={100} value={percent} />}
+    {status?.last_checked_at && <p className="mcdk-checked">最近检查：{new Date(status.last_checked_at).toLocaleString()}</p>}
+    {status?.session && <p className="mcdk-session">{status.session.mode === "editor" ? "MCDE 宿主运行中 · " + status.session.version : "运行中 · v" + status.session.version} · PID {status.session.pid}</p>}
+    {(mcdk.error || status?.error) && <p className="mcdk-error" role="alert">{mcdk.error || status?.error}</p>}
+    <div className="mcdk-actions">
+      <label className="mcdk-toggle"><input type="checkbox" role="switch" aria-label="MCDK 自动更新" checked={status?.auto_update ?? true} disabled={!status || saving} onChange={(event) => void toggle(event.target.checked)} /><span>自动更新</span></label>
+      <div><button className="button secondary" disabled={!desktop || working} onClick={() => void run(api.checkMcdkUpdate)}><RefreshCw size={15} className={status?.phase === "checking" ? "mcdk-spin" : undefined} />检查更新</button>
+        {status?.latest_version && <button className="button secondary" disabled={working} onClick={() => void run(api.installMcdkUpdate)}><Download size={15} />立即更新</button>}</div>
+    </div>
+    <McdeSettings mcdk={mcdk} showError={false} />
+  </div>;
+}
+
+export function McdeSettings({ mcdk, showError = true }: { mcdk: McdkController; showError?: boolean }) {
+  const { status } = mcdk;
+  const [configuring, setConfiguring] = useState(false);
+  const [directoryError, setDirectoryError] = useState("");
+  const directoryPending = useRef(false);
   const configureDirectory = async (reset = false) => {
     if (directoryPending.current || !desktop || !status || status.session || mcdk.launching) return;
     directoryPending.current = true;
@@ -154,23 +175,10 @@ export function McdkSettings({ mcdk }: { mcdk: McdkController }) {
     } catch (cause) { setDirectoryError(errorMessage(cause)); }
     finally { directoryPending.current = false; setConfiguring(false); }
   };
-  const working = busy || status?.phase === "checking" || status?.phase === "downloading";
-  const percent = status?.download_size ? Math.min(100, Math.floor(status.downloaded_bytes / status.download_size * 100)) : 0;
   const directoryDisabled = !desktop || !status || configuring || !!status.session || !!mcdk.launching;
   const editorIssue = status ? mcdeIssue(status) : null;
-  return <div className="mcdk-settings">
-    <div className="mcdk-heading"><strong>MCDK</strong><span>{status?.current_version ? "v" + status.current_version : "未就绪"}</span></div>
-    <div className="mcdk-status" role="status">{status ? (status.last_checked_at ? phaseText[status.phase] : "尚未检查更新") : "正在读取状态"}{status?.latest_version && " · v" + status.latest_version}</div>
-    {status?.phase === "downloading" && <progress aria-label="MCDK 下载进度" max={100} value={percent} />}
-    {status?.last_checked_at && <p className="mcdk-checked">最近检查：{new Date(status.last_checked_at).toLocaleString()}</p>}
-    {status?.session && <p className="mcdk-session">{status.session.mode === "editor" ? "MCDE 宿主运行中 · " + status.session.version : "运行中 · v" + status.session.version} · PID {status.session.pid}</p>}
-    {(mcdk.error || status?.error) && <p className="mcdk-error" role="alert">{mcdk.error || status?.error}</p>}
-    <div className="mcdk-actions">
-      <label className="mcdk-toggle"><input type="checkbox" role="switch" aria-label="MCDK 自动更新" checked={status?.auto_update ?? true} disabled={!status || saving} onChange={(event) => void toggle(event.target.checked)} /><span>自动更新</span></label>
-      <div><button className="button secondary" disabled={!desktop || working} onClick={() => void run(api.checkMcdkUpdate)}><RefreshCw size={15} className={status?.phase === "checking" ? "mcdk-spin" : undefined} />检查更新</button>
-        {status?.latest_version && <button className="button secondary" disabled={working} onClick={() => void run(api.installMcdkUpdate)}><Download size={15} />立即更新</button>}</div>
-    </div>
-    <section className="mcde-settings" aria-label="MCDE">
+  const error = directoryError || (showError && mcdk.error) || editorIssue;
+  return <section className="mcde-settings" aria-label="MCDE">
       <div className="mcdk-heading"><strong>MCDE</strong><span>{status?.mcde?.plugin_version ? "v" + status.mcde.plugin_version : status ? "未检测到插件" : "正在读取状态"}</span></div>
       <label className="field mcde-directory"><span>MCDE 插件目录<small>{status?.mcde?.configured ? "自定义" : "内置默认"}</small></span>
         <div className="path-row"><input aria-label="MCDE 插件目录" readOnly value={status?.mcde?.directory ?? ""} title={status?.mcde?.directory ?? undefined} placeholder="未检测到插件目录" aria-invalid={!!editorIssue} />
@@ -179,7 +187,6 @@ export function McdkSettings({ mcdk }: { mcdk: McdkController }) {
         </div>
       </label>
       <p className="mcde-host">宿主分支 / 修订：{status?.mcde?.host_available ? MCDE_HOST_BRANCH + " · " + (status.mcde.host_revision ?? "未提供") : "宿主不可用"}</p>
-      {(directoryError || editorIssue) && <p className="mcdk-error" role="alert">{directoryError || editorIssue}</p>}
-    </section>
-  </div>;
+      {error && <p className="mcdk-error" role="alert">{error}</p>}
+    </section>;
 }

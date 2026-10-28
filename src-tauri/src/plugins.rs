@@ -32,8 +32,10 @@ impl Drop for Operation {
 
 impl DesktopPlugins {
     pub fn new(index: LocalIndex) -> Result<Self> {
+        let service = PluginService::new(index)?;
+        service.register_builtins()?;
         Ok(Self {
-            service: PluginService::new(index)?,
+            service,
             operations: Arc::default(),
         })
     }
@@ -149,11 +151,42 @@ pub(crate) async fn uninstall_plugin(
 
 #[tauri::command]
 pub(crate) async fn execute_plugin_command(
+    app: tauri::AppHandle,
+    manager: State<'_, crate::mcdk_manager::McdkManager>,
     state: State<'_, DesktopPlugins>,
     request: ExecutionRequest,
     operation_id: String,
 ) -> Result<ExecutionResult> {
     let operation = state.operation(operation_id)?;
+    if request.plugin_id == mcdh_plugins::MCDE_PLUGIN_ID {
+        let service = state.service.clone();
+        let manager = manager.inner().clone();
+        let cancellation = operation.cancellation.clone();
+        return blocking(move || {
+            let result = (|| {
+                cancellation.check()?;
+                let _lease = service.mcde_command(&request)?;
+                let component_id = request.component_id.as_deref().ok_or_else(|| {
+                    PluginError::new("invalid_input", "Missing component context")
+                })?;
+                let session = crate::mcdk_launch::launch(
+                    &app,
+                    &manager,
+                    component_id,
+                    mcdh_core::mcdk_session::SessionMode::Editor,
+                )?;
+                Ok(ExecutionResult {
+                    value: serde_json::to_value(session)?,
+                    actions: vec![],
+                })
+            })();
+            if let Err(error) = &result {
+                let _ = service.record_mcde_error(error);
+            }
+            result
+        })
+        .await;
+    }
     state
         .service
         .execute(
