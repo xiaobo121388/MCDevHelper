@@ -36,6 +36,34 @@ beforeEach(() => {
 afterEach(() => { cleanup(); document.documentElement.removeAttribute("style"); });
 
 describe("plugin management", () => {
+  it.each([false,true])("toggles the icon-only enable switch (enabled=%s)", async (enabled) => {
+    const current = {...plugin,enabled,allow_mcp:enabled};
+    const next = {...current,enabled:!enabled,allow_mcp:false};
+    mocks.list.mockResolvedValue([current]);
+    mocks.configure.mockImplementationOnce(async () => { mocks.list.mockResolvedValue([next]); return next; });
+    render(<Manager />);
+    const toggle = await screen.findByRole("switch", {name:"启用 测试插件"});
+    expect(toggle).toHaveProperty("checked", enabled);
+    expect(toggle.parentElement).toHaveAttribute("title", "启用 测试插件");
+    expect(toggle.parentElement?.textContent).toBe("");
+    fireEvent.click(toggle);
+    await waitFor(() => expect(mocks.configure).toHaveBeenCalledWith(current,!enabled,false,current.settings));
+    await waitFor(() => expect(toggle).toHaveProperty("checked", !enabled));
+  });
+  it.each([{trusted:false},{compatible:false}])("disables the enable switch for unavailable plugins (%j)", async (state) => {
+    mocks.list.mockResolvedValue([{...plugin,...state}]);
+    render(<Manager />);
+    expect(await screen.findByRole("switch", {name:"启用 测试插件"})).toBeDisabled();
+    expect(mocks.configure).not.toHaveBeenCalled();
+  });
+  it("uses an icon-only uninstall button with an accessible name and tooltip", async () => {
+    render(<Manager />);
+    const uninstall = await screen.findByRole("button", {name:"卸载 测试插件"});
+    expect(uninstall).toHaveClass("icon-button", "plugin-uninstall");
+    expect(uninstall).toHaveAttribute("title", "卸载 测试插件");
+    expect(uninstall.textContent).toBe("");
+    expect(uninstall.querySelector("svg")).toBeInTheDocument();
+  });
   it("uninstalls MCDE with confirmation and removes its registration from the page", async () => {
     const builtin: PluginSummary = {...plugin,manifest:{...plugin.manifest,id:"mcdh.mcde",name:"MCDE",panels:[],mcp_tools:[],settings_schema:{type:"object"}},source:{...plugin.source,kind:"builtin"}};
     mocks.list.mockResolvedValue([builtin]);

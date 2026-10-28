@@ -31,25 +31,36 @@
 .plugin-trust-warning { display: flex; gap: 10px; padding: 12px 14px; margin: 16px 0; color: var(--warning-text); background: var(--warning-bg); border-left: 3px solid var(--warning-border); }
 .plugin-trust-warning p { margin: 0; color: inherit; font-size: 12px; }
 .plugin-trust-warning svg { margin-top: 2px; }
-.plugin-checkbox, .plugin-enable { display: flex; align-items: center; gap: 8px; font-size: 12px; cursor: pointer; }
-.plugin-checkbox input, .plugin-enable input { width: 16px; height: 16px; margin: 0; flex: none; accent-color: var(--accent); }
+.plugin-checkbox { display: flex; align-items: center; gap: 8px; font-size: 12px; cursor: pointer; }
+.plugin-checkbox input { width: 16px; height: 16px; margin: 0; flex: none; accent-color: var(--accent); }
 .plugin-list-heading { display: flex; gap: 10px; align-items: center; border-bottom: 1px solid var(--border); padding: 12px 0; }
 .plugin-list-heading h2 { margin: 0; font-size: 13px; }
 .plugin-list-heading > span { color: var(--subtle); font-size: 12px; }
 .plugin-row { padding: 21px 0; border-bottom: 1px solid var(--border); }
-.plugin-row-top { display: flex; gap: 13px; align-items: flex-start; }
+.plugin-row-top { display: grid; grid-template-columns: 38px minmax(0, 1fr) auto; gap: 13px; align-items: start; }
 .plugin-row-icon { display: grid; flex: none; width: 38px; height: 38px; border-radius: 7px; place-items: center; color: var(--accent); background: var(--accent-soft); }
-.plugin-row-name { flex: 1; min-width: 0; }
+.plugin-row-name { min-width: 0; }
 .plugin-row h3 { margin: 0 0 6px; font-size: 14px; overflow-wrap: anywhere; flex-wrap: wrap; }
 .plugin-row-name p { color: var(--muted); margin: 0 0 7px; font-size: 12px; overflow-wrap: anywhere; }
 .plugin-row-origin { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; color: var(--subtle); font-size: 11px; overflow-wrap: anywhere; }
 .plugin-state { display: inline-flex; align-items: center; gap: 5px; color: var(--subtle); font-size: 11px; }
 .plugin-state.enabled { color: #278365; }
-.plugin-enable { padding-top: 3px; }
+.plugin-enable { display: flex; padding-top: 3px; }
+.plugin-enable input { appearance: none; position: relative; width: 36px; height: 20px; margin: 0; border: 1px solid var(--subtle); border-radius: 999px; background: var(--control-bg); cursor: pointer; transition: background-color .15s, border-color .15s; }
+.plugin-enable input::before { content: ""; position: absolute; top: 3px; left: 3px; width: 12px; height: 12px; border-radius: 50%; background: var(--muted); pointer-events: none; transition: transform .15s, background-color .15s; }
+.plugin-enable input:hover:not(:disabled) { border-color: var(--text); }
+.plugin-enable input:checked { border-color: var(--accent); background: var(--accent); }
+.plugin-enable input:checked::before { transform: translateX(16px); background: var(--accent-contrast); }
+.plugin-enable input:checked:hover:not(:disabled) { border-color: var(--accent-hover); background: var(--accent-hover); }
+.plugin-enable input:disabled { cursor: not-allowed; opacity: .5; }
 .plugin-row-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 7px; margin-top: 15px; }
 .plugin-action-spacer { flex: 1; }
 .plugin-panel-actions { display: inline-flex; align-items: center; gap: 3px; }
-.plugin-row-actions .button { font-size: 11px; min-height: 29px; padding: 5px 9px; }
+.plugin-row-actions .button { font-size: 11px; min-height: 38px; padding: 0 10px; }
+.plugin-row-actions .icon-button { flex: none; padding: 0; }
+.plugin-row-actions .icon-button:disabled { cursor: not-allowed; opacity: .58; }
+.plugin-uninstall { color: var(--danger); }
+.plugin-uninstall:hover:not(:disabled) { border-color: var(--danger); }
 .plugin-row-error { margin: 12px 0 0; color: var(--danger); font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .plugin-settings { margin-top: 14px; }
 .plugin-settings > summary { display: inline-flex; gap: 8px; align-items: center; color: var(--muted); font-size: 12px; cursor: pointer; }
@@ -101,7 +112,8 @@
 @container (max-width: 560px) {
   .plugin-install-bar { flex-wrap: wrap; }
   .plugin-install-bar > label { flex-basis: 100%; min-width: 0; }
-  .plugin-row-top { flex-wrap: wrap; }
-  .plugin-row-name { flex-basis: calc(100% - 51px); }
   .plugin-row-actions > .plugin-checkbox { flex-basis: 100%; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .plugin-enable input, .plugin-enable input::before { transition: none; }
 }

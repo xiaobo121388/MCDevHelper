@@ -24,7 +24,8 @@ const manifest = JSON.parse(await readFile(new URL("../examples/plugins/hello/mc
 const browser = await chromium.launch({ channel:"msedge", headless:true, args:["--no-proxy-server"] });
 const errors = [];
 try {
-  for (const [name, viewport] of [["desktop",{width:1180,height:760}],["compact",{width:900,height:620}],["mobile",{width:390,height:844}]]) {
+  const viewports = [["desktop",{width:1180,height:760}],["compact",{width:900,height:620}],["mobile",{width:390,height:844}]];
+  for (const [name, viewport, theme] of viewports.flatMap(([name,viewport]) => ["light","dark"].map(theme => [`${name}-${theme}`,viewport,theme]))) {
     const context = await browser.newContext({ viewport });
     context.setDefaultTimeout(10_000);
     context.on("page", page => page.on("pageerror", error => errors.push(`${name}: ${error.message}`)));
@@ -46,7 +47,7 @@ try {
     page.on("requestfailed", (request) => console.error("request failed", request.url(), request.failure()));
     page.on("console", (message) => { if (message.type() === "error") console.error("browser", message.text()); });
     page.on("pageerror", (error) => { errors.push(`${name}: ${error.message}`); console.error(error.message); });
-    await context.addInitScript(({ manifest, base }) => {
+    await context.addInitScript(({ manifest, base, theme }) => {
       if (location.origin === "null") return;
       const dialog = new URL(location.href).searchParams.get("dialog");
       if (dialog === "settings") window.__MCDH_DIALOG__ = {kind:"settings"};
@@ -84,7 +85,7 @@ try {
           if (command === "plugin:event|listen") { listeners.set(args.event,args.handler); return next++; }
           if (command.startsWith("plugin:event|")) return next++;
           if (command === "plugin:window|is_maximized") return false;
-          if (command === "get_settings") return {developer_nickname:"MCDH",developer_account:"mcdh@local.invalid",developer_user_id:"0",theme:"light",color_preset:"fluent"};
+          if (command === "get_settings") return {developer_nickname:"MCDH",developer_account:"mcdh@local.invalid",developer_user_id:"0",theme,color_preset:"fluent"};
           if (command === "app_version") return "1.3.0";
           if (command === "check_for_updates") return {current_version:"1.3.0",update_available:false,no_release:false};
           if (command === "mcdk_status") return mcdkStatus();
@@ -105,7 +106,7 @@ try {
           return null;
         },
       };
-    }, { manifest, base });
+    }, { manifest, base, theme });
     await page.goto(base, {waitUntil:"commit",timeout:10_000});
     if (errors.length) console.error((await page.locator("body").innerText()).slice(0,1000));
     const search = page.getByPlaceholder("搜索名称或路径");
@@ -124,11 +125,37 @@ try {
     await expect(manager.getByRole("button", {name:"保存设置"})).toHaveCount(0);
     const mcdeSwitch = manager.getByRole("switch", {name:"启用 MCDE"});
     await expect(mcdeSwitch).toBeChecked();
+    await expect(mcdeSwitch).toHaveCSS("appearance", "none");
+    await expect(mcdeSwitch).toHaveCSS("border-radius", "999px");
+    await expect(mcdeSwitch).toHaveCSS("width", "36px");
+    await expect(mcdeSwitch).toHaveCSS("height", "20px");
+    await expect(mcdeSwitch.locator("..")).toHaveText("");
+    await mcdeSwitch.focus();
+    await manager.keyboard.press("Space");
+    await expect(mcdeSwitch).not.toBeChecked();
+    await expect(mcdeSwitch).toBeFocused();
+    await manager.keyboard.press("Space");
+    await expect(mcdeSwitch).toBeChecked();
     await mcdeSwitch.click();
     await expect(mcdeSwitch).not.toBeChecked();
     await expect(manager.getByRole("textbox", {name:"MCDE 插件目录"})).toHaveCount(0);
     await mcdeSwitch.click();
     await expect(mcdeSwitch).toBeChecked();
+    const switchBounds = await mcdeSwitch.boundingBox();
+    const titleBounds = await manager.getByRole("heading", {name:/^MCDE/}).boundingBox();
+    expect(Math.abs(switchBounds.y - titleBounds.y)).toBeLessThan(6);
+    for (const row of await manager.locator(".plugin-row").all()) {
+      const uninstall = row.locator(".plugin-uninstall");
+      await expect(uninstall).toHaveText("");
+      await expect(uninstall).toHaveAttribute("title", /^卸载 /);
+      for (const button of await row.locator(".plugin-row-actions button").all()) {
+        await expect(button).toHaveCSS("height", "38px");
+      }
+      for (const button of await row.locator(".plugin-row-actions .icon-button").all()) {
+        await expect(button).toHaveCSS("width", "38px");
+      }
+    }
+    await manager.locator(".plugin-row").filter({has:manager.getByRole("heading", {name:/^组件概览/})}).screenshot({path:path.join(output,`${name}-plugin-row.png`)});
     await manager.getByRole("button", {name:"卸载 MCDE"}).click();
     await expect(manager.getByRole("checkbox", {name:"同时清除插件管理数据和日志"})).not.toBeChecked();
     await manager.getByRole("button", {name:"确认卸载"}).click();
@@ -178,5 +205,5 @@ try {
     await context.close();
   }
   expect(errors).toEqual([]);
-  console.log(`Plugin UI verified at 1180, 900 and 390px; screenshots: ${output}`);
+  console.log(`Plugin UI verified in light/dark themes at 1180, 900 and 390px; screenshots: ${output}`);
 } finally { await browser.close(); await new Promise(resolve => server.close(resolve)); }
