@@ -3,7 +3,7 @@ import { spawn } from "node:child_process";
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 
-const data = path.resolve(process.env.MCDH_PLUGIN_QA_DATA ?? "target/plugin-qa/native-data");
+const data = path.resolve(process.env.MCDH_PLUGIN_QA_DATA ?? "target/plugin-qa/native-optional-data");
 if (!data.startsWith(`${path.resolve("target/plugin-qa")}${path.sep}`)) throw new Error("Native plugin QA must use an isolated directory under target/plugin-qa.");
 const output = path.resolve("target/plugin-qa/native");
 const endpoint = "http://127.0.0.1:9224";
@@ -57,6 +57,11 @@ try {
     await window.__TAURI_INTERNALS__.invoke("plugin:event|emit", {event:"mcdh:settings-changed",payload:null});
   });
   await expect(main.locator("html")).toHaveAttribute("data-theme", "light");
+  const initial = await main.evaluate(async () => ({plugins:await window.__TAURI_INTERNALS__.invoke("list_plugins"),status:await window.__TAURI_INTERNALS__.invoke("mcdk_status")}));
+  expect(initial.plugins.some(plugin => plugin.manifest.id === "mcdh.mcde")).toBe(false);
+  expect(initial.status.mcde).toBeNull();
+  expect(initial.status.mcde_plugin_installed).toBe(false);
+  await expect(main.locator("body")).not.toContainText("MCDE");
   const imported = await main.evaluate(async (directory) => {
     const invoke = window.__TAURI_INTERNALS__.invoke;
     const previous = (await invoke("list_plugins")).find(plugin => plugin.manifest.id === "example.component-overview");
@@ -69,10 +74,14 @@ try {
   expect(imported).toBe("local_directory");
   await main.getByRole("button", {name:/^插件(?:\s*\d+)?$/}).click();
   await expect(main.getByRole("heading", {name:/组件概览/})).toBeVisible();
+  await expect(main.locator("body")).not.toContainText("MCDE");
+  await main.getByRole("button", {name:"内置插件",exact:true}).click();
+  await main.getByRole("button", {name:"安装 MCDE"}).click();
   const mcdeSwitch = main.getByRole("switch", {name:"启用 MCDE"});
   await expect(mcdeSwitch).toBeChecked();
   await mcdeSwitch.click();
   await expect(mcdeSwitch).not.toBeChecked();
+  await expect(main.getByRole("textbox", {name:"MCDE 插件目录"})).toHaveCount(0);
   const blocked = await main.evaluate(async () => {
     const invoke = window.__TAURI_INTERNALS__.invoke;
     const mcde = (await invoke("list_plugins")).find(plugin => plugin.manifest.id === "mcdh.mcde");
@@ -126,6 +135,30 @@ try {
   await main.getByRole("button", {name:/^插件(?:\s*\d+)?$/}).click();
   await main.getByLabel("GitHub 插件仓库").fill("owner/repo");
   await main.screenshot({path:path.join(output,"manager-dark.png")});
+  await main.getByRole("button", {name:"卸载 MCDE"}).click();
+  await expect(main.getByRole("checkbox", {name:"同时清除插件管理数据和日志"})).not.toBeChecked();
+  await main.getByRole("button", {name:"确认卸载"}).click();
+  await expect(mcdeSwitch).toHaveCount(0);
+  await expect(main.locator("body")).not.toContainText("MCDE");
+  const removed = await main.evaluate(async () => ({plugins:await window.__TAURI_INTERNALS__.invoke("list_plugins"),status:await window.__TAURI_INTERNALS__.invoke("mcdk_status")}));
+  expect(removed.plugins.some(plugin => plugin.manifest.id === "mcdh.mcde")).toBe(false);
+  expect(removed.status.mcde).toBeNull();
+  expect(removed.status.mcde_plugin_installed).toBe(false);
+  await main.screenshot({path:path.join(output,"manager-uninstalled.png")});
+  await main.getByRole("button", {name:"设置",exact:true}).click();
+  let settings;
+  await expect.poll(async () => {
+    for (const page of context.pages()) {
+      const label = await page.evaluate(() => window.__TAURI_INTERNALS__?.metadata?.currentWindow?.label).catch(() => "");
+      if (label === "dialog-settings") { settings = page; return true; }
+    }
+    return false;
+  }, {timeout:20_000}).toBe(true);
+  await settings.getByRole("button", {name:"开发工具",exact:true}).click();
+  await expect(settings.getByRole("textbox", {name:"MCDE 插件目录"})).toHaveCount(0);
+  await expect(settings.locator("body")).not.toContainText("MCDE");
+  await settings.screenshot({path:path.join(output,"settings-uninstalled.png")});
+  await settings.getByRole("button", {name:"关闭窗口",exact:true}).click();
   expect(errors).toEqual([]);
   await main.getByRole("button", {name:"关闭窗口",exact:true}).click();
   await expect.poll(() => child.exitCode, {timeout:10_000}).not.toBeNull();

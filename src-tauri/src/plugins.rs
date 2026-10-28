@@ -33,7 +33,7 @@ impl Drop for Operation {
 impl DesktopPlugins {
     pub fn new(index: LocalIndex) -> Result<Self> {
         let service = PluginService::new(index)?;
-        service.register_builtins()?;
+        service.refresh_builtins()?;
         Ok(Self {
             service,
             operations: Arc::default(),
@@ -77,6 +77,26 @@ impl DesktopPlugins {
 pub(crate) async fn list_plugins(state: State<'_, DesktopPlugins>) -> Result<Vec<PluginSummary>> {
     let service = state.service.clone();
     blocking(move || service.list()).await
+}
+
+#[tauri::command]
+pub(crate) async fn list_builtin_plugins(
+    state: State<'_, DesktopPlugins>,
+) -> Result<Vec<mcdh_plugins::PluginManifest>> {
+    let service = state.service.clone();
+    blocking(move || service.builtin_catalog()).await
+}
+
+#[tauri::command]
+pub(crate) async fn install_builtin_plugin(
+    app: tauri::AppHandle,
+    state: State<'_, DesktopPlugins>,
+    plugin_id: String,
+) -> Result<PluginSummary> {
+    let service = state.service.clone();
+    let result = blocking(move || service.install_builtin(&plugin_id)).await;
+    app.state::<crate::mcdk_manager::McdkManager>().emit(&app);
+    result
 }
 
 #[tauri::command]
@@ -127,6 +147,7 @@ pub(crate) fn discard_plugin_preview(
 
 #[tauri::command]
 pub(crate) async fn configure_plugin(
+    app: tauri::AppHandle,
     state: State<'_, DesktopPlugins>,
     plugin_id: String,
     fingerprint: String,
@@ -135,18 +156,30 @@ pub(crate) async fn configure_plugin(
     settings: Value,
 ) -> Result<PluginSummary> {
     let service = state.service.clone();
-    blocking(move || service.configure(&plugin_id, &fingerprint, enabled, allow_mcp, settings))
-        .await
+    let native = plugin_id == mcdh_plugins::MCDE_PLUGIN_ID;
+    let result =
+        blocking(move || service.configure(&plugin_id, &fingerprint, enabled, allow_mcp, settings))
+            .await;
+    if native {
+        app.state::<crate::mcdk_manager::McdkManager>().emit(&app);
+    }
+    result
 }
 
 #[tauri::command]
 pub(crate) async fn uninstall_plugin(
+    app: tauri::AppHandle,
     state: State<'_, DesktopPlugins>,
     plugin_id: String,
     clear_data: bool,
 ) -> Result<()> {
     let service = state.service.clone();
-    blocking(move || service.uninstall(&plugin_id, clear_data)).await
+    let native = plugin_id == mcdh_plugins::MCDE_PLUGIN_ID;
+    let result = blocking(move || service.uninstall(&plugin_id, clear_data)).await;
+    if native {
+        app.state::<crate::mcdk_manager::McdkManager>().emit(&app);
+    }
+    result
 }
 
 #[tauri::command]

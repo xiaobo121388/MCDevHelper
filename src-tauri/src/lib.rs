@@ -458,6 +458,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             windows::open_dialog_window,
             list_plugins,
+            list_builtin_plugins,
+            install_builtin_plugin,
             preview_plugin,
             preview_local_plugin,
             install_plugin,

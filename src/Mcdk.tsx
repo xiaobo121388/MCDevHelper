@@ -7,6 +7,10 @@ import type { McdkSession, McdkStatus } from "./types";
 // The backend host validator requires this branch before reporting host_available.
 const MCDE_HOST_BRANCH = "feature/plugin-system";
 
+function mcdeLoaded(status: McdkStatus | null): boolean {
+  return !!status?.mcde && status.mcde_plugin_installed !== false && status.mcde_plugin_enabled !== false;
+}
+
 function mcdeIssue(status: McdkStatus | null): string | null {
   if (!status) return "正在读取 MCDE 状态";
   if (status.mcde_plugin_enabled === false) return "MCDE 插件已禁用，请在插件页启用";
@@ -32,7 +36,8 @@ export function useMcdk(onNotice: (message: string) => void) {
     setStatus(next);
     setError("");
     if (lastExit.current !== undefined && next.last_exit && next.last_exit.id !== lastExit.current
-      && next.last_exit.exit_code !== null && next.last_exit.exit_code !== 0) {
+      && next.last_exit.exit_code !== null && next.last_exit.exit_code !== 0
+      && (next.last_exit.mode !== "editor" || mcdeLoaded(next))) {
       onNotice(next.last_exit.mode === "editor"
         ? "MCDE 宿主异常退出（代码 " + next.last_exit.exit_code + "），日志目录：" + (next.last_exit.launch_directory ?? "未记录")
         : "MCDK 启动器异常退出（代码 " + next.last_exit.exit_code + "），请查看控制台输出。");
@@ -68,7 +73,7 @@ export function useMcdk(onNotice: (message: string) => void) {
   const startLaunch = async (id: string, mode: "game" | "editor") => {
     const current = currentStatus.current;
     if (pending.current || !desktop || !current || current.session
-      || (mode === "editor" ? !!mcdeIssue(current) : !current.available)) return;
+      || (mode === "editor" ? !mcdeLoaded(current) || !!mcdeIssue(current) : !current.available)) return;
     pending.current = true;
     revision.current += 1;
     setLaunching(id);
@@ -99,7 +104,8 @@ export type McdkController = ReturnType<typeof useMcdk>;
 export function LaunchGameButton({ componentId, name, mcdk, disabled = false }: { componentId: string; name: string; mcdk: McdkController; disabled?: boolean }) {
   const session = mcdk.status?.session;
   const running = session?.component_id === componentId;
-  const editorRunning = running && session?.mode === "editor";
+  const editorLoaded = mcdeLoaded(mcdk.status);
+  const editorRunning = editorLoaded && running && session?.mode === "editor";
   const waiting = mcdk.launching === componentId && mcdk.launchingMode === "game";
   const editorWaiting = mcdk.launching === componentId && mcdk.launchingMode === "editor";
   const busy = disabled || !desktop || !!mcdk.launching || !!session;
@@ -107,11 +113,11 @@ export function LaunchGameButton({ componentId, name, mcdk, disabled = false }: 
     ?? (session ? editorRunning ? "MCDE 宿主运行中" : "请先退出正在运行的 MCDK 会话"
       : mcdk.launching ? "正在启动会话" : disabled ? "正在导出，请稍候" : "在 MCDE 中打开 " + name);
   const title = editorRunning ? "MCDE 宿主运行中" : running ? "MCDK 会话运行中" : session ? "请先退出正在运行的 MCDK 会话" : "启动游戏";
-  return <><button className={editorRunning ? "launch-editor active" : "launch-editor"} title={editorTitle}
+  return <>{editorLoaded && <button className={editorRunning ? "launch-editor active" : "launch-editor"} title={editorTitle}
     aria-label={"在 MCDE 中打开 " + name} aria-busy={editorWaiting}
     disabled={busy || !!mcdeIssue(mcdk.status)} onClick={() => void mcdk.launchEditor(componentId)}>
     {editorWaiting ? <LoaderCircle size={16} className="mcdk-spin" /> : <Monitor size={16} />}
-  </button><button className={running && !editorRunning ? "launch-game active" : "launch-game"} title={title}
+  </button>}<button className={running && !editorRunning ? "launch-game active" : "launch-game"} title={title}
     aria-label={"启动游戏 " + name} aria-busy={waiting}
     disabled={busy || !mcdk.status?.available}
     onClick={() => void mcdk.launch(componentId)}>
@@ -143,7 +149,7 @@ export function McdkSettings({ mcdk }: { mcdk: McdkController }) {
     <div className="mcdk-status" role="status">{status ? (status.last_checked_at ? phaseText[status.phase] : "尚未检查更新") : "正在读取状态"}{status?.latest_version && " · v" + status.latest_version}</div>
     {status?.phase === "downloading" && <progress aria-label="MCDK 下载进度" max={100} value={percent} />}
     {status?.last_checked_at && <p className="mcdk-checked">最近检查：{new Date(status.last_checked_at).toLocaleString()}</p>}
-    {status?.session && <p className="mcdk-session">{status.session.mode === "editor" ? "MCDE 宿主运行中 · " + status.session.version : "运行中 · v" + status.session.version} · PID {status.session.pid}</p>}
+    {status?.session && <p className="mcdk-session">{mcdeLoaded(status) && status.session.mode === "editor" ? "MCDE 宿主运行中 · " + status.session.version : "运行中 · v" + status.session.version} · PID {status.session.pid}</p>}
     {(mcdk.error || status?.error) && <p className="mcdk-error" role="alert">{mcdk.error || status?.error}</p>}
     <div className="mcdk-actions">
       <label className="mcdk-toggle"><input type="checkbox" role="switch" aria-label="MCDK 自动更新" checked={status?.auto_update ?? true} disabled={!status || saving} onChange={(event) => void toggle(event.target.checked)} /><span>自动更新</span></label>
@@ -178,6 +184,7 @@ export function McdeSettings({ mcdk, showError = true }: { mcdk: McdkController;
   const directoryDisabled = !desktop || !status || configuring || !!status.session || !!mcdk.launching;
   const editorIssue = status ? mcdeIssue(status) : null;
   const error = directoryError || (showError && mcdk.error) || editorIssue;
+  if (!mcdeLoaded(status)) return null;
   return <section className="mcde-settings" aria-label="MCDE">
       <div className="mcdk-heading"><strong>MCDE</strong><span>{status?.mcde?.plugin_version ? "v" + status.mcde.plugin_version : status ? "未检测到插件" : "正在读取状态"}</span></div>
       <label className="field mcde-directory"><span>MCDE 插件目录<small>{status?.mcde?.configured ? "自定义" : "内置默认"}</small></span>

@@ -91,9 +91,9 @@ fn mcdk_test_mcde_native_backend() {
     let manager = McdkManager::new(index.clone(), binary);
     mcdh_plugins::PluginService::new(index.clone())
         .unwrap()
-        .register_builtins()
+        .install_builtin(mcdh_plugins::MCDE_PLUGIN_ID)
         .unwrap();
-    assert!(manager.status().unwrap().mcde.available);
+    assert!(manager.status().unwrap().mcde.unwrap().available);
     let source = fs::read(project.join(".mcdev.json")).unwrap();
     let source_digest = format!("{:x}", Sha256::digest(&source));
     let id = setup["component_id"].as_str().unwrap();

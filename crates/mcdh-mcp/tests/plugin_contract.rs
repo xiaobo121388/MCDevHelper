@@ -158,7 +158,9 @@ fn plugins_are_independent_version_bound_and_never_pollute_stdio() {
     let temp = tempfile::tempdir().unwrap();
     let data = temp.path().join("state");
     let service = PluginService::new(LocalIndex::open(data.join("mcdh.db")).unwrap()).unwrap();
-    service.register_builtins().unwrap();
+    service
+        .install_builtin(mcdh_plugins::MCDE_PLUGIN_ID)
+        .unwrap();
     let first = service
         .preview_archive("fixture/plugin", &package(temp.path(), "1.0.0"))
         .unwrap();

@@ -97,7 +97,7 @@ import { releaseNotesFor } from "./releaseNotes";
 import type { ComponentSummary, McdkSession, McdkStatus } from "./types";
 import type { AppUpdateProgress } from "./types";
 
-const mcdkReady: McdkStatus = {
+const mcdkReady: McdkStatus & {mcde: NonNullable<McdkStatus["mcde"]>} = {
   available: true, current_version: "1.6.1", auto_update: true, phase: "idle", latest_version: null,
   last_checked_at: null, error: null, downloaded_bytes: 0, download_size: null, session: null, last_exit: null,
   mcde: { available: true, directory: "D:/Bundled/MCDE", configured: false, host_available: true, host_revision: "abc1234", plugin_version: "0.1.0", error: null },
@@ -286,15 +286,36 @@ describe("component workspace filters", () => {
     expect(screen.getByRole("textbox", { name: "MCDE 插件目录" })).toHaveAttribute("aria-invalid", "true");
   });
 
-  it("disables the legacy editor shortcut when the MCDE plugin is disabled", async () => {
+  it.each(["disabled", "uninstalled", "loading"])("hides editor controls and settings while MCDE is %s", async (state) => {
     mocks.refresh.mockResolvedValue({components:[launchComponent],sources:[],warnings:[]});
-    mocks.mcdkStatus.mockResolvedValue({...mcdkReady,mcde_plugin_enabled:false});
+    if (state === "loading") mocks.mcdkStatus.mockReturnValue(new Promise(() => {}));
+    else mocks.mcdkStatus.mockResolvedValue({...mcdkReady,mcde:state === "disabled" ? mcdkReady.mcde : null,mcde_plugin_installed:state !== "uninstalled",mcde_plugin_enabled:false});
     render(<App />);
-    const editor = await screen.findByRole("button", {name:"在 MCDE 中打开 编辑测试"});
-    await waitFor(() => expect(editor).toHaveAttribute("title", "MCDE 插件已禁用，请在插件页启用"));
-    expect(editor).toBeDisabled(); fireEvent.click(editor);
+    await screen.findByRole("heading", {name:"编辑测试"});
+    expect(screen.queryByRole("button", {name:"在 MCDE 中打开 编辑测试"})).not.toBeInTheDocument();
     expect(mocks.launchEditor).not.toHaveBeenCalled();
-    expect(screen.getByRole("button", {name:"启动游戏 编辑测试"})).toBeEnabled();
+    if (state !== "loading") expect(screen.getByRole("button", {name:"启动游戏 编辑测试"})).toBeEnabled();
+    fireEvent.click(screen.getByRole("button", {name:"设置"}));
+    fireEvent.click(within(screen.getByRole("navigation", {name:"设置分类"})).getByRole("button", {name:"开发工具"}));
+    expect(screen.queryByRole("textbox", {name:"MCDE 插件目录"})).not.toBeInTheDocument();
+    expect(screen.queryByText(/MCDE/)).not.toBeInTheDocument();
+  });
+
+  it("removes the active editor UI on an uninstall event without emitting an old editor error", async () => {
+    const notice = vi.fn();
+    const { result } = renderHook(() => useMcdk(notice));
+    await waitFor(() => expect(result.current.status).toEqual(mcdkReady));
+    const view = render(<><LaunchGameButton componentId="game" name="编辑测试" mcdk={result.current} /><McdkSettings mcdk={result.current} /></>);
+    expect(screen.getByRole("button", {name:"在 MCDE 中打开 编辑测试"})).toBeInTheDocument();
+    await act(async () => {
+      mocks.onMcdkStatus.mock.calls[0][0]({...mcdkReady,mcde:null,mcde_plugin_installed:false,mcde_plugin_enabled:false,last_exit:{id:"old-editor",component_id:"game",exit_code:1,mode:"editor"}});
+    });
+    view.rerender(<><LaunchGameButton componentId="game" name="编辑测试" mcdk={result.current} /><McdkSettings mcdk={result.current} /></>);
+    expect(screen.queryByRole("button", {name:"在 MCDE 中打开 编辑测试"})).not.toBeInTheDocument();
+    expect(screen.queryByText(/MCDE/)).not.toBeInTheDocument();
+    expect(notice).not.toHaveBeenCalled();
+    await act(async () => { await result.current.launchEditor("game"); });
+    expect(mocks.launchEditor).not.toHaveBeenCalled();
   });
 
   it("does not dispatch launches or plugin configuration outside the desktop app", async () => {
@@ -588,7 +609,7 @@ describe("component workspace filters", () => {
     mocks.mcdkStatus.mockResolvedValue(running);
     await act(async () => { complete({ ...running, session: null }); await update; });
     expect(result.current.status?.session).toBe(editorSession);
-    expect(result.current.status?.mcde.directory).toBe("D:/Plugins/MCDE");
+    expect(result.current.status?.mcde?.directory).toBe("D:/Plugins/MCDE");
     expect(mocks.mcdkStatus).toHaveBeenCalledTimes(2);
   });
 

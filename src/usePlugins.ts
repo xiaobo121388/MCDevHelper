@@ -16,10 +16,12 @@ export function usePlugins(onNotice: (message: string) => void, onPanel: (reques
   const [prompt, setPrompt] = useState<{ plugin: PluginSummary; command: PluginCommand; componentId?: string } | null>(null);
   const alive = useRef(true);
   const active = useRef<string | null>(null);
+  const listRevision = useRef(0);
   const reload = useCallback(async () => {
     if (!pluginDesktop) return;
+    const revision = ++listRevision.current;
     const next = await pluginApi.list();
-    if (alive.current) setItems((current) => JSON.stringify(current) === JSON.stringify(next) ? current : next);
+    if (alive.current && revision === listRevision.current) setItems((current) => JSON.stringify(current) === JSON.stringify(next) ? current : next);
   }, []);
   useEffect(() => {
     alive.current = true;
@@ -66,7 +68,15 @@ export function usePlugins(onNotice: (message: string) => void, onPanel: (reques
     if (allowMcp && !plugin.allow_mcp && !await confirmAction(`${MCP_TRUST_WARNING}\n\n${plugin.manifest.name} ${plugin.manifest.version}\n${plugin.repository}`)) return;
     await operation("保存插件设置", () => pluginApi.configure(plugin, enabled, allowMcp, settings));
   };
-  return { items, error, setError, busy, progress, result, setResult, prompt, setPrompt, reload, operation, applyActions, execute, requestCommand, configure,
+  const uninstall = (pluginId: string, clearData: boolean) => operation("卸载插件", async () => {
+    await pluginApi.uninstall(pluginId, clearData);
+    ++listRevision.current;
+    if (alive.current) {
+      setItems((current) => current.filter((plugin) => plugin.manifest.id !== pluginId));
+      setPrompt((current) => current?.plugin.manifest.id === pluginId ? null : current);
+    }
+  });
+  return { items, error, setError, busy, progress, result, setResult, prompt, setPrompt, reload, operation, applyActions, execute, requestCommand, configure, uninstall,
     preview: (source: string) => operation("获取插件", (id) => pluginApi.preview(source, id, setProgress)),
     previewLocal: (path: string) => operation("校验本地插件", (id) => pluginApi.previewLocal(path, id)),
     cancel: () => active.current ? pluginApi.cancel(active.current) : Promise.resolve(),

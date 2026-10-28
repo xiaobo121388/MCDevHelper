@@ -547,14 +547,11 @@ impl PluginService {
     }
 
     pub fn uninstall(&self, id: &str, clear_data: bool) -> Result<()> {
-        if id == crate::MCDE_PLUGIN_ID {
-            return Err(PluginError::new(
-                "builtin_plugin",
-                "MCDE is bundled with MCDH; disable it instead of uninstalling",
-            ));
-        }
         let _registry = self.lease("registry", true)?;
         let _plugin = self.lease(id, true)?;
+        if id == crate::MCDE_PLUGIN_ID {
+            self.ensure_mcde_idle()?;
+        }
         let mut records = self.registry()?;
         let record = records
             .remove(id)

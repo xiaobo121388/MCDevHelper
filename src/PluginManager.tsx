@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
-import { Archive, Check, ChevronDown, Download, ExternalLink, FileText, FolderOpen, LoaderCircle, Plus, Puzzle, RefreshCw, Save, ShieldAlert, Trash2, X } from "lucide-react";
+import { Archive, Check, ChevronDown, Download, ExternalLink, FileText, FolderOpen, LoaderCircle, PackagePlus, Plus, Puzzle, RefreshCw, Save, ShieldAlert, Trash2, X } from "lucide-react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { openDialogWindow } from "./windows";
 import { errorMessage } from "./api";
@@ -7,13 +7,14 @@ import { pluginApi } from "./pluginApi";
 import { SchemaFields } from "./PluginForms";
 import { McdeSettings, type McdkController } from "./Mcdk";
 import { PLUGIN_TRUST_WARNING, type PluginController } from "./usePlugins";
-import type { Json, PluginCandidate, PluginLog, PluginSummary } from "./pluginTypes";
+import type { Json, PluginCandidate, PluginLog, PluginManifest, PluginSummary } from "./pluginTypes";
 
 export function PluginManager({ controller, mcdk }: { controller: PluginController; mcdk?: McdkController }) {
   const [source, setSource] = useState("");
   const sourceInput = useRef<HTMLInputElement>(null);
   const [candidate, setCandidate] = useState<PluginCandidate | null>(null);
   const [trusted, setTrusted] = useState(false);
+  const [catalog, setCatalog] = useState<PluginManifest[] | null>(null);
   const currentPreview = useRef<string | null>(null);
   const mounted = useRef(true);
   const choosing = useRef(false);
@@ -54,9 +55,25 @@ export function PluginManager({ controller, mcdk }: { controller: PluginControll
     } catch { /* Persistent error belongs to the controller. */ }
   };
   const submit = (event: FormEvent) => { event.preventDefault(); void preview(source); };
+  const browseBuiltins = async () => {
+    try {
+      const items = await controller.operation("读取内置插件", pluginApi.builtins);
+      if (mounted.current) setCatalog(items);
+    } catch { /* The controller keeps the error visible. */ }
+  };
+  const installBuiltin = async (id: string) => {
+    try {
+      await controller.operation("安装内置插件", () => pluginApi.installBuiltin(id));
+      if (mounted.current) setCatalog(null);
+    } catch { /* The controller keeps the error visible. */ }
+  };
   return <main className="workspace plugin-workspace">
-    <header className="topbar"><div><p className="eyebrow">扩展</p><h1>插件</h1></div><button className="icon-button" title="刷新插件" aria-label="刷新插件" disabled={!!controller.busy} onClick={() => void controller.reload().catch((cause) => controller.setError(errorMessage(cause)))}><RefreshCw size={18} /></button></header>
+    <header className="topbar"><div><p className="eyebrow">扩展</p><h1>插件</h1></div><div className="plugin-manager-tools"><button className="icon-button" title="内置插件" aria-label="内置插件" disabled={!!controller.busy} onClick={() => void browseBuiltins()}><PackagePlus size={18} /></button><button className="icon-button" title="刷新插件" aria-label="刷新插件" disabled={!!controller.busy} onClick={() => void controller.reload().catch((cause) => controller.setError(errorMessage(cause)))}><RefreshCw size={18} /></button></div></header>
     <div className="plugin-manager-body">
+      {catalog && <section className="plugin-preview" aria-label="内置插件列表"><header><h2>内置插件</h2><button className="icon-button" title="关闭内置插件列表" aria-label="关闭内置插件列表" onClick={() => setCatalog(null)}><X size={17} /></button></header>{catalog.map((manifest) => {
+        const installed = controller.items.some((plugin) => plugin.manifest.id === manifest.id);
+        return <div className="plugin-catalog-row" key={manifest.id}><div><h3>{manifest.name} <small>v{manifest.version}</small></h3><p>{manifest.description}</p></div><button className="button secondary" disabled={!!controller.busy || installed} aria-label={`${installed ? "已安装" : "安装"} ${manifest.name}`} onClick={() => void installBuiltin(manifest.id)}><Download size={16} />{installed ? "已安装" : "安装"}</button></div>;
+      })}</section>}
       <form className="plugin-install-bar" onSubmit={submit}><label><Puzzle size={18} /><input ref={sourceInput} aria-label="GitHub 插件仓库" value={source} onChange={(event) => setSource(event.target.value)} placeholder="owner/repo" required disabled={!!controller.busy} />{source && <button className="input-clear" type="button" title="清空插件仓库" aria-label="清空插件仓库" disabled={!!controller.busy} onClick={() => { setSource(""); sourceInput.current?.focus(); }}><X size={16} /></button>}</label><button className="button primary" type="submit" aria-busy={!!controller.busy} disabled={!!controller.busy || selecting || !source.trim()}><Plus size={16} />添加插件</button><div className="plugin-local-import"><button className="button secondary" type="button" title="导入插件 ZIP" disabled={!!controller.busy || selecting} onClick={() => void importLocal(false)}><Archive size={16} />本地导入</button><button className="icon-button" type="button" title="导入插件目录" aria-label="导入插件目录" disabled={!!controller.busy || selecting} onClick={() => void importLocal(true)}><FolderOpen size={17} /></button></div></form>
       {controller.busy && <div className="plugin-task" role="status"><LoaderCircle className="spin" size={17} /><span>{controller.busy.title}{controller.progress?.phase === "downloading" ? ` · ${(controller.progress.downloaded_bytes / 1048576).toFixed(1)} MB` : ""}</span><button className="icon-button" title="取消插件任务" aria-label="取消插件任务" onClick={() => void controller.cancel().catch((cause) => controller.setError(errorMessage(cause)))}><X size={16} /></button></div>}
       {candidate && <section className="plugin-preview" aria-label="插件安装预览">
@@ -96,7 +113,7 @@ function PluginRow({ plugin, controller, onUpdate, mcdk }: { plugin: PluginSumma
       {plugin.manifest.panels.map((panel) => <span className="plugin-panel-actions" key={panel.id}><button className="button secondary" disabled={!plugin.enabled || !plugin.trusted} onClick={() => controller.openPanel({ pluginId:plugin.manifest.id, fingerprint:plugin.fingerprint, panelId:panel.id })}>{panel.title}</button><button className="icon-button" disabled={!plugin.enabled || !plugin.trusted} title={`独立窗口打开 ${panel.title}`} aria-label={`独立窗口打开 ${panel.title}`} onClick={() => void attempt(() => openDialogWindow({ kind:"plugin_panel", pluginId:plugin.manifest.id, fingerprint:plugin.fingerprint, panelId:panel.id }))}><ExternalLink size={15} /></button></span>)}
       {!builtin && <button className="icon-button" disabled={!!controller.busy} title={`检查更新 ${plugin.manifest.name}`} aria-label={`检查更新 ${plugin.manifest.name}`} onClick={onUpdate}><RefreshCw size={16} /></button>}
       <button className="icon-button" title={`日志 ${plugin.manifest.name}`} aria-label={`日志 ${plugin.manifest.name}`} aria-expanded={!!logs} onClick={() => void attempt(async () => setLogs(logs ? null : await pluginApi.logs(plugin.manifest.id)))}><FileText size={16} /></button>
-      {!builtin && <button className="icon-button danger" disabled={!!controller.busy} title={`卸载 ${plugin.manifest.name}`} aria-label={`卸载 ${plugin.manifest.name}`} onClick={() => setRemoving(!removing)}><Trash2 size={16} /></button>}
+      <button className="button danger" disabled={!!controller.busy || nativeBusy} title={`卸载 ${plugin.manifest.name}`} aria-label={`卸载 ${plugin.manifest.name}`} onClick={() => setRemoving(!removing)}><Trash2 size={16} />卸载</button>
     </div>
     {builtin && plugin.manifest.id === "mcdh.mcde" && mcdk && <McdeSettings mcdk={mcdk} />}
     {!!Object.keys(plugin.manifest.settings_schema.properties ?? {}).length && <details className="plugin-settings"><summary>设置<ChevronDown size={15} /></summary><form onSubmit={(event) => {
@@ -104,6 +121,6 @@ function PluginRow({ plugin, controller, onUpdate, mcdk }: { plugin: PluginSumma
       void attempt(async () => { await controller.configure(plugin, plugin.enabled, plugin.allow_mcp, settings); editingSettings.current = false; });
     }}><SchemaFields schema={plugin.manifest.settings_schema} value={settings} onChange={(value) => { editingSettings.current = true; setSettings(value); }} disabled={!!controller.busy} /><button className="button secondary" type="submit" disabled={!!controller.busy}><Save size={15} />保存</button></form></details>}
     {logs && <div className="plugin-logs" role="log">{logs.length ? logs.map((log, index) => <div key={index}><time>{log.time}</time><strong>{log.level}</strong><span>{log.text}</span></div>) : <p>暂无运行日志</p>}</div>}
-    {removing && <div className="plugin-remove-confirm"><p>卸载 {plugin.manifest.name}？</p><label className="plugin-checkbox"><input type="checkbox" checked={clearData} onChange={(event) => setClearData(event.target.checked)} /><span>同时清除插件设置、存储和日志</span></label><div className="dialog-actions"><button className="button secondary" onClick={() => setRemoving(false)}>取消</button><button className="button danger" disabled={!!controller.busy} onClick={() => void attempt(() => controller.operation("卸载插件", () => pluginApi.uninstall(plugin.manifest.id, clearData)))}><Trash2 size={15} />确认卸载</button></div></div>}
+    {removing && <div className="plugin-remove-confirm"><p>卸载 {plugin.manifest.name}？</p>{builtin && <p>原生资源、编辑器配置和项目文件会保留。</p>}<label className="plugin-checkbox"><input type="checkbox" checked={clearData} onChange={(event) => setClearData(event.target.checked)} /><span>{builtin ? "同时清除插件管理数据和日志" : "同时清除插件设置、存储和日志"}</span></label><div className="dialog-actions"><button className="button secondary" onClick={() => setRemoving(false)}>取消</button><button className="button danger" disabled={!!controller.busy || nativeBusy} onClick={() => void attempt(() => controller.uninstall(plugin.manifest.id, clearData))}><Trash2 size={15} />确认卸载</button></div></div>}
   </article>;
 }

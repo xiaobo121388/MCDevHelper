@@ -41,6 +41,10 @@ try {
         {id:"three",name:"像素材质",kind:"material",path:"D:/Projects/Textures"},
       ].map((component) => ({...component,origin:{kind:"single"},manifests:[],tags:[],favorite:false,size_bytes:4096}));
       const callbacks = new Map();
+      const listeners = new Map();
+      let mcdeInstalled = true;
+      const mcdkStatus = () => ({available:false,current_version:null,auto_update:false,phase:"idle",latest_version:null,last_checked_at:null,error:null,downloaded_bytes:0,download_size:null,session:null,last_exit:null,mcde_plugin_installed:mcdeInstalled,mcde_plugin_enabled:mcdeInstalled && mcde.enabled,mcde:mcdeInstalled && mcde.enabled ? {available:false,configured:false,host_available:false,host_revision:null,plugin_version:null,error:null,directory:null} : null});
+      const emitMcdk = () => callbacks.get(listeners.get("mcdk-status-changed"))?.({event:"mcdk-status-changed",id:0,payload:mcdkStatus()});
       let next = 1;
       localStorage.setItem("mcdh.last-launched-version", "1.3.0");
       window.isTauri = true;
@@ -51,15 +55,19 @@ try {
         unregisterCallback(id) { callbacks.delete(id); },
         convertFileSrc(file) { return `${base}/examples/plugins/hello/${file.split('/').slice(2).join('/')}`; },
         async invoke(command, args = {}) {
+          if (command === "plugin:event|listen") { listeners.set(args.event,args.handler); return next++; }
           if (command.startsWith("plugin:event|")) return next++;
           if (command === "plugin:window|is_maximized") return false;
           if (command === "get_settings") return {developer_nickname:"MCDH",developer_account:"mcdh@local.invalid",developer_user_id:"0",theme:"light",color_preset:"fluent"};
           if (command === "app_version") return "1.3.0";
           if (command === "check_for_updates") return {current_version:"1.3.0",update_available:false,no_release:false};
-          if (command === "mcdk_status") return {available:false,current_version:null,auto_update:false,phase:"idle",latest_version:null,last_checked_at:null,error:null,downloaded_bytes:0,download_size:null,session:null,last_exit:null,mcde:{available:false,configured:false,host_available:false,host_revision:null,plugin_version:null,error:null,directory:null}};
+          if (command === "mcdk_status") return mcdkStatus();
           if (command === "refresh_components") return {components,sources:[],warnings:[]};
-          if (command === "list_plugins") return [mcde,plugin];
-          if (command === "configure_plugin" && args.pluginId === "mcdh.mcde") { mcde.enabled = args.enabled; return mcde; }
+          if (command === "list_plugins") return mcdeInstalled ? [mcde,plugin] : [plugin];
+          if (command === "list_builtin_plugins") return [mcde.manifest];
+          if (command === "install_builtin_plugin") { mcdeInstalled = true; mcde.enabled = true; emitMcdk(); return mcde; }
+          if (command === "uninstall_plugin" && args.pluginId === "mcdh.mcde") { mcdeInstalled = false; emitMcdk(); return; }
+          if (command === "configure_plugin" && args.pluginId === "mcdh.mcde") { mcde.enabled = args.enabled; emitMcdk(); return mcde; }
           if (command === "plugin:dialog|open") return args.options?.directory ? "D:/plugins/source" : "D:/plugins/example.zip";
           if (command === "preview_local_plugin") return {token:"local-preview",...plugin,repository:"Local import",source:{kind:args.path.endsWith(".zip") ? "local_zip" : "local_directory",reference:args.path,archive_sha256:"a".repeat(64)},already_installed:false};
           if (command === "preview_plugin") { args.onProgress.onmessage({phase:"validating",downloaded_bytes:1024,total_bytes:1024}); return {token:"preview",...plugin,already_installed:false}; }
@@ -79,6 +87,7 @@ try {
     await page.getByRole("button", {name:"清空组件搜索"}).click();
     await expect(search).toHaveValue("");
     await expect(search).toBeFocused();
+    await expect(page.getByRole("button", {name:/^在 MCDE 中打开 /})).toHaveCount(3);
     await page.getByRole("button", {name:/^插件(?:\s*\d+)?$/}).click();
     await expect(page.getByRole("heading", {name:"插件",exact:true})).toBeVisible();
     await expect(page.getByRole("heading", {name:/组件概览/})).toBeVisible();
@@ -86,9 +95,24 @@ try {
     await expect(mcdeSwitch).toBeChecked();
     await mcdeSwitch.click();
     await expect(mcdeSwitch).not.toBeChecked();
+    await expect(page.getByRole("textbox", {name:"MCDE 插件目录"})).toHaveCount(0);
     await mcdeSwitch.click();
     await expect(mcdeSwitch).toBeChecked();
-    await expect(page.getByRole("button", {name:"卸载 MCDE"})).toHaveCount(0);
+    await page.getByRole("button", {name:"卸载 MCDE"}).click();
+    await expect(page.getByRole("checkbox", {name:"同时清除插件管理数据和日志"})).not.toBeChecked();
+    await page.getByRole("button", {name:"确认卸载"}).click();
+    await expect(mcdeSwitch).toHaveCount(0);
+    await expect(page.locator("body")).not.toContainText("MCDE");
+    await page.screenshot({path:path.join(output,`${name}-uninstalled.png`)});
+    await page.getByRole("button", {name:/^全部组件/}).click();
+    await expect(page.getByRole("button", {name:/^在 MCDE 中打开 /})).toHaveCount(0);
+    await page.getByRole("button", {name:"组件插件操作"}).first().click();
+    await expect(page.getByRole("menuitem", {name:/MCDE/})).toHaveCount(0);
+    await page.keyboard.press("Escape");
+    await page.getByRole("button", {name:/^插件(?:\s*\d+)?$/}).click();
+    await page.getByRole("button", {name:"内置插件",exact:true}).click();
+    await page.getByRole("button", {name:"安装 MCDE"}).click();
+    await expect(mcdeSwitch).toBeChecked();
     const repository = page.getByLabel("GitHub 插件仓库");
     await expect(page.getByRole("button", {name:"添加插件"})).toHaveCSS("cursor", "not-allowed");
     await repository.fill("owner/repo");

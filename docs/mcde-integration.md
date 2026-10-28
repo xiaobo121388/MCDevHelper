@@ -7,11 +7,16 @@ the editor or a game, rewrite project configuration, or touch shared runtime pac
 
 ## Source Lock
 
-MCDH registers the native adapter as the bundled application plugin `mcdh.mcde`.
-The plugin page owns its persistent enable switch and reuses the existing MCDE
-directory configuration. Both the component plugin command and the legacy quick
+MCDH offers the native adapter as the optional bundled plugin `mcdh.mcde`.
+Installation is explicit from the plugin page's built-in catalog. Startup only
+refreshes already-installed registrations; uninstalling is persistent across
+restarts and application updates. The plugin page owns its enable switch and
+uninstall command and reuses the existing MCDE directory configuration. Both the component plugin command and the legacy quick
 launch check the registration before creating a process. A live editor session
-blocks disabling the adapter; normal MCDK launches are unaffected. This does not
+blocks disabling or uninstalling the adapter; normal MCDK launches are unaffected.
+Without an enabled adapter, MCDH hides MCDE controls/settings and does not probe
+its native resources. Uninstalling preserves native binaries, editor configuration
+and project files, even when plugin management data is explicitly cleared. This does not
 change the native MCDK plugin ID, ABI, packaging or host verification described
 below. The adapter is desktop-only, cannot be granted MCP access, and updates with
 MCDH rather than through GitHub/local package installation.

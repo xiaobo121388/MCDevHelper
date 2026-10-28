@@ -154,6 +154,7 @@ export interface McdkSession {
 }
 
 export interface McdkStatus {
+  mcde_plugin_installed?: boolean;
   mcde_plugin_enabled?: boolean;
   current_version: string | null;
   available: boolean;
@@ -165,7 +166,7 @@ export interface McdkStatus {
     host_revision: string | null;
     plugin_version: string | null;
     error: string | null;
-  };
+  } | null;
   auto_update: boolean;
   phase: "idle" | "checking" | "downloading" | "available" | "updated" | "error";
   latest_version: string | null;

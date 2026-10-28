@@ -7,7 +7,8 @@ use mcdh_core::{
 use serde_json::json;
 
 use crate::{
-    ExecutionRequest, PluginCaller, PluginError, PluginManifest, PluginService, Result, archive,
+    ExecutionRequest, PluginCaller, PluginError, PluginManifest, PluginService, PluginSummary,
+    Result, archive,
     error::invalid,
     github::DownloadSource,
     origin::{ManagedOrigin, PluginOrigin},
@@ -76,11 +77,12 @@ pub(crate) fn verify_mcde(record: &InstalledPlugin) -> Result<()> {
 }
 
 impl PluginService {
-    pub fn register_builtins(&self) -> Result<()> {
-        if self
-            .registry()?
+    /// Refresh installed adapters only. Absence is an explicit uninstalled state.
+    pub fn refresh_builtins(&self) -> Result<()> {
+        let records = self.registry()?;
+        if records
             .get(MCDE_PLUGIN_ID)
-            .is_some_and(|record| verify_mcde(record).is_ok())
+            .is_none_or(|record| verify_mcde(record).is_ok())
         {
             return Ok(());
         }
@@ -88,26 +90,54 @@ impl PluginService {
         let _plugin = self.lease(MCDE_PLUGIN_ID, true)?;
         let mut records = self.registry()?;
         let mut record = mcde_record()?;
-        if let Some(previous) = records.get(MCDE_PLUGIN_ID) {
-            if previous.repository != record.repository {
-                return Err(invalid(
-                    "The reserved MCDE id belongs to another source; uninstall that plugin first",
-                ));
-            }
-            if verify_mcde(previous).is_ok() {
-                return Ok(());
-            }
-            record.enabled = previous.enabled;
+        let Some(previous) = records.get(MCDE_PLUGIN_ID) else {
+            return Ok(());
+        };
+        if previous.repository != record.repository {
+            return Err(invalid(
+                "The reserved MCDE id belongs to another source; uninstall that plugin first",
+            ));
         }
+        if verify_mcde(previous).is_ok() {
+            return Ok(());
+        }
+        record.enabled = previous.enabled;
         records.insert(MCDE_PLUGIN_ID.into(), record);
         self.save_registry(&records)
     }
 
-    pub fn mcde_enabled(&self) -> Result<bool> {
+    pub fn builtin_catalog(&self) -> Result<Vec<PluginManifest>> {
+        Ok(vec![mcde_record()?.manifest])
+    }
+
+    pub fn install_builtin(&self, id: &str) -> Result<PluginSummary> {
+        if id != MCDE_PLUGIN_ID {
+            return Err(invalid("Unknown built-in plugin"));
+        }
+        let _registry = self.lease("registry", true)?;
+        let _plugin = self.lease(id, true)?;
+        let mut records = self.registry()?;
+        if let Some(record) = records.get(id) {
+            self.verify(record)?;
+            return Ok(record.clone().into());
+        }
+        self.ensure_mcde_idle()?;
+        let record = mcde_record()?;
+        records.insert(id.into(), record.clone());
+        self.save_registry(&records)?;
+        Ok(record.into())
+    }
+
+    pub fn mcde_state(&self) -> Result<(bool, bool)> {
         let records = self.registry()?;
-        Ok(records
-            .get(MCDE_PLUGIN_ID)
-            .is_some_and(|record| record.enabled && self.verify(record).is_ok()))
+        Ok(match records.get(MCDE_PLUGIN_ID) {
+            Some(record) => (true, record.enabled && self.verify(record).is_ok()),
+            None => (false, false),
+        })
+    }
+
+    pub fn mcde_enabled(&self) -> Result<bool> {
+        Ok(self.mcde_state()?.1)
     }
 
     pub fn mcde_lease(&self, fingerprint: Option<&str>) -> Result<McdePluginLease> {
@@ -162,7 +192,7 @@ mod tests {
     fn bundled_registration_persists_disable_and_protects_identity() {
         let temp = tempfile::tempdir().unwrap();
         let service = crate::tests::service(temp.path());
-        service.register_builtins().unwrap();
+        service.install_builtin(MCDE_PLUGIN_ID).unwrap();
         let plugin = service.list().unwrap().remove(0);
         assert_eq!(plugin.manifest.id, MCDE_PLUGIN_ID);
         assert_eq!(plugin.source.kind, "builtin");
@@ -175,7 +205,11 @@ mod tests {
         );
         let guard = service.mcde_lease(Some(&plugin.fingerprint)).unwrap();
         let other = PluginService::new(service.index.clone()).unwrap();
-        other.register_builtins().unwrap();
+        other.refresh_builtins().unwrap();
+        assert_eq!(
+            other.uninstall(MCDE_PLUGIN_ID, false).unwrap_err().code,
+            "plugin_busy"
+        );
         assert_eq!(
             other
                 .configure(MCDE_PLUGIN_ID, &plugin.fingerprint, false, false, json!({}))
@@ -187,13 +221,13 @@ mod tests {
         other
             .configure(MCDE_PLUGIN_ID, &plugin.fingerprint, false, false, json!({}))
             .unwrap();
-        other.register_builtins().unwrap();
+        other.refresh_builtins().unwrap();
         assert!(!service.mcde_enabled().unwrap());
         assert!(service.mcde_lease(None).is_err());
-        assert_eq!(
-            service.uninstall(MCDE_PLUGIN_ID, true).unwrap_err().code,
-            "builtin_plugin"
-        );
+        service.uninstall(MCDE_PLUGIN_ID, false).unwrap();
+        other.refresh_builtins().unwrap();
+        assert_eq!(other.mcde_state().unwrap(), (false, false));
+        assert!(other.list().unwrap().is_empty());
         let mut manifest = crate::tests::manifest();
         manifest["id"] = json!(MCDE_PLUGIN_ID);
         let archive = crate::tests::package(temp.path(), &manifest, "");
@@ -209,7 +243,7 @@ mod tests {
     fn native_commands_require_context_current_fingerprint_and_enabled_registration() {
         let temp = tempfile::tempdir().unwrap();
         let service = crate::tests::service(temp.path());
-        service.register_builtins().unwrap();
+        service.install_builtin(MCDE_PLUGIN_ID).unwrap();
         let mut request: ExecutionRequest = serde_json::from_value(
             json!({"plugin_id":MCDE_PLUGIN_ID,"command":"open-editor","component_id":"component"}),
         )
@@ -236,7 +270,7 @@ mod tests {
         use mcdh_core::mcdk_session::{McdkSession, SESSION_KEY, SessionState, inspect_process};
         let temp = tempfile::tempdir().unwrap();
         let service = crate::tests::service(temp.path());
-        service.register_builtins().unwrap();
+        service.install_builtin(MCDE_PLUGIN_ID).unwrap();
         let plugin = service.list().unwrap().remove(0);
         let process = inspect_process(std::process::id()).unwrap().unwrap();
         let store = McdkStore::new(service.index.clone());
@@ -260,6 +294,10 @@ mod tests {
             .unwrap();
         let other = PluginService::new(service.index.clone()).unwrap();
         assert_eq!(
+            other.uninstall(MCDE_PLUGIN_ID, true).unwrap_err().code,
+            "plugin_busy"
+        );
+        assert_eq!(
             other
                 .configure(MCDE_PLUGIN_ID, &plugin.fingerprint, false, false, json!({}))
                 .unwrap_err()
@@ -272,5 +310,64 @@ mod tests {
             .configure(MCDE_PLUGIN_ID, &plugin.fingerprint, false, false, json!({}))
             .unwrap();
         assert!(!service.mcde_enabled().unwrap());
+    }
+
+    #[test]
+    fn absent_builtin_stays_absent_after_catalog_refresh_and_restart() {
+        let temp = tempfile::tempdir().unwrap();
+        let service = crate::tests::service(temp.path());
+        let revision = service.revision().unwrap();
+        assert_eq!(service.builtin_catalog().unwrap()[0].id, MCDE_PLUGIN_ID);
+        service.refresh_builtins().unwrap();
+        assert_eq!(service.revision().unwrap(), revision);
+        assert!(service.list().unwrap().is_empty());
+        assert!(service.install_builtin("unknown").is_err());
+        service.install_builtin(MCDE_PLUGIN_ID).unwrap();
+        let data = service.root.join("data").join(MCDE_PLUGIN_ID);
+        std::fs::create_dir_all(&data).unwrap();
+        std::fs::write(data.join("runtime.log"), "retained").unwrap();
+        service.uninstall(MCDE_PLUGIN_ID, false).unwrap();
+        let other = PluginService::new(service.index.clone()).unwrap();
+        other.refresh_builtins().unwrap();
+        assert!(other.list().unwrap().is_empty());
+        assert!(other.mcde_lease(None).is_err());
+        assert!(data.join("runtime.log").is_file());
+        let native = mcdh_core::mcde::McdeStore::new(McdkStore::new(service.index.clone())).root();
+        std::fs::create_dir_all(&native).unwrap();
+        std::fs::write(native.join("editor-state.json"), "user data").unwrap();
+        service
+            .index
+            .set_setting("mcde.installation", "{\"directory\":\"D:/Custom/MCDE\"}")
+            .unwrap();
+        let installed = other.install_builtin(MCDE_PLUGIN_ID).unwrap();
+        assert!(installed.enabled && installed.trusted && !installed.allow_mcp);
+        other.uninstall(MCDE_PLUGIN_ID, true).unwrap();
+        other.refresh_builtins().unwrap();
+        assert!(!data.exists());
+        assert!(native.join("editor-state.json").is_file());
+        assert!(
+            service
+                .index
+                .setting("mcde.installation")
+                .unwrap()
+                .unwrap()
+                .contains("D:/Custom/MCDE")
+        );
+        assert_eq!(other.mcde_state().unwrap(), (false, false));
+    }
+
+    #[test]
+    fn refreshing_an_installed_adapter_does_not_reenable_it() {
+        let temp = tempfile::tempdir().unwrap();
+        let service = crate::tests::service(temp.path());
+        service.install_builtin(MCDE_PLUGIN_ID).unwrap();
+        let mut records = service.registry().unwrap();
+        let previous = records.get_mut(MCDE_PLUGIN_ID).unwrap();
+        previous.enabled = false;
+        previous.fingerprint = "old-application".into();
+        service.save_registry(&records).unwrap();
+        service.refresh_builtins().unwrap();
+        assert_eq!(service.mcde_state().unwrap(), (true, false));
+        assert_ne!(service.list().unwrap()[0].fingerprint, "old-application");
     }
 }
