@@ -50,7 +50,7 @@ import { applyAppearance } from "./appearance";
 import { mergeComponent } from "./workspace";
 import { WindowChrome } from "./WindowChrome";
 import { usePlugins } from "./usePlugins";
-import { PluginManager } from "./PluginManager";
+import { PluginSettings } from "./PluginManager";
 import { PluginPanelHost } from "./PluginPanelHost";
 import { PluginCommandMenu, PluginFeedback } from "./PluginCommands";
 import { PluginCommandPrompt } from "./PluginForms";
@@ -103,7 +103,7 @@ export function App() {
   const [modal, setModal] = useState<"create" | "import" | "settings" | "warnings" | null>(null);
   const [selected, setSelected] = useState<ComponentSummary | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  const [view, setView] = useState<"components" | "plugins" | "panel">("components");
+  const [view, setView] = useState<"components" | "panel">("components");
   const [pluginPanel, setPluginPanel] = useState<PluginPanelRequest | null>(null);
   const openPluginPanel = useCallback((request: PluginPanelRequest) => { setPluginPanel(request); setView("panel"); }, []);
   const plugins = usePlugins(setNotice, openPluginPanel);
@@ -292,7 +292,6 @@ export function App() {
           <NavItem active={view === "components" && kind === "material"} icon={<Palette />} label="材质" count={countKind(result.components, "material")} onClick={() => selectKind("material")} />
           <NavItem active={view === "components" && kind === "map"} icon={<Map />} label="地图" count={countKind(result.components, "map")} onClick={() => selectKind("map")} />
           <NavItem active={view === "components" && kind === "favorites"} icon={<Star />} label="收藏" count={result.components.filter((component) => component.favorite).length} onClick={() => selectKind("favorites")} />
-          <button className={view === "plugins" ? "nav-item active" : "nav-item"} onClick={() => setView("plugins")}><span><Puzzle size={18} /></span>插件<small>{plugins.items.length}</small></button>
         </nav>
         <nav className="plugin-sidebar-tools" aria-label="插件面板">{plugins.items.filter((plugin) => plugin.enabled && plugin.trusted && plugin.compatible).flatMap((plugin) => plugin.manifest.panels.map((panel) => <button key={`${plugin.manifest.id}:${panel.id}`} className={view === "panel" && pluginPanel?.pluginId === plugin.manifest.id && pluginPanel.panelId === panel.id ? "nav-item active" : "nav-item"} title={plugin.manifest.name} onClick={() => openPluginPanel({ pluginId:plugin.manifest.id, panelId:panel.id, fingerprint:plugin.fingerprint })}><span><Puzzle size={16} /></span><span className="plugin-nav-title">{panel.title}</span></button>))}</nav>
         <div className="sidebar-spacer" />
@@ -301,7 +300,7 @@ export function App() {
         </button>
       </aside>
 
-      {view === "plugins" ? <PluginManager controller={plugins} mcdk={mcdk} /> : view === "panel" && pluginPanel ? <PluginPanelHost request={pluginPanel} onOpenPanel={openPluginPanel} onClose={() => setView("components")} /> : <main className="workspace">
+      {view === "panel" && pluginPanel ? <PluginPanelHost request={pluginPanel} onOpenPanel={openPluginPanel} onClose={() => setView("components")} /> : <main className="workspace">
         <header className="topbar">
           <div>
             <p className="eyebrow">创作组件</p>
@@ -344,11 +343,11 @@ export function App() {
         </section>
       </main>}
       <PluginCommandPrompt controller={plugins} />
-      <PluginFeedback controller={plugins} managerVisible={view === "plugins"} />
+      <PluginFeedback controller={plugins} managerVisible={false} />
 
       {modal === "create" && <CreateDialog sources={result.sources} settings={settings} onConfigurePaths={() => showModal("settings")} onClose={() => setModal(null)} onDone={(message, operation) => { setModal(null); void done(message, operation, false); }} />}
       {modal === "import" && <ImportDialog onClose={() => setModal(null)} onDone={(message, operation) => { setModal(null); void done(message, operation, false); }} />}
-      {modal === "settings" && <SettingsDialog updater={updater} mcdk={mcdk} settings={settings} onSettings={setSettings} onClose={() => setModal(null)} onChanged={() => void refresh()} onNotice={setNotice} />}
+      {modal === "settings" && <SettingsDialog updater={updater} mcdk={mcdk} settings={settings} onSettings={setSettings} onClose={() => setModal(null)} onChanged={() => void refresh()} onNotice={setNotice} onOpenPluginPanel={(request) => { setModal(null); openPluginPanel(request); }} />}
       {modal === "warnings" && <WarningsDialog warnings={result.warnings} sources={result.sources} ignoredKeys={ignoredWarningKeys} onIgnore={setWarningIgnored} onRemoveSource={removeWarningSource} onClose={() => setModal(null)} onNotice={setNotice} />}
       {selected && <ComponentDialog component={selected} running={mcdk.status?.session?.component_id === selected.id} onClose={() => setSelected(null)} onDone={(message, operation, refreshAfter) => {
         setSelected(null);
@@ -557,11 +556,11 @@ export function ImportDialog({ onClose, onDone }: DialogProps) {
   return <Modal title="导入组件" subtitle="支持文件夹、ZIP、mcpack 和 mcaddon" onClose={onClose}><form onSubmit={submit} className="dialog-form"><Field label="导入来源"><div className="path-row"><input required value={source} onChange={(event) => setSource(event.target.value)} placeholder="选择组件包或文件夹" /><button type="button" onClick={() => void chooseSource(false)}>选文件</button><button type="button" onClick={() => void chooseSource(true)}>选文件夹</button></div></Field><PathField label="存放位置" value={destination} onChange={setDestination} /><Field label="遇到重复 UUID"><select value={policy} onChange={(event) => setPolicy(event.target.value as IdentityPolicy)}><option value="error">停止并提示</option><option value="regenerate">生成全新 UUID</option><option value="preserve">保留原 UUID</option></select></Field><CheckRow checked={full} onChange={setFull} label="完整恢复" hint="保留点号项、MCS 配置和开发辅助文件；关闭时按游戏内容清洁导入" /><CheckRow checked={mcs} onChange={setMcs} label="导入为 MCS 组件" hint="将生成新的 MCS UID 与兼容配置" />{error && <FormError>{error}</FormError>}<DialogActions busy={busy} onClose={onClose} submit="开始导入" /></form></Modal>;
 }
 
-type SettingsSection = "paths" | "identity" | "appearance" | "tools" | "quickExport" | "exports" | "about";
+type SettingsSection = "paths" | "identity" | "appearance" | "tools" | "plugins" | "quickExport" | "exports" | "about";
 
 const FEEDBACK_URL = "https://github.com/xiaobo121388/MCDevHelper/issues/new";
 
-export function SettingsDialog({ settings: initialSettings, mcdk, updater, onSettings, onClose, onChanged, onNotice }: { settings: AppSettings; mcdk: McdkController; updater: AppUpdater; onSettings: (settings: AppSettings) => void; onClose: () => void; onChanged: () => void; onNotice: (message: string) => void }) {
+export function SettingsDialog({ settings: initialSettings, mcdk, updater, onSettings, onClose, onChanged, onNotice, onOpenPluginPanel }: { settings: AppSettings; mcdk: McdkController; updater: AppUpdater; onSettings: (settings: AppSettings) => void; onClose: () => void; onChanged: () => void; onNotice: (message: string) => void; onOpenPluginPanel: (request: PluginPanelRequest) => void }) {
   const [sources, setSources] = useState<SourceRecord[]>([]);
   const [settings, setSettings] = useState(initialSettings);
   const [vscode, setVscode] = useState<{ available: boolean; path?: string; custom: boolean } | null>(null);
@@ -679,6 +678,7 @@ export function SettingsDialog({ settings: initialSettings, mcdk, updater, onSet
     { id: "identity", label: "MCS 身份", icon: <UserRound size={17} /> },
     { id: "appearance", label: "外观", icon: <Palette size={17} /> },
     { id: "tools", label: "开发工具", icon: <Code2 size={17} /> },
+    { id: "plugins", label: "插件", icon: <Puzzle size={17} /> },
     { id: "quickExport", label: "一键导出", icon: <Archive size={17} /> },
     { id: "exports", label: "自定义导出", icon: <Archive size={17} /> },
     { id: "about", label: "关于", icon: <Info size={17} /> },
@@ -690,6 +690,7 @@ export function SettingsDialog({ settings: initialSettings, mcdk, updater, onSet
           {settingsNavigation.map((item) => (
             <button
               key={item.id}
+              title={item.label}
               className={section === item.id ? "active" : ""}
               aria-current={section === item.id ? "page" : undefined}
               onClick={() => setSection(item.id)}
@@ -701,6 +702,7 @@ export function SettingsDialog({ settings: initialSettings, mcdk, updater, onSet
 
         <div className="settings-panel">
           <div className="settings-panel-body">
+            {section === "plugins" && <PluginSettings mcdk={mcdk} onNotice={onNotice} onOpenPanel={(request) => { if (!nativeWindows) applyAppearance(initialSettings); onOpenPluginPanel(request); }} />}
             {section === "quickExport" && <QuickExportOptions value={settings.quick_export ?? DEFAULT_QUICK_EXPORT} disabled={!!busy} onChange={(quick_export) => setSettings((current) => ({ ...current, quick_export }))} />}
             {section === "exports" && <CustomExportSettings />}
             {section === "paths" && <section>
@@ -743,7 +745,7 @@ export function SettingsDialog({ settings: initialSettings, mcdk, updater, onSet
               <div className="settings-tool"><div><strong>反馈问题</strong><p>在 GitHub 新建 Issue；提交内容前由你自行确认。</p></div><div className="settings-tool-actions"><button className="button secondary" onClick={() => void openGitHub(FEEDBACK_URL)}><MessageSquare size={16} />打开反馈页面<ExternalLink size={14} /></button></div></div>
             </section>}
           </div>
-          <div className="settings-footer"><button className="button secondary" onClick={close}>关闭</button>{section !== "exports" && <button className="button primary" disabled={!!busy} onClick={() => void save()}><Save size={16} />{busy === "save" ? "保存中…" : "保存设置"}</button>}</div>
+          <div className="settings-footer"><button className="button secondary" onClick={close}>关闭</button>{section !== "exports" && section !== "plugins" && <button className="button primary" disabled={!!busy} onClick={() => void save()}><Save size={16} />{busy === "save" ? "保存中…" : "保存设置"}</button>}</div>
         </div>
       </div>
     </Modal>

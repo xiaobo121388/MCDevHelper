@@ -21,6 +21,7 @@ child.stdout.on("data", data => outputLog.push(data.toString()));
 child.stderr.on("data", data => outputLog.push(data.toString()));
 let browser;
 let main;
+let settings;
 try {
   await expect.poll(async () => {
     if (child.exitCode !== null) throw new Error(`Native application exited: ${outputLog.join('')}`);
@@ -72,16 +73,26 @@ try {
     return installed.source.kind;
   }, path.resolve("examples/plugins/hello"));
   expect(imported).toBe("local_directory");
-  await main.getByRole("button", {name:/^插件(?:\s*\d+)?$/}).click();
-  await expect(main.getByRole("heading", {name:/组件概览/})).toBeVisible();
-  await expect(main.locator("body")).not.toContainText("MCDE");
-  await main.getByRole("button", {name:"内置插件",exact:true}).click();
-  await main.getByRole("button", {name:"安装 MCDE"}).click();
-  const mcdeSwitch = main.getByRole("switch", {name:"启用 MCDE"});
+  await expect(main.getByRole("navigation", {name:"组件分类"}).getByRole("button", {name:/插件/})).toHaveCount(0);
+  await main.getByRole("button", {name:"设置",exact:true}).click();
+  await expect.poll(async () => {
+    for (const page of context.pages()) {
+      const label = await page.evaluate(() => window.__TAURI_INTERNALS__?.metadata?.currentWindow?.label).catch(() => "");
+      if (label === "dialog-settings") { settings = page; return true; }
+    }
+    return false;
+  }, {timeout:20_000}).toBe(true);
+  await settings.getByRole("navigation", {name:"设置分类"}).getByRole("button", {name:"插件",exact:true}).click();
+  await expect(settings.getByRole("heading", {name:/组件概览/})).toBeVisible();
+  await expect(settings.getByRole("button", {name:"保存设置"})).toHaveCount(0);
+  await expect(settings.locator("body")).not.toContainText("MCDE");
+  await settings.getByRole("button", {name:"内置插件",exact:true}).click();
+  await settings.getByRole("button", {name:"安装 MCDE"}).click();
+  const mcdeSwitch = settings.getByRole("switch", {name:"启用 MCDE"});
   await expect(mcdeSwitch).toBeChecked();
   await mcdeSwitch.click();
   await expect(mcdeSwitch).not.toBeChecked();
-  await expect(main.getByRole("textbox", {name:"MCDE 插件目录"})).toHaveCount(0);
+  await expect(settings.getByRole("textbox", {name:"MCDE 插件目录"})).toHaveCount(0);
   const blocked = await main.evaluate(async () => {
     const invoke = window.__TAURI_INTERNALS__.invoke;
     const mcde = (await invoke("list_plugins")).find(plugin => plugin.manifest.id === "mcdh.mcde");
@@ -95,17 +106,19 @@ try {
   expect(blocked[1].code).toBe("plugin_disabled");
   await mcdeSwitch.click();
   await expect(mcdeSwitch).toBeChecked();
-  const repository = main.getByLabel("GitHub 插件仓库");
+  const repository = settings.getByLabel("GitHub 插件仓库");
   await repository.fill("owner/repo");
-  await main.getByRole("button", {name:"清空插件仓库"}).click();
+  await settings.getByRole("button", {name:"清空插件仓库"}).click();
   await expect(repository).toHaveValue("");
   await expect(repository).toBeFocused();
   await expect(repository).toHaveCSS("outline-style", "none");
-  await expect(main.getByRole("button", {name:"添加插件"})).toHaveCSS("cursor", "not-allowed");
-  await main.screenshot({path:path.join(output,"manager.png")});
-  await main.getByRole("button", {name:"组件概览",exact:true}).last().click();
+  await expect(settings.getByRole("button", {name:"添加插件"})).toHaveCSS("cursor", "not-allowed");
+  expect(await settings.locator(".settings-panel-body").evaluate(node => node.scrollWidth <= node.clientWidth)).toBe(true);
+  await settings.screenshot({path:path.join(output,"manager.png")});
+  await settings.getByRole("button", {name:"组件概览",exact:true}).click();
   await expect(main.locator(".plugin-panel-mount .stats")).toBeVisible({timeout:20_000});
   await expect(main.locator(".plugin-panel-mount .stat strong").first()).toHaveText("0");
+  await expect.poll(() => settings.evaluate(() => window.__TAURI_INTERNALS__.invoke("plugin:window|is_minimized", {label:"dialog-settings"}))).toBe(true);
   const image = main.locator(".plugin-panel-mount img");
   await expect.poll(() => image.evaluate(image => image.naturalWidth)).toBeGreaterThan(0);
   await main.getByRole("button", {name:"读取组件",exact:true}).click();
@@ -132,28 +145,21 @@ try {
   await expect(panel.locator(".plugin-panel-mount .overview")).toHaveAttribute("data-theme", "dark");
   await panel.screenshot({path:path.join(output,"independent-dark.png")});
   await panel.getByRole("button", {name:"关闭窗口",exact:true}).click();
-  await main.getByRole("button", {name:/^插件(?:\s*\d+)?$/}).click();
-  await main.getByLabel("GitHub 插件仓库").fill("owner/repo");
-  await main.screenshot({path:path.join(output,"manager-dark.png")});
-  await main.getByRole("button", {name:"卸载 MCDE"}).click();
-  await expect(main.getByRole("checkbox", {name:"同时清除插件管理数据和日志"})).not.toBeChecked();
-  await main.getByRole("button", {name:"确认卸载"}).click();
+  await main.getByRole("button", {name:"设置",exact:true}).click();
+  await expect.poll(() => settings.evaluate(() => window.__TAURI_INTERNALS__.invoke("plugin:window|is_minimized", {label:"dialog-settings"}))).toBe(false);
+  await expect(settings.getByRole("heading", {name:"插件",exact:true})).toBeVisible();
+  await settings.getByLabel("GitHub 插件仓库").fill("owner/repo");
+  await settings.screenshot({path:path.join(output,"manager-dark.png")});
+  await settings.getByRole("button", {name:"卸载 MCDE"}).click();
+  await expect(settings.getByRole("checkbox", {name:"同时清除插件管理数据和日志"})).not.toBeChecked();
+  await settings.getByRole("button", {name:"确认卸载"}).click();
   await expect(mcdeSwitch).toHaveCount(0);
-  await expect(main.locator("body")).not.toContainText("MCDE");
+  await expect(settings.locator("body")).not.toContainText("MCDE");
   const removed = await main.evaluate(async () => ({plugins:await window.__TAURI_INTERNALS__.invoke("list_plugins"),status:await window.__TAURI_INTERNALS__.invoke("mcdk_status")}));
   expect(removed.plugins.some(plugin => plugin.manifest.id === "mcdh.mcde")).toBe(false);
   expect(removed.status.mcde).toBeNull();
   expect(removed.status.mcde_plugin_installed).toBe(false);
-  await main.screenshot({path:path.join(output,"manager-uninstalled.png")});
-  await main.getByRole("button", {name:"设置",exact:true}).click();
-  let settings;
-  await expect.poll(async () => {
-    for (const page of context.pages()) {
-      const label = await page.evaluate(() => window.__TAURI_INTERNALS__?.metadata?.currentWindow?.label).catch(() => "");
-      if (label === "dialog-settings") { settings = page; return true; }
-    }
-    return false;
-  }, {timeout:20_000}).toBe(true);
+  await settings.screenshot({path:path.join(output,"manager-uninstalled.png")});
   await settings.getByRole("button", {name:"开发工具",exact:true}).click();
   await expect(settings.getByRole("textbox", {name:"MCDE 插件目录"})).toHaveCount(0);
   await expect(settings.locator("body")).not.toContainText("MCDE");
@@ -164,6 +170,10 @@ try {
   await expect.poll(() => child.exitCode, {timeout:10_000}).not.toBeNull();
   console.log(`Native packaged-resource WebView2 validation passed; screenshots: ${output}`);
 } catch (error) {
+  if (settings && !settings.isClosed()) {
+    console.error(await settings.locator("body").innerText().catch(() => "Cannot read settings document"));
+    await settings.screenshot({path:path.join(output,"failure-settings.png")}).catch(() => {});
+  }
   if (main && !main.isClosed()) {
     console.error(await main.locator("body").innerText().catch(() => "Cannot read native document"));
     await main.screenshot({path:path.join(output,"failure.png")}).catch(() => {});

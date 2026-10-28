@@ -533,11 +533,11 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px s
   .empty-state { min-height: 280px; }
   .empty-state p { max-width: 240px; line-height: 1.7; }
   .standalone-modal > .modal > header, .standalone-modal .modal-content { padding: 20px; }
-  .standalone-modal .settings-layout { grid-template-columns: 56px minmax(0, 1fr); }
-  .standalone-modal .settings-nav { padding-inline: 5px; }
-  .standalone-modal .settings-nav button { font-size: 0; grid-template-columns: 1fr; justify-items: center; padding: 8px; }
-  .standalone-modal .settings-nav button > svg:last-child { display: none; }
-  .standalone-modal .settings-panel-body, .standalone-modal .settings-footer { padding: 16px; }
+  .settings-layout, .standalone-modal .settings-layout { grid-template-columns: 56px minmax(0, 1fr); }
+  .settings-nav, .standalone-modal .settings-nav { padding-inline: 5px; }
+  .settings-nav button { font-size: 0; grid-template-columns: 1fr; justify-items: center; padding: 8px; }
+  .settings-nav button > svg:last-child { display: none; }
+  .settings-panel-body, .settings-footer, .standalone-modal .settings-panel-body, .standalone-modal .settings-footer { padding: 16px; }
   .settings-grid.single, .export-profile-editor .settings-grid { grid-template-columns: minmax(0, 1fr); }
   .path-row { flex-wrap: wrap; }
   .path-row input { flex-basis: 100%; }

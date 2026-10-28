@@ -169,14 +169,23 @@ describe("component workspace filters", () => {
     mocks.installMcdkUpdate.mockReset().mockResolvedValue(mcdkReady);
   });
 
-  it("preserves workspace filters when visiting plugin management", async () => {
+  it("keeps plugin management inside settings and preserves workspace filters", async () => {
     mocks.refresh.mockResolvedValue({ components:[launchComponent], sources:[], warnings:[] });
     render(<App />);
     await screen.findByText(launchComponent.name);
     fireEvent.change(screen.getByPlaceholderText("搜索名称或路径"), {target:{value:"编辑"}});
-    fireEvent.click(screen.getByRole("button", {name:/^插件/}));
+    expect(within(screen.getByRole("navigation", {name:"组件分类"})).queryByRole("button", {name:/插件/})).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", {name:"插件"})).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", {name:"设置"}));
+    fireEvent.click(within(screen.getByRole("navigation", {name:"设置分类"})).getByRole("button", {name:"插件"}));
     expect(await screen.findByRole("heading", {name:"插件"})).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", {name:/全部组件/}));
+    expect(screen.getByRole("region", {name:"插件管理"})).toContainElement(screen.getByLabelText("GitHub 插件仓库"));
+    expect(screen.getByRole("button", {name:"本地导入"})).toBeInTheDocument();
+    expect(screen.queryByRole("button", {name:"保存设置"})).not.toBeInTheDocument();
+    fireEvent.click(within(screen.getByRole("navigation", {name:"设置分类"})).getByRole("button", {name:"路径管理"}));
+    expect(screen.queryByLabelText("GitHub 插件仓库")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", {name:"保存设置"})).toBeInTheDocument();
+    fireEvent.click(within(screen.getByRole("dialog", {name:"设置"})).getByText("关闭", {selector:"button"}));
     expect(screen.getByPlaceholderText("搜索名称或路径")).toHaveValue("编辑");
     expect(mocks.refresh).toHaveBeenCalledTimes(1);
   });

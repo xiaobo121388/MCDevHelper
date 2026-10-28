@@ -6,8 +6,13 @@ import { errorMessage } from "./api";
 import { pluginApi } from "./pluginApi";
 import { SchemaFields } from "./PluginForms";
 import { McdeSettings, type McdkController } from "./Mcdk";
-import { PLUGIN_TRUST_WARNING, type PluginController } from "./usePlugins";
-import type { Json, PluginCandidate, PluginLog, PluginManifest, PluginSummary } from "./pluginTypes";
+import { PLUGIN_TRUST_WARNING, usePlugins, type PluginController } from "./usePlugins";
+import type { Json, PluginCandidate, PluginLog, PluginManifest, PluginPanelRequest, PluginSummary } from "./pluginTypes";
+
+export function PluginSettings({ mcdk, onNotice, onOpenPanel }: { mcdk: McdkController; onNotice: (message: string) => void; onOpenPanel: (request: PluginPanelRequest) => void }) {
+  const controller = usePlugins(onNotice, onOpenPanel);
+  return <PluginManager controller={controller} mcdk={mcdk} />;
+}
 
 export function PluginManager({ controller, mcdk }: { controller: PluginController; mcdk?: McdkController }) {
   const [source, setSource] = useState("");
@@ -67,8 +72,8 @@ export function PluginManager({ controller, mcdk }: { controller: PluginControll
       if (mounted.current) setCatalog(null);
     } catch { /* The controller keeps the error visible. */ }
   };
-  return <main className="workspace plugin-workspace">
-    <header className="topbar"><div><p className="eyebrow">扩展</p><h1>插件</h1></div><div className="plugin-manager-tools"><button className="icon-button" title="内置插件" aria-label="内置插件" disabled={!!controller.busy} onClick={() => void browseBuiltins()}><PackagePlus size={18} /></button><button className="icon-button" title="刷新插件" aria-label="刷新插件" disabled={!!controller.busy} onClick={() => void controller.reload().catch((cause) => controller.setError(errorMessage(cause)))}><RefreshCw size={18} /></button></div></header>
+  return <section className="plugin-manager" aria-label="插件管理">
+    <header className="plugin-manager-header"><h3>插件</h3><div className="plugin-manager-tools"><button className="icon-button" title="内置插件" aria-label="内置插件" disabled={!!controller.busy} onClick={() => void browseBuiltins()}><PackagePlus size={18} /></button><button className="icon-button" title="刷新插件" aria-label="刷新插件" disabled={!!controller.busy} onClick={() => void controller.reload().catch((cause) => controller.setError(errorMessage(cause)))}><RefreshCw size={18} /></button></div></header>
     <div className="plugin-manager-body">
       {catalog && <section className="plugin-preview" aria-label="内置插件列表"><header><h2>内置插件</h2><button className="icon-button" title="关闭内置插件列表" aria-label="关闭内置插件列表" onClick={() => setCatalog(null)}><X size={17} /></button></header>{catalog.map((manifest) => {
         const installed = controller.items.some((plugin) => plugin.manifest.id === manifest.id);
@@ -90,7 +95,7 @@ export function PluginManager({ controller, mcdk }: { controller: PluginControll
       <div className="plugin-list">{controller.items.map((plugin) => <PluginRow key={plugin.manifest.id} plugin={plugin} controller={controller} mcdk={mcdk} onUpdate={() => void (plugin.source.kind.startsWith("local") ? importLocal(plugin.source.kind === "local_directory", plugin.manifest.id) : preview(plugin.repository, plugin.manifest.id))} />)}</div>
       {!controller.items.length && <div className="plugin-empty"><Puzzle size={30} /><h2>暂无插件</h2></div>}
     </div>
-  </main>;
+  </section>;
 }
 
 function PluginRow({ plugin, controller, onUpdate, mcdk }: { plugin: PluginSummary; controller: PluginController; onUpdate: () => void; mcdk?: McdkController }) {

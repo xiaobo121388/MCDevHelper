@@ -1,5 +1,5 @@
 import { emitTo, listen } from "@tauri-apps/api/event";
-import { getCurrentWindow } from "@tauri-apps/api/window";
+import { getCurrentWindow, Window } from "@tauri-apps/api/window";
 import { LoaderCircle, TriangleAlert } from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { api, errorMessage } from "./api";
@@ -75,7 +75,17 @@ export function DialogApp({ request }: { request: DialogRequest }) {
   }, [notice]);
 
   const close = () => { void closeDialogWindow().catch((cause) => setNotice(errorMessage(cause))); };
-  const openPluginPanel = useCallback((value: PluginPanelRequest) => { void emitTo("main", "mcdh:plugin-open-panel", value).catch((cause) => setNotice(errorMessage(cause))); }, []);
+  const openPluginPanel = useCallback((value: PluginPanelRequest) => {
+    void (async () => {
+      const main = await Window.getByLabel("main");
+      if (!main) throw new Error("主窗口已关闭，无法打开插件面板。");
+      await emitTo("main", "mcdh:plugin-open-panel", value);
+      if (request.kind === "settings") await getCurrentWindow().minimize();
+      await main.unminimize();
+      await main.show();
+      await main.setFocus();
+    })().catch((cause) => setNotice(errorMessage(cause)));
+  }, [request.kind]);
   const changed = () => { void notifyWorkspace().catch((cause) => setNotice(errorMessage(cause))); };
   const done = (message: string, operation?: OperationResult, refreshAfter = true) => {
     void notifyWorkspace(message, operation, refreshAfter).then(close).catch((cause) => setNotice(errorMessage(cause)));
@@ -107,7 +117,7 @@ export function DialogApp({ request }: { request: DialogRequest }) {
     <WindowChrome title={title + " · MCDH"} busy={!!updater.progress || directoryBusy} onError={setNotice} />
     {updater.progress ? <UpdateProgress progress={updater.progress} standalone /> : loading ? <div className="window-loading" role="status"><LoaderCircle className="spin" size={22} />正在加载</div> : error ?
       <div className="window-load-error" role="alert"><TriangleAlert size={24} /><p>{error}</p><button className="button secondary" onClick={() => { setLoading(true); void load(); }}>重试</button></div> : <>
-        {request.kind === "settings" && <SettingsDialog settings={settings} mcdk={mcdk} updater={updater} onSettings={onSettings} onClose={close} onChanged={changed} onNotice={setNotice} />}
+        {request.kind === "settings" && <SettingsDialog settings={settings} mcdk={mcdk} updater={updater} onSettings={onSettings} onClose={close} onChanged={changed} onNotice={setNotice} onOpenPluginPanel={openPluginPanel} />}
         {request.kind === "create" && <CreateDialog sources={sources} settings={settings} onConfigurePaths={() => { void openDialogWindow({ kind: "settings" }).catch((cause) => setNotice(errorMessage(cause))); }} onClose={close} onDone={done} />}
         {request.kind === "import" && <ImportDialog onClose={close} onDone={done} />}
         {request.kind === "component" && component && <ComponentDialog component={component} running={mcdk.status?.session?.component_id === component.id} onClose={close} onDone={done} onNotice={setNotice} />}

@@ -2,7 +2,9 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-libra
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({ settings: vi.fn(), sources: vi.fn(), create: vi.fn(), component: vi.fn(), exportSource: vi.fn(), destination: vi.fn(), emitTo: vi.fn(), picker: vi.fn(), customExportProfiles: vi.fn(), customExportTasks: vi.fn(), notify: vi.fn(), close: vi.fn(), open: vi.fn(), show: vi.fn(), listen: vi.fn(), stop: vi.fn() }));
-vi.mock("./api", () => ({ desktop: false, errorMessage: (value: unknown) => String(value), api: { settings: mocks.settings, sources: mocks.sources, create: mocks.create, component: mocks.component, exportSource: mocks.exportSource, setQuickExportDestination: mocks.destination, customExportProfiles: mocks.customExportProfiles, customExportTasks: mocks.customExportTasks } }));
+const pluginMocks = vi.hoisted(() => ({ list:vi.fn(), cancel:vi.fn(), main:vi.fn(), minimize:vi.fn(), restore:vi.fn(), show:vi.fn(), focus:vi.fn() }));
+vi.mock("./pluginApi", () => ({ pluginDesktop:true, pluginApi:{list:pluginMocks.list,cancel:pluginMocks.cancel} }));
+vi.mock("./api", () => ({ desktop: false, errorMessage: (value: unknown) => String(value), api: { settings: mocks.settings, sources: mocks.sources, version:async () => "1.3.0", create: mocks.create, component: mocks.component, exportSource: mocks.exportSource, setQuickExportDestination: mocks.destination, customExportProfiles: mocks.customExportProfiles, customExportTasks: mocks.customExportTasks } }));
 vi.mock("./WindowChrome", () => ({ WindowChrome: () => <header>Window chrome</header> }));
 vi.mock("./windows", () => ({
   nativeWindows: true, dialogRequest: { kind: "create" }, WORKSPACE_CHANGED: "workspace", SETTINGS_CHANGED: "settings",
@@ -10,13 +12,15 @@ vi.mock("./windows", () => ({
 }));
 vi.mock("@tauri-apps/api/event", () => ({ listen: mocks.listen, emitTo: mocks.emitTo }));
 vi.mock("@tauri-apps/plugin-dialog", () => ({ open: mocks.picker }));
-vi.mock("@tauri-apps/api/window", () => ({ getCurrentWindow: () => ({ show: mocks.show }) }));
+vi.mock("@tauri-apps/api/window", () => ({ getCurrentWindow: () => ({ show:mocks.show,minimize:pluginMocks.minimize }), Window:{getByLabel:pluginMocks.main} }));
 
 import { DialogApp } from "./DialogApp";
 import { DEFAULT_SETTINGS } from "./App";
 import type { ComponentSummary } from "./types";
+import type { PluginSummary } from "./pluginTypes";
 
 const component: ComponentSummary = { id: "test", name: "即时组件", kind: "addon", path: "D:/Project", origin: { kind: "single", source_id: "source" }, manifests: [], tags: ["开发"], favorite: false, size_bytes: 1 };
+const plugin: PluginSummary = { manifest:{schema_version:1,api_version:1,id:"example.panel",name:"测试插件",version:"1.0.0",description:"",author:"Example",engines:{mcdh:">=1.0.0"},entry:"main.js",commands:[],panels:[{id:"main",title:"组件概览",entry:"panel.js"}],mcp_tools:[],settings_schema:{type:"object"}},repository:"example/panel",source:{kind:"local_directory",reference:"D:/Plugin",archive_sha256:""},fingerprint:"test-fingerprint",enabled:true,trusted:true,compatible:true,allow_mcp:false,settings:{} };
 
 describe("standalone dialog application", () => {
   beforeEach(() => {
@@ -30,8 +34,39 @@ describe("standalone dialog application", () => {
     mocks.exportSource.mockResolvedValue({ path: component.path, configured: false, valid: true, issue: null });
     mocks.destination.mockResolvedValue({ ...DEFAULT_SETTINGS, quick_export: { ...DEFAULT_SETTINGS.quick_export, destination: "D:/Exports" } });
     mocks.emitTo.mockResolvedValue(undefined);
+    pluginMocks.list.mockResolvedValue([plugin]); pluginMocks.cancel.mockResolvedValue(undefined);
+    pluginMocks.main.mockResolvedValue({unminimize:pluginMocks.restore,show:pluginMocks.show,setFocus:pluginMocks.focus});
+    pluginMocks.minimize.mockResolvedValue(undefined); pluginMocks.restore.mockResolvedValue(undefined);
+    pluginMocks.show.mockResolvedValue(undefined); pluginMocks.focus.mockResolvedValue(undefined);
   });
   afterEach(cleanup);
+
+  it("hosts plugin management in settings and opens panels in the main workspace", async () => {
+    render(<DialogApp request={{kind:"settings"}} />);
+    fireEvent.click(await screen.findByRole("button", {name:"插件"}));
+    expect(await screen.findByRole("region", {name:"插件管理"})).toBeInTheDocument();
+    expect(screen.getByRole("button", {name:"本地导入"})).toBeInTheDocument();
+    expect(screen.queryByRole("button", {name:"保存设置"})).not.toBeInTheDocument();
+    fireEvent.click(await screen.findByRole("button", {name:"组件概览"}));
+    await waitFor(() => expect(pluginMocks.focus).toHaveBeenCalledOnce());
+    expect(pluginMocks.main).toHaveBeenCalledWith("main");
+    expect(mocks.emitTo).toHaveBeenCalledWith("main","mcdh:plugin-open-panel",{pluginId:plugin.manifest.id,panelId:"main",fingerprint:plugin.fingerprint});
+    expect(pluginMocks.minimize).toHaveBeenCalledOnce();
+    expect(pluginMocks.restore).toHaveBeenCalledOnce();
+    expect(pluginMocks.show).toHaveBeenCalledOnce();
+    expect(mocks.close).not.toHaveBeenCalled();
+  });
+
+  it("keeps plugin management open when the main window is unavailable", async () => {
+    pluginMocks.main.mockResolvedValue(null);
+    render(<DialogApp request={{kind:"settings"}} />);
+    fireEvent.click(await screen.findByRole("button", {name:"插件"}));
+    fireEvent.click(await screen.findByRole("button", {name:"组件概览"}));
+    expect(await screen.findByText(/主窗口已关闭/)).toBeInTheDocument();
+    expect(mocks.emitTo).not.toHaveBeenCalled();
+    expect(pluginMocks.minimize).not.toHaveBeenCalled();
+    expect(mocks.close).not.toHaveBeenCalled();
+  });
 
   it("loads native dialog content without a workspace or overlay", async () => {
     const { container } = render(<DialogApp request={{ kind: "create" }} />);
