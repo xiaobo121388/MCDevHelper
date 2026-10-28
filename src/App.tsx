@@ -315,7 +315,7 @@ export function App() {
         </header>
 
         <section className="toolbar" aria-label="筛选工具">
-          <label className="search-box"><Search size={17} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索名称或路径" /></label>
+          <label className="search-box"><Search size={17} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索名称或路径" />{query && <button className="input-clear" type="button" title="清空组件搜索" aria-label="清空组件搜索" onClick={(event) => { setQuery(""); event.currentTarget.parentElement?.querySelector("input")?.focus(); }}><X size={16} /></button>}</label>
           <label className="select-box"><Tag size={16} /><select value={tag} onChange={(event) => setTag(event.target.value)}><option value="all">全部标签</option>{tags.map((value) => <option key={value} value={value}>{value}</option>)}</select></label>
           <label className="select-box sort-box"><ArrowDownUp size={16} /><select aria-label="排序字段" value={sortKey} onChange={(event) => { const value = event.target.value as SortKey; setSortKey(value); setSortDirection(value === "name" ? "asc" : "desc"); }}><option value="updated">MCS 时间</option><option value="name">名称</option><option value="modified">修改日期</option><option value="created">创建日期</option><option value="size">大小</option></select></label>
           <button className="icon-button" aria-label="切换排序方向" title={sortDirection === "desc" ? "当前倒序" : "当前正序"} onClick={() => setSortDirection((value) => value === "desc" ? "asc" : "desc")}><span className={sortDirection === "desc" ? "sort-direction desc" : "sort-direction"}>↑</span></button>

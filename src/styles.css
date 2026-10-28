@@ -222,14 +222,19 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px s
 .button.secondary:hover { background: var(--control-hover); }
 .button.danger { border-color: color-mix(in srgb, var(--danger) 38%, var(--border)); color: var(--danger); background: color-mix(in srgb, var(--danger) 8%, var(--panel)); }
 .button.danger:hover { background: color-mix(in srgb, var(--danger) 15%, var(--panel)); }
-.button:disabled { cursor: wait; opacity: .58; }
+.button:disabled { cursor: not-allowed; opacity: .58; }
+.button[aria-busy="true"] { cursor: wait; }
 
 .toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 9px; max-width: 1380px; margin: 25px auto 17px; }
 .search-box, .select-box { display: flex; height: 38px; align-items: center; gap: 8px; border: 1px solid var(--control-border); border-radius: 8px; color: var(--muted); background: var(--control-bg); transition: border-color .15s, background-color .15s; }
 .search-box:hover, .select-box:hover { background: var(--control-hover); }
 .search-box:focus-within, .select-box:focus-within { border-color: var(--accent); }
 .search-box { width: min(390px, 46vw); padding: 0 11px; }
-.search-box input { width: 100%; border: 0; outline: 0; color: var(--text); background: transparent; font-size: 13px; }
+.search-box input { min-width: 0; width: 100%; border: 0; outline: 0; color: var(--text); background: transparent; font-size: 13px; }
+.search-box input:focus-visible, .plugin-install-bar input:focus-visible { outline: none; }
+.input-clear { display: grid; place-items: center; flex: none; width: 26px; height: 26px; padding: 0; border: 0; border-radius: 4px; color: var(--muted); background: transparent; cursor: pointer; }
+.input-clear:hover:not(:disabled) { color: var(--text); background: var(--control-hover); }
+.input-clear:disabled { cursor: not-allowed; opacity: .5; }
 .select-box { padding-left: 10px; }
 .sort-box { min-width: 132px; }
 .select-box select { height: 100%; padding-right: 10px; border: 0; outline: 0; color: var(--text); background-color: var(--control-bg); font-size: 12px; }

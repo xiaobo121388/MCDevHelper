@@ -9,6 +9,7 @@ import type { Json, PluginCandidate, PluginLog, PluginSummary } from "./pluginTy
 
 export function PluginManager({ controller }: { controller: PluginController }) {
   const [source, setSource] = useState("");
+  const sourceInput = useRef<HTMLInputElement>(null);
   const [candidate, setCandidate] = useState<PluginCandidate | null>(null);
   const [trusted, setTrusted] = useState(false);
   const currentPreview = useRef<string | null>(null);
@@ -41,7 +42,7 @@ export function PluginManager({ controller }: { controller: PluginController }) 
   return <main className="workspace plugin-workspace">
     <header className="topbar"><div><p className="eyebrow">扩展</p><h1>插件</h1></div><button className="icon-button" title="刷新插件" aria-label="刷新插件" disabled={!!controller.busy} onClick={() => void controller.reload().catch((cause) => controller.setError(errorMessage(cause)))}><RefreshCw size={18} /></button></header>
     <div className="plugin-manager-body">
-      <form className="plugin-install-bar" onSubmit={submit}><label><Puzzle size={18} /><input aria-label="GitHub 插件仓库" value={source} onChange={(event) => setSource(event.target.value)} placeholder="owner/repo" required disabled={!!controller.busy} /></label><button className="button primary" type="submit" disabled={!!controller.busy || !source.trim()}><Plus size={16} />添加插件</button></form>
+      <form className="plugin-install-bar" onSubmit={submit}><label><Puzzle size={18} /><input ref={sourceInput} aria-label="GitHub 插件仓库" value={source} onChange={(event) => setSource(event.target.value)} placeholder="owner/repo" required disabled={!!controller.busy} />{source && <button className="input-clear" type="button" title="清空插件仓库" aria-label="清空插件仓库" disabled={!!controller.busy} onClick={() => { setSource(""); sourceInput.current?.focus(); }}><X size={16} /></button>}</label><button className="button primary" type="submit" aria-busy={!!controller.busy} disabled={!!controller.busy || !source.trim()}><Plus size={16} />添加插件</button></form>
       {controller.busy && <div className="plugin-task" role="status"><LoaderCircle className="spin" size={17} /><span>{controller.busy.title}{controller.progress?.phase === "downloading" ? ` · ${(controller.progress.downloaded_bytes / 1048576).toFixed(1)} MB` : ""}</span><button className="icon-button" title="取消插件任务" aria-label="取消插件任务" onClick={() => void controller.cancel().catch((cause) => controller.setError(errorMessage(cause)))}><X size={16} /></button></div>}
       {candidate && <section className="plugin-preview" aria-label="插件安装预览">
         <header><div><h2>{candidate.manifest.name}<span>v{candidate.manifest.version}</span></h2><p>{candidate.manifest.description}</p></div><button className="icon-button" title="关闭安装预览" aria-label="关闭安装预览" disabled={!!controller.busy} onClick={() => void discard().catch((cause) => controller.setError(errorMessage(cause)))}><X size={17} /></button></header>

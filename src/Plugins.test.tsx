@@ -32,6 +32,23 @@ beforeEach(() => {
 afterEach(() => { cleanup(); document.documentElement.removeAttribute("style"); });
 
 describe("plugin management", () => {
+  it("clears the repository without submitting and only reports busy during a task", async () => {
+    render(<Manager />);
+    const input = screen.getByLabelText("GitHub 插件仓库");
+    const add = screen.getByRole("button", {name:"添加插件"});
+    expect(add).toBeDisabled(); expect(add).toHaveAttribute("aria-busy", "false");
+    fireEvent.change(input, {target:{value:"owner/repo"}});
+    fireEvent.click(screen.getByRole("button", {name:"清空插件仓库"}));
+    expect(input).toHaveValue(""); expect(input).toHaveFocus();
+    expect(mocks.preview).not.toHaveBeenCalled();
+    let reject!: (cause: Error) => void;
+    mocks.preview.mockReturnValue(new Promise((_resolve, fail) => { reject = fail; }));
+    fireEvent.change(input, {target:{value:"owner/repo"}});
+    fireEvent.click(add);
+    await waitFor(() => expect(add).toHaveAttribute("aria-busy", "true"));
+    await act(async () => { reject(new Error("offline")); });
+    expect(add).toBeEnabled(); expect(add).toHaveAttribute("aria-busy", "false");
+  });
   it("never installs before a preview and explicit trust confirmation", async () => {
     render(<Manager />);
     fireEvent.change(screen.getByLabelText("GitHub 插件仓库"), {target:{value:"owner/repo"}});
