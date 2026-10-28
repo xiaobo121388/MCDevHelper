@@ -716,20 +716,20 @@ describe("component workspace filters", () => {
     expect(screen.queryByRole("heading", { name: "已更新至 v1.1.0" })).not.toBeInTheDocument();
   });
 
-  it("shows the Git-based 1.3.0 changelog once when upgrading from 1.2.0", async () => {
-    window.localStorage.setItem("mcdh.last-launched-version", "1.2.0");
-    mocks.version.mockResolvedValue("1.3.0");
+  it.each([["1.2.0", "1.3.0"], ["1.3.0", "1.4.0"]])("shows the Git-based changelog once when upgrading from %s to %s", async (previous, current) => {
+    window.localStorage.setItem("mcdh.last-launched-version", previous);
+    mocks.version.mockResolvedValue(current);
     mocks.refresh.mockResolvedValue({ components: [], sources: [], warnings: [] });
-    mocks.checkForUpdates.mockResolvedValue({ current_version: "1.3.0", latest_version: "v1.2.0", update_available: false, no_release: false });
+    mocks.checkForUpdates.mockResolvedValue({ current_version: current, latest_version: `v${previous}`, update_available: false, no_release: false });
     const view = render(<App />);
-    expect(await screen.findByRole("heading", { name: "已更新至 v1.3.0" })).toBeInTheDocument();
-    for (const note of releaseNotesFor("1.3.0")) expect(screen.getByText(note)).toBeInTheDocument();
-    expect(window.localStorage.getItem("mcdh.last-launched-version")).toBe("1.3.0");
+    expect(await screen.findByRole("heading", { name: `已更新至 v${current}` })).toBeInTheDocument();
+    for (const note of releaseNotesFor(current)) expect(screen.getByText(note)).toBeInTheDocument();
+    expect(window.localStorage.getItem("mcdh.last-launched-version")).toBe(current);
     fireEvent.click(screen.getByRole("button", { name: "知道了" }));
     view.unmount();
     render(<App />);
     await waitFor(() => expect(mocks.checkForUpdates).toHaveBeenCalledTimes(2));
-    expect(screen.queryByRole("heading", { name: "已更新至 v1.3.0" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: `已更新至 v${current}` })).not.toBeInTheDocument();
   });
 
   it("shows download progress, prevents duplicate installs, and permits retry after a failure", async () => {

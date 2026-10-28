@@ -67,7 +67,7 @@ lib/
   "description": "问候和工程面板",
   "author": "Example Author",
   "version": "1.0.0",
-  "engines": { "mcdh": ">=1.3.0, <2.0.0" },
+  "engines": { "mcdh": ">=1.4.0, <2.0.0" },
   "entry": "main.js",
   "commands": [{
     "id": "hello",
@@ -92,7 +92,7 @@ lib/
 }
 ```
 
-- `schema_version`、`api_version` 当前均为 `1`。`engines.mcdh` 使用 Rust `semver::VersionReq` 语法，例如 `>=1.3.0, <2.0.0`；不使用 npm 的 `||` 语法。
+- `schema_version`、`api_version` 当前均为 `1`，随 MCDH `v1.4.0` 首次正式发布。`engines.mcdh` 使用 Rust `semver::VersionReq` 语法，例如 `>=1.4.0, <2.0.0`；不使用 npm 的 `||` 语法。
 - 插件、命令、面板和工具 ID 必须以小写 ASCII 字母开头，后续仅允许小写字母、数字、点、短横线和下划线，最多 64 字节，不能包含 `..` 或 `__`。插件 ID 还须是合法 Windows 路径片段，不能是设备名或以点结尾，`registry` 保留给宿主。MCP 完整名称还须不超过 128 字节。
 - `entry`、面板 `entry` 是包内相对路径，使用 `/`；入口必须存在，不能指向源码构建之前的缺失产物。
 - `commands`、`panels`、`mcp_tools` 可省略；命令和面板 ID 分别唯一。MCP 声明只能引用同一插件已声明的命令。

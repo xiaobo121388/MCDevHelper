@@ -1,5 +1,6 @@
 import { act, cleanup, fireEvent, render, renderHook, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { version as appVersion } from "../package.json";
 import type { PluginCandidate, PluginPanelInfo, PluginSummary } from "./pluginTypes";
 
 const mocks = vi.hoisted(() => ({ list:vi.fn(), preview:vi.fn(), previewLocal:vi.fn(), pick:vi.fn(), install:vi.fn(), discard:vi.fn(), configure:vi.fn(), uninstall:vi.fn(), execute:vi.fn(), cancel:vi.fn(), panel:vi.fn(), panelCall:vi.fn(), logs:vi.fn(), load:vi.fn(), open:vi.fn(), confirm:vi.fn(), notice:vi.fn(), onPanel:vi.fn() }));
@@ -19,7 +20,7 @@ const plugin: PluginSummary = { manifest:{ schema_version:1, api_version:1, id:"
   repository:"owner/repo",source:{kind:"release",reference:"v1.0.0",archive_sha256:"a".repeat(64)},fingerprint:"b".repeat(64),enabled:true,trusted:true,compatible:true,allow_mcp:false,settings:{label:"hello"} };
 const candidate: PluginCandidate = { token:"preview",manifest:plugin.manifest,repository:plugin.repository,source:plugin.source,fingerprint:plugin.fingerprint,compatible:true,already_installed:false };
 const request = { pluginId:plugin.manifest.id, panelId:"main", fingerprint:plugin.fingerprint, componentId:"component-1" };
-const panelInfo: PluginPanelInfo = { plugin,panel:plugin.manifest.panels[0],environment:{caller:"desktop",pluginId:plugin.manifest.id,appVersion:"1.3.0",dataDir:"D:/data",packageDir:"D:/package",componentId:"component-1"} };
+const panelInfo: PluginPanelInfo = { plugin,panel:plugin.manifest.panels[0],environment:{caller:"desktop",pluginId:plugin.manifest.id,appVersion,dataDir:"D:/data",packageDir:"D:/package",componentId:"component-1"} };
 
 function Manager() { const controller = usePlugins(mocks.notice, mocks.onPanel); return <PluginManager controller={controller} />; }
 beforeEach(() => {

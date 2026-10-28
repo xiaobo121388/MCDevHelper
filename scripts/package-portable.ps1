@@ -1,11 +1,19 @@
 $ErrorActionPreference = "Stop"
 
 $repoRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "..")).Path
+$targetRoot = Join-Path $repoRoot "target"
+if ($env:CARGO_TARGET_DIR) {
+    $targetRoot = if ([IO.Path]::IsPathRooted($env:CARGO_TARGET_DIR)) {
+        [IO.Path]::GetFullPath($env:CARGO_TARGET_DIR)
+    } else {
+        [IO.Path]::GetFullPath((Join-Path $repoRoot $env:CARGO_TARGET_DIR))
+    }
+}
 & (Join-Path $PSScriptRoot "prepare-mcdk.ps1") -VerifyOnly
 $config = Get-Content -Encoding UTF8 -Raw -LiteralPath (Join-Path $repoRoot "src-tauri\tauri.conf.json") | ConvertFrom-Json
 $version = [string]$config.version
 $releaseRoot = Join-Path $repoRoot "release"
-$portableRoot = Join-Path $repoRoot "target\release\portable"
+$portableRoot = Join-Path $targetRoot "release\portable"
 $staging = Join-Path $portableRoot "MCDH-$version"
 
 New-Item -ItemType Directory -Force -Path $releaseRoot, $portableRoot | Out-Null
@@ -19,10 +27,11 @@ if (Test-Path -LiteralPath $stagingFull) {
 }
 New-Item -ItemType Directory -Path $stagingFull | Out-Null
 
-Copy-Item -LiteralPath (Join-Path $repoRoot "target\release\mcdh-desktop.exe") -Destination (Join-Path $stagingFull "MCDH.exe")
-Copy-Item -LiteralPath (Join-Path $repoRoot "target\release\mcdh-mcp.exe") -Destination (Join-Path $stagingFull "mcdh-mcp.exe")
+Copy-Item -LiteralPath (Join-Path $targetRoot "release\mcdh-desktop.exe") -Destination (Join-Path $stagingFull "MCDH.exe")
+Copy-Item -LiteralPath (Join-Path $targetRoot "release\mcdh-mcp.exe") -Destination (Join-Path $stagingFull "mcdh-mcp.exe")
 Copy-Item -LiteralPath (Join-Path $repoRoot "LICENSE") -Destination $stagingFull
 Copy-Item -LiteralPath (Join-Path $repoRoot "README.md") -Destination $stagingFull
+Copy-Item -LiteralPath (Join-Path $repoRoot "RELEASE_NOTES.md") -Destination $stagingFull
 Copy-Item -LiteralPath (Join-Path $repoRoot "THIRD_PARTY_LICENSES.md") -Destination $stagingFull
 Copy-Item -LiteralPath (Join-Path $repoRoot "src-tauri\release-resources\mcdk") -Destination (Join-Path $stagingFull "mcdk") -Recurse
 
@@ -36,9 +45,9 @@ if ($portableItems.Count -eq 0) {
 }
 Compress-Archive -Path $portableItems -DestinationPath $portableArchive -CompressionLevel Optimal
 
-$installer = Get-ChildItem -LiteralPath (Join-Path $repoRoot "target\release\bundle\nsis") -File -Filter "*-setup.exe" | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+$installer = Get-ChildItem -LiteralPath (Join-Path $targetRoot "release\bundle\nsis") -File -Filter "*_${version}_x64-setup.exe" | Sort-Object LastWriteTime -Descending | Select-Object -First 1
 if ($null -eq $installer) {
-    throw "NSIS setup executable was not found."
+    throw "NSIS setup executable for $version was not found."
 }
 $installerTarget = Join-Path $releaseRoot "MCDH-$version-windows-x64-setup.exe"
 Copy-Item -LiteralPath $installer.FullName -Destination $installerTarget -Force

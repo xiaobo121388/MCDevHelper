@@ -20,6 +20,7 @@ await new Promise(resolve => server.listen(0,"127.0.0.1",resolve));
 const base = process.env.MCDH_UI_URL ?? `http://127.0.0.1:${server.address().port}`;
 const output = path.resolve("target/plugin-qa/browser");
 await mkdir(output, { recursive: true });
+const { version: appVersion } = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8"));
 const manifest = JSON.parse(await readFile(new URL("../examples/plugins/hello/mcdh-plugin.json", import.meta.url), "utf8"));
 const browser = await chromium.launch({ channel:"msedge", headless:true, args:["--no-proxy-server"] });
 const errors = [];
@@ -47,7 +48,7 @@ try {
     page.on("requestfailed", (request) => console.error("request failed", request.url(), request.failure()));
     page.on("console", (message) => { if (message.type() === "error") console.error("browser", message.text()); });
     page.on("pageerror", (error) => { errors.push(`${name}: ${error.message}`); console.error(error.message); });
-    await context.addInitScript(({ manifest, base, theme }) => {
+    await context.addInitScript(({ manifest, base, theme, appVersion }) => {
       if (location.origin === "null") return;
       const dialog = new URL(location.href).searchParams.get("dialog");
       if (dialog === "settings") window.__MCDH_DIALOG__ = {kind:"settings"};
@@ -70,7 +71,7 @@ try {
       const emitMcdk = () => window.__qaDispatch("mcdk-status-changed",mcdkStatus());
       window.addEventListener("storage", emitMcdk);
       let next = 1;
-      localStorage.setItem("mcdh.last-launched-version", "1.3.0");
+      localStorage.setItem("mcdh.last-launched-version", appVersion);
       window.isTauri = true;
       window.__TAURI_EVENT_PLUGIN_INTERNALS__ = { unregisterListener() {} };
       window.__TAURI_INTERNALS__ = {
@@ -86,8 +87,8 @@ try {
           if (command.startsWith("plugin:event|")) return next++;
           if (command === "plugin:window|is_maximized") return false;
           if (command === "get_settings") return {developer_nickname:"MCDH",developer_account:"mcdh@local.invalid",developer_user_id:"0",theme,color_preset:"fluent"};
-          if (command === "app_version") return "1.3.0";
-          if (command === "check_for_updates") return {current_version:"1.3.0",update_available:false,no_release:false};
+          if (command === "app_version") return appVersion;
+          if (command === "check_for_updates") return {current_version:appVersion,update_available:false,no_release:false};
           if (command === "mcdk_status") return mcdkStatus();
           if (command === "refresh_components") return {components,sources:[],warnings:[]};
           if (command === "list_plugins") { syncTool(); return toolInstalled() ? [tool,plugin] : [plugin]; }
@@ -96,7 +97,7 @@ try {
           if (command === "plugin:dialog|open") return args.options?.directory ? "D:/plugins/source" : "D:/plugins/example.zip";
           if (command === "preview_local_plugin") return {token:"local-preview",...plugin,repository:"Local import",source:{kind:args.path.endsWith(".zip") ? "local_zip" : "local_directory",reference:args.path,archive_sha256:"a".repeat(64)},already_installed:false};
           if (command === "preview_plugin") { args.onProgress.onmessage({phase:"validating",downloaded_bytes:1024,total_bytes:1024}); return {token:"preview",...plugin,already_installed:false}; }
-          if (command === "get_plugin_panel") return {plugin,panel:manifest.panels[0],environment:{caller:"desktop",pluginId:manifest.id,appVersion:"1.3.0",packageDir:"D:/plugins/hello",dataDir:"D:/plugins/data",componentId:args.componentId ?? null}};
+          if (command === "get_plugin_panel") return {plugin,panel:manifest.panels[0],environment:{caller:"desktop",pluginId:manifest.id,appVersion:appVersion,packageDir:"D:/plugins/hello",dataDir:"D:/plugins/data",componentId:args.componentId ?? null}};
           if (command === "execute_plugin_command") return {value:{label:"组件概览",total:3,addon:1,map:1,material:1,current:null,components},actions:[]};
           if (command === "plugin_panel_call") return {value:null,actions:[]};
           if (command === "get_plugin_logs") return [];
@@ -104,7 +105,7 @@ try {
           return null;
         },
       };
-    }, { manifest, base, theme });
+    }, { manifest, base, theme, appVersion });
     await page.goto(base, {waitUntil:"commit",timeout:10_000});
     if (errors.length) console.error((await page.locator("body").innerText()).slice(0,1000));
     const search = page.getByPlaceholder("搜索名称或路径");

@@ -4,7 +4,7 @@ MCDH 是面向网易《我的世界》中国版 PE 创作者的 Windows 本地�
 
 游戏启动功能使用内置的 **MCDK**：MCDH 负责组件入口与会话管理，MCDK 负责引导游戏配置和启动游戏。游戏本体需自行安装。
 
-当前版本：**v1.3.0**。本次更新带来无边框独立窗口、八套配色预设、可配置的一键导出、包体位置可视化配置和增量刷新，完整说明见 [Release 更新日志](RELEASE_NOTES.md)。
+当前版本：**v1.4.0**。本次更新带来 GitHub / 本地插件安装、双模式工具面板、按版本授权的插件 MCP 工具，以及设置内插件管理和输入框体验修复，完整说明见 [Release 更新日志](RELEASE_NOTES.md)。
 
 ## 特点
 
@@ -169,6 +169,8 @@ pnpm release:windows
 ```
 
 输出位于 `release\`。构建脚本会先生成第三方许可清单，下载并验证 `assets/mcdk/bundled.json` 锁定的 MCDK 资源，再编译 `mcdh-mcp.exe` sidecar，最后构建当前用户 NSIS 安装包和便携 ZIP。MCDK 二进制位于被 Git 忽略的生成目录，离线重新构建可复用已验证的缓存。开发模式也应先运行 `pnpm mcdk:prepare`。
+
+需要保留正在运行的开发构建时，可先设置 `$env:CARGO_TARGET_DIR = "target/release-build"`，再执行同一发布命令。sidecar、桌面构建和便携打包会统一使用该目录；最终发行文件仍输出到 `release\`。便携包同时附带更新日志和第三方许可清单。
 
 MCDK 原生控制台、离线资源验证命令及人工验收清单见 [MCDK 验证说明](docs/mcdk-validation.md)。
 

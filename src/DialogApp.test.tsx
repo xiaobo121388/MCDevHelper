@@ -1,10 +1,11 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { version as appVersion } from "../package.json";
 
 const mocks = vi.hoisted(() => ({ settings: vi.fn(), sources: vi.fn(), create: vi.fn(), component: vi.fn(), exportSource: vi.fn(), destination: vi.fn(), emitTo: vi.fn(), picker: vi.fn(), customExportProfiles: vi.fn(), customExportTasks: vi.fn(), notify: vi.fn(), close: vi.fn(), open: vi.fn(), show: vi.fn(), listen: vi.fn(), stop: vi.fn() }));
 const pluginMocks = vi.hoisted(() => ({ list:vi.fn(), cancel:vi.fn(), main:vi.fn(), minimize:vi.fn(), restore:vi.fn(), show:vi.fn(), focus:vi.fn() }));
 vi.mock("./pluginApi", () => ({ pluginDesktop:true, pluginApi:{list:pluginMocks.list,cancel:pluginMocks.cancel} }));
-vi.mock("./api", () => ({ desktop: false, errorMessage: (value: unknown) => String(value), api: { settings: mocks.settings, sources: mocks.sources, version:async () => "1.3.0", create: mocks.create, component: mocks.component, exportSource: mocks.exportSource, setQuickExportDestination: mocks.destination, customExportProfiles: mocks.customExportProfiles, customExportTasks: mocks.customExportTasks } }));
+vi.mock("./api", () => ({ desktop: false, errorMessage: (value: unknown) => String(value), api: { settings: mocks.settings, sources: mocks.sources, version:async () => appVersion, create: mocks.create, component: mocks.component, exportSource: mocks.exportSource, setQuickExportDestination: mocks.destination, customExportProfiles: mocks.customExportProfiles, customExportTasks: mocks.customExportTasks } }));
 vi.mock("./WindowChrome", () => ({ WindowChrome: () => <header>Window chrome</header> }));
 vi.mock("./windows", () => ({
   nativeWindows: true, dialogRequest: { kind: "create" }, WORKSPACE_CHANGED: "workspace", SETTINGS_CHANGED: "settings",

@@ -7,7 +7,7 @@
   "version": "1.0.0",
   "description": "组件统计与当前工程信息",
   "author": "MCDH Example",
-  "engines": { "mcdh": ">=1.3.0" },
+  "engines": { "mcdh": ">=1.4.0, <2.0.0" },
   "entry": "main.js",
   "commands": [
     { "id": "inspect", "title": "读取组件概览", "menus": ["global", "component"], "input_schema": { "type": "object", "properties": {}, "additionalProperties": false } },

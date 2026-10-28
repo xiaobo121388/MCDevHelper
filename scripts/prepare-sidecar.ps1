@@ -1,6 +1,14 @@
 $ErrorActionPreference = "Stop"
 
 $repoRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "..")).Path
+$targetRoot = Join-Path $repoRoot "target"
+if ($env:CARGO_TARGET_DIR) {
+    $targetRoot = if ([IO.Path]::IsPathRooted($env:CARGO_TARGET_DIR)) {
+        [IO.Path]::GetFullPath($env:CARGO_TARGET_DIR)
+    } else {
+        [IO.Path]::GetFullPath((Join-Path $repoRoot $env:CARGO_TARGET_DIR))
+    }
+}
 & (Join-Path $PSScriptRoot "prepare-mcdk.ps1")
 $cargoPath = Join-Path $env:USERPROFILE ".cargo\bin\cargo.exe"
 $rustcPath = Join-Path $env:USERPROFILE ".cargo\bin\rustc.exe"
@@ -26,7 +34,7 @@ try {
     Pop-Location
 }
 
-$sourceBinary = Join-Path $repoRoot "target\release\mcdh-mcp.exe"
+$sourceBinary = Join-Path $targetRoot "release\mcdh-mcp.exe"
 $binaryDirectory = Join-Path $repoRoot "src-tauri\binaries"
 $resourceDirectory = Join-Path $repoRoot "src-tauri\release-resources"
 New-Item -ItemType Directory -Force -Path $binaryDirectory, $resourceDirectory | Out-Null

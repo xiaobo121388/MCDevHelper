@@ -1,11 +1,12 @@
 import { chromium, expect } from "@playwright/test";
 import { spawn } from "node:child_process";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 const data = path.resolve(process.env.MCDH_PLUGIN_QA_DATA ?? "target/plugin-qa/native-plugin-api-data");
 if (!data.startsWith(`${path.resolve("target/plugin-qa")}${path.sep}`)) throw new Error("Native plugin QA must use an isolated directory under target/plugin-qa.");
 const output = path.resolve("target/plugin-qa/native");
+const { version: appVersion } = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8"));
 const endpoint = "http://127.0.0.1:9224";
 let occupied = false;
 try { await fetch(`${endpoint}/json/version`, {signal:AbortSignal.timeout(500)}); occupied = true; } catch { /* No debugger owns the isolated test port. */ }
@@ -58,7 +59,8 @@ try {
     await window.__TAURI_INTERNALS__.invoke("plugin:event|emit", {event:"mcdh:settings-changed",payload:null});
   });
   await expect(main.locator("html")).toHaveAttribute("data-theme", "light");
-  const initial = await main.evaluate(async () => ({plugins:await window.__TAURI_INTERNALS__.invoke("list_plugins"),status:await window.__TAURI_INTERNALS__.invoke("mcdk_status")}));
+  const initial = await main.evaluate(async () => ({version:await window.__TAURI_INTERNALS__.invoke("app_version"),plugins:await window.__TAURI_INTERNALS__.invoke("list_plugins"),status:await window.__TAURI_INTERNALS__.invoke("mcdk_status")}));
+  expect(initial.version).toBe(appVersion);
   expect(initial.plugins).toEqual([]);
   const imported = await main.evaluate(async (directory) => {
     const invoke = window.__TAURI_INTERNALS__.invoke;
