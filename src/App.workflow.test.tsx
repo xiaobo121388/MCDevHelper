@@ -716,7 +716,7 @@ describe("component workspace filters", () => {
     expect(screen.queryByRole("heading", { name: "已更新至 v1.1.0" })).not.toBeInTheDocument();
   });
 
-  it.each([["1.2.0", "1.3.0"], ["1.3.0", "1.4.0"]])("shows the Git-based changelog once when upgrading from %s to %s", async (previous, current) => {
+  it.each([["1.2.0", "1.3.0"], ["1.3.0", "1.4.0"], ["1.4.0", "1.4.1"]])("shows the Git-based changelog once when upgrading from %s to %s", async (previous, current) => {
     window.localStorage.setItem("mcdh.last-launched-version", previous);
     mocks.version.mockResolvedValue(current);
     mocks.refresh.mockResolvedValue({ components: [], sources: [], warnings: [] });

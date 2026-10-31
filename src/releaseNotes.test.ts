@@ -12,10 +12,18 @@ describe("releaseNotesFor", () => {
   it("provides release notes for the packaged version", () => {
     const notes = releaseNotesFor(version);
     expect(notes.length).toBeGreaterThan(1);
-    for (const topic of ["GitHub", "本地导入", "面板", "MCP", "设置", "开关", "清空", "全权限"]) {
+    for (const topic of ["标题栏", "独立窗口", "加载", "重载", "兼容", "MCP"]) {
       expect(notes.some((note) => note.includes(topic))).toBe(true);
     }
     expect(new Set(notes).size).toBe(notes.length);
+  });
+
+  it("keeps the download notes and README on the packaged version", () => {
+    const notes = readFileSync("RELEASE_NOTES.md", "utf8");
+    expect(notes.startsWith(`# MCDH v${version}\n`) || notes.startsWith(`# MCDH v${version}\r\n`)).toBe(true);
+    expect(notes).toContain(`MCDH-${version}-windows-x64-setup.exe`);
+    expect(notes).toContain(`MCDH-${version}-windows-x64-portable.zip`);
+    expect(readFileSync("README.md", "utf8")).toContain(`当前版本：**v${version}**`);
   });
 
   it("normalizes version prefixes and surrounding whitespace", () => {
@@ -33,6 +41,9 @@ describe("releaseNotesFor", () => {
   });
 
   it("preserves historical notes and handles unknown versions", () => {
+    for (const topic of ["GitHub", "本地导入", "面板", "MCP", "设置", "开关", "清空", "全权限"]) {
+      expect(releaseNotesFor("1.4.0").some((note) => note.includes(topic))).toBe(true);
+    }
     expect(releaseNotesFor("1.3.0").some((note) => note.includes("八套配色"))).toBe(true);
     expect(releaseNotesFor("1.2.0")[0]).toContain("MCDK");
     expect(releaseNotesFor("1.1.0")[0]).toContain(".mcdh.json");

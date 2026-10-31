@@ -67,9 +67,9 @@ export interface PluginContext {
 }
 export interface PanelContext extends PluginContext {
   theme: { mode: "light" | "dark"; accent: string };
-  /** Optional on older API 1 hosts. Describes this panel instance, not global state. */
+  /** Since MCDH 1.4.1; optional on older API 1 hosts. Describes this panel instance. */
   readonly placement?: Placement;
-  /** Desktop panel only. Loading/errors always retain the host recovery controls. */
+  /** Since MCDH 1.4.1, desktop only. Loading/errors retain the host recovery controls. */
   setHeaderVisible?(visible: boolean): void;
   onThemeChanged(listener: (theme: PanelContext["theme"]) => void): () => void;
   assetUrl(relativePath: string): string;
