@@ -235,4 +235,49 @@ describe("plugin panel host", () => {
     fireEvent.click(screen.getByRole("button", {name:"在独立窗口打开"}));
     expect(mocks.open).toHaveBeenCalledWith({kind:"plugin_panel",...request});
   });
+  it.each([false, true])("allows an opted-in panel to own its header (standalone=%s)", async (standalone) => {
+    let context!: import("../sdk/mcdh").PanelContext;
+    mocks.load.mockResolvedValue({mount:(element: HTMLElement, ctx: import("../sdk/mcdh").PanelContext) => {
+      context = ctx; element.textContent = "custom toolbar"; ctx.setHeaderVisible?.(false);
+    }});
+    render(<PluginPanelHost request={request} standalone={standalone} onOpenPanel={mocks.onPanel} onClose={vi.fn()} />);
+    await waitFor(() => expect(context).toBeDefined());
+    await waitFor(() => expect(screen.queryByRole("button", {name:"关闭插件面板"})).not.toBeInTheDocument());
+    expect(screen.queryByRole("heading", {name:"组件概览"})).not.toBeInTheDocument();
+    expect(context.placement).toBe(standalone ? "window" : "main");
+    await act(async () => { context.setHeaderVisible?.(true); });
+    expect(screen.getByRole("button", {name:"关闭插件面板"})).toBeVisible();
+  });
+  it("keeps recovery controls visible until a headerless mount completes and after failure", async () => {
+    let rejectMount!: (reason: Error) => void;
+    mocks.load.mockResolvedValue({mount:(_element: HTMLElement, ctx: import("../sdk/mcdh").PanelContext) => {
+      ctx.setHeaderVisible?.(false);
+      return new Promise((_resolve, reject) => { rejectMount = reject; });
+    }});
+    render(<PluginPanelHost request={request} onOpenPanel={mocks.onPanel} onClose={vi.fn()} />);
+    await waitFor(() => expect(rejectMount).toBeDefined());
+    expect(screen.getByRole("button", {name:"重新加载面板"})).toBeVisible();
+    await act(async () => { rejectMount(new Error("custom header mount failure")); });
+    expect(await screen.findByRole("alert")).toHaveTextContent("custom header mount failure");
+    expect(screen.getByRole("button", {name:"重新加载面板"})).toBeVisible();
+    mocks.load.mockResolvedValue({mount:vi.fn()});
+    fireEvent.click(screen.getByRole("button", {name:"重新加载面板"}));
+    await waitFor(() => expect(screen.queryByRole("alert")).not.toBeInTheDocument());
+    expect(screen.getByRole("button", {name:"关闭插件面板"})).toBeVisible();
+  });
+  it("resets header visibility on panel switches and ignores a disposed context", async () => {
+    let oldContext!: import("../sdk/mcdh").PanelContext;
+    mocks.load.mockResolvedValueOnce({mount:(_element: HTMLElement, ctx: import("../sdk/mcdh").PanelContext) => {
+      oldContext = ctx; ctx.setHeaderVisible?.(false);
+    }});
+    const view = render(<PluginPanelHost request={request} onOpenPanel={mocks.onPanel} onClose={vi.fn()} />);
+    await waitFor(() => expect(oldContext).toBeDefined());
+    await waitFor(() => expect(screen.queryByRole("button", {name:"关闭插件面板"})).not.toBeInTheDocument());
+    const nextMount = vi.fn(); mocks.load.mockResolvedValue({mount:nextMount});
+    view.rerender(<PluginPanelHost request={{...request,componentId:"component-2"}} onOpenPanel={mocks.onPanel} onClose={vi.fn()} />);
+    await waitFor(() => expect(nextMount).toHaveBeenCalledOnce());
+    await act(async () => { oldContext.setHeaderVisible?.(false); });
+    expect(screen.getByRole("button", {name:"关闭插件面板"})).toBeVisible();
+    expect(screen.getByRole("heading", {name:"组件概览"})).toBeVisible();
+  });
 });

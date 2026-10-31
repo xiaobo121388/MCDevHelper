@@ -187,6 +187,10 @@ export function mount(container, ctx) {
 
 `ctx.theme` 包含 `mode` 和 `accent`，主题变化时更新；`ctx.onThemeChanged` 返回取消监听函数。Shadow DOM 可以继承宿主 CSS 变量，例如 `--text`、`--muted`、`--accent`、`--border`、`--control-bg`。插件自行注入容器内 `<style>`，不得向应用页面注入全局样式。外部事件、观察器和监听请注册清理或放入 `ctx.subscriptions`。
 
+面板可通过可选的 `ctx.setHeaderVisible(false)` 隐藏宿主外层标题栏，由插件在容器内提供自己的标题和工具按钮；传入 `true` 恢复。默认显示，旧插件无需修改。设置只影响当前面板实例，切换、重载后重置；加载中或出错时始终显示宿主重载与关闭入口，已失效实例不能影响新面板。此方法仅供桌面面板使用，不属于后台/MCP 命令，也不改变任何授权。
+
+`ctx.placement` 为 `main` 或 `window`。自行提供标题栏的插件可在主面板中使用 `ctx.ui.openPanel(panelId, "window", componentId)` 保留独立窗口入口，并在 `window` 模式隐藏该按钮。较早的 API 1 宿主没有这两个属性，请检测 `typeof ctx.setHeaderVisible === "function"` 后使用；未支持时保留原有布局，不通过全局 CSS 或外部 DOM 绕过。
+
 使用 `ctx.assetUrl("logo.png")` 获取包内资源地址，ES module 依赖使用相对导入。资源由 `mcdh-plugin` 自定义协议加载，仅提供当前已启用、信任且校验通过版本清单中的文件；不映射整个磁盘。不得使用远程脚本、CDN、`eval`、`new Function` 或外部源码构建器。CSP 只增加插件本地协议来源，没有增加全局 `unsafe-eval`。
 
 关闭、切换、停用或更新面板后，宿主清理容器和订阅并取消未完成调用。切回组件视图保留原有筛选与排序。主窗口与独立窗口共享插件数据，但各自拥有独立 DOM 生命周期。

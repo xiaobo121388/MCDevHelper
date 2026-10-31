@@ -21,6 +21,7 @@ export function PluginPanelHost({ request, onOpenPanel, onClose, standalone = fa
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [revision, setRevision] = useState(0);
+  const [headerVisible, setHeaderVisible] = useState(true);
   const callbacks = useRef({ onOpenPanel });
   callbacks.current = { onOpenPanel };
   const key = JSON.stringify(request);
@@ -34,7 +35,7 @@ export function PluginPanelHost({ request, onOpenPanel, onClose, standalone = fa
     const node = container.current!;
     const shadow = node.shadowRoot ?? node.attachShadow({ mode: "open" });
     shadow.replaceChildren();
-    setLoading(true); setError("");
+    setLoading(true); setError(""); setHeaderVisible(true);
     const stop = () => {
       stopped = true;
       for (const id of jobs) void pluginApi.cancel(id).catch(() => {});
@@ -77,6 +78,12 @@ export function PluginPanelHost({ request, onOpenPanel, onClose, standalone = fa
         dispose = state.dispose;
         const themeListeners = new Set<(theme: PanelContext["theme"]) => void>();
         const context: PanelContext = { ...state.context, theme: currentTheme(),
+          placement: standalone ? "window" : "main",
+          setHeaderVisible(visible) {
+            if (!active || stopped) return;
+            if (typeof visible !== "boolean") throw new TypeError("Header visibility must be a boolean");
+            setHeaderVisible(visible);
+          },
           onThemeChanged(listener) { themeListeners.add(listener); const stop = () => { themeListeners.delete(listener); }; state.context.subscriptions.push(stop); return stop; },
           assetUrl: (path) => pluginAssetUrl(request, path),
         };
@@ -114,9 +121,9 @@ export function PluginPanelHost({ request, onOpenPanel, onClose, standalone = fa
       active = false; window.clearInterval(timer); stop();
     };
   // The serialized request includes plugin version and component context.
-  }, [key, revision]);
+  }, [key, revision, standalone]);
   return <main className={standalone ? "plugin-panel-workspace standalone" : "workspace plugin-panel-workspace"}>
-    <header className="topbar"><div className="plugin-panel-title"><button className="icon-button" title="关闭插件面板" aria-label="关闭插件面板" onClick={onClose}><ArrowLeft size={18} /></button><h1>{title}</h1></div><div className="top-actions"><button className="icon-button" title="重新加载面板" aria-label="重新加载面板" onClick={() => setRevision((value) => value + 1)}><RefreshCw size={17} /></button>{!standalone && <button className="icon-button" title="在独立窗口打开" aria-label="在独立窗口打开" onClick={() => void openDialogWindow({ kind: "plugin_panel", ...request }).catch((cause) => setError(errorMessage(cause)))}><ExternalLink size={17} /></button>}</div></header>
+    {(headerVisible || loading || !!error) && <header className="topbar"><div className="plugin-panel-title"><button className="icon-button" title="关闭插件面板" aria-label="关闭插件面板" onClick={onClose}><ArrowLeft size={18} /></button><h1>{title}</h1></div><div className="top-actions"><button className="icon-button" title="重新加载面板" aria-label="重新加载面板" onClick={() => setRevision((value) => value + 1)}><RefreshCw size={17} /></button>{!standalone && <button className="icon-button" title="在独立窗口打开" aria-label="在独立窗口打开" onClick={() => void openDialogWindow({ kind: "plugin_panel", ...request }).catch((cause) => setError(errorMessage(cause)))}><ExternalLink size={17} /></button>}</div></header>}
     {loading && <div className="plugin-panel-status" role="status"><LoaderCircle className="spin" size={20} />正在加载插件</div>}
     {error && <div className="plugin-error" role="alert"><TriangleAlert size={18} /><span>{error}</span></div>}
     <div className="plugin-panel-mount" ref={container} hidden={loading || !!error} />
