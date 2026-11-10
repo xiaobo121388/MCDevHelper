@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => ({
   requestDirectory: vi.fn(),
   setQuickExportDestination: vi.fn(),
   open: vi.fn(),
+  openWindow: vi.fn(),
   customExportProfiles: vi.fn(),
   customExportTasks: vi.fn(),
   startCustomExport: vi.fn(),
@@ -45,7 +46,7 @@ vi.mock("@tauri-apps/plugin-opener", () => ({
   openUrl: mocks.openUrl,
 }));
 vi.mock("@tauri-apps/plugin-dialog", () => ({ open: mocks.open }));
-vi.mock("./windows", async (actual) => ({ ...await actual<typeof import("./windows")>(), requestExportDirectory: mocks.requestDirectory }));
+vi.mock("./windows", async (actual) => ({ ...await actual<typeof import("./windows")>(), requestExportDirectory: mocks.requestDirectory, openDialogWindow: mocks.openWindow }));
 
 vi.mock("./api", () => ({
   get desktop() { return mocks.desktop; },
@@ -130,6 +131,7 @@ describe("component workspace filters", () => {
     mocks.requestDirectory.mockReset().mockResolvedValue("D:/BOMD/src");
     mocks.setQuickExportDestination.mockReset();
     mocks.open.mockReset();
+    mocks.openWindow.mockReset().mockResolvedValue(undefined);
     mocks.customExportProfiles.mockReset().mockResolvedValue([]);
     mocks.customExportTasks.mockReset().mockResolvedValue([]);
     mocks.startCustomExport.mockReset();
@@ -180,6 +182,21 @@ describe("component workspace filters", () => {
     expect(screen.getByRole("button", {name:"保存设置"})).toBeInTheDocument();
     fireEvent.click(within(screen.getByRole("dialog", {name:"设置"})).getByText("关闭", {selector:"button"}));
     expect(screen.getByPlaceholderText("搜索名称或路径")).toHaveValue("编辑");
+    expect(mocks.refresh).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps the MCDK editor entry inside component configuration details", async () => {
+    mocks.refresh.mockResolvedValue({ components: [launchComponent], sources: [], warnings: [] });
+    render(<App />);
+    await screen.findByRole("heading", { name: launchComponent.name });
+    expect(screen.queryByRole("button", { name: "MCDK 可视化配置" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "可视化编辑" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "配置 " + launchComponent.name }));
+    const details = screen.getByRole("dialog", { name: launchComponent.name });
+    const edit = within(details).getByRole("button", { name: "可视化编辑" });
+    expect(edit).toBeEnabled();
+    fireEvent.click(edit);
+    await waitFor(() => expect(mocks.openWindow).toHaveBeenCalledWith({ kind: "mcdk_editor", componentId: launchComponent.id }));
     expect(mocks.refresh).toHaveBeenCalledTimes(1);
   });
 

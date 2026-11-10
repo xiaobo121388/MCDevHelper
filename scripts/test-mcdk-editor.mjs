@@ -112,7 +112,7 @@ async function nativeTest() {
   let occupied = false;
   try { await fetch(endpoint + "/json/version", { signal: AbortSignal.timeout(500) }); occupied = true; } catch { /* Port is available. */ }
   if (occupied) throw new Error("Port 9238 is occupied; refusing to attach to another WebView.");
-  const child = spawn(path.resolve("target/debug/mcdh-desktop.exe"), [], { windowsHide: true, env: { ...process.env,
+  const child = spawn(path.resolve(process.env.MCDH_EDITOR_QA_EXE ?? "target/debug/mcdh-desktop.exe"), [], { windowsHide: true, env: { ...process.env,
     MCDH_DATA_DIR: path.join(data, "index"), MCDH_DISABLE_MCS_SCAN: "1", WEBVIEW2_USER_DATA_FOLDER: path.join(data, "webview"),
     WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: "--remote-debugging-port=9238 --remote-debugging-address=127.0.0.1",
   }, stdio: ["ignore", "pipe", "pipe"] });
@@ -135,7 +135,16 @@ async function nativeTest() {
     const configPath = path.join(component.path, ".mcdev.json");
     await writeFile(configPath, "\ufeff{\r\n// QA comment\r\n" + JSON.stringify({ game_executable_path: game, world_name: "QA world", skin_info: { skin: path.join(vanilla, "alex.png"), slim: true, retained: 42 }, extension_field: "keep" }).slice(1, -1) + ",\r\n}\r\n");
     await main.getByRole("button", { name: "刷新组件", exact: true }).click();
-    await main.getByRole("button", { name: "MCDK 可视化配置", exact: true }).click();
+    await expect(main.getByRole("button", { name: "MCDK 可视化配置", exact: true })).toHaveCount(0);
+    await main.getByRole("button", { name: "配置 " + component.name, exact: true }).click();
+    let details;
+    await expect.poll(async () => {
+      for (const page of context.pages()) if ((await page.evaluate(() => window.__TAURI_INTERNALS__?.metadata.currentWindow.label).catch(() => "")).startsWith("dialog-component-")) { details = page; return true; }
+      return false;
+    }, { timeout: 20000 }).toBe(true);
+    await expect(details.getByRole("heading", { name: component.name, exact: true })).toBeVisible();
+    await details.screenshot({ path: path.join(output, "native-details-entry.png") });
+    await details.getByRole("button", { name: "可视化编辑", exact: true }).click();
     await expect.poll(async () => {
       for (const page of context.pages()) if ((await page.evaluate(() => window.__TAURI_INTERNALS__?.metadata.currentWindow.label).catch(() => "")).startsWith("dialog-mcdk-")) { editor = page; return true; }
       return false;
