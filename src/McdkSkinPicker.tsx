@@ -1,12 +1,13 @@
 import { open } from "@tauri-apps/plugin-dialog";
-import { FolderOpen, Plus, RefreshCw, Trash2, UserRound } from "lucide-react";
+import { Box, FolderOpen, Image, Plus, RefreshCw, Trash2, UserRound } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { errorMessage } from "./api";
 import { editorApi, legacyVanillaMatch, normalizeSkinPath, valueAt, type ConfigData, type CustomSkin, type SkinCatalog } from "./mcdkEditorApi";
 import { EditorField, Toggle, type Change } from "./McdkConfigFields";
+import { McdkChoice } from "./McdkChoice";
 
 const filename = (path: string) => path.replaceAll("\\", "/").split("/").at(-1) || path;
-export function McdkSkinPicker({ componentId, data, change, onBusy }: { componentId: string; data: ConfigData; change: Change; onBusy: (busy: boolean) => void }) {
+export function McdkSkinPicker({ componentId, data, change, onBusy, disabled }: { componentId: string; data: ConfigData; change: Change; onBusy: (busy: boolean) => void; disabled?: boolean }) {
   const game = String(data.game_executable_path ?? "");
   const selected = String(valueAt(data, "skin_info.skin") ?? "");
   const slim = Boolean(valueAt(data, "skin_info.slim"));
@@ -69,13 +70,12 @@ export function McdkSkinPicker({ componentId, data, change, onBusy }: { componen
   };
   const known = match || custom.find(s => normalizeSkinPath(s.path) === normalizeSkinPath(selected));
   return <><div className="mcdk-section-heading"><h2>玩家皮肤</h2><button type="button" title="刷新皮肤目录" aria-label="刷新皮肤目录" disabled={loading} onClick={() => setRefresh(v => v + 1)}><RefreshCw size={16} className={loading ? "spin" : ""} /></button></div>
-    <div className="mcdk-skin-layout"><div className="mcdk-skin-controls"><EditorField label="皮肤选择"><select value={known?.path ?? selected} onChange={e => { const skin = catalog.skins.find(s => s.path === e.target.value) || custom.find(s => s.path === e.target.value); select(e.target.value, skin?.slim ?? false); }}>
-      <option value="">默认 Steve</option>
-      {selected && !known && <option value={selected}>{filename(selected)} · 当前配置</option>}
-      <optgroup label="原版免费皮肤">{catalog.skins.filter(s => s.kind === "vanilla").map(s => <option key={s.path} value={s.path}>{s.name} · {s.slim ? "Slim" : "Classic"}</option>)}</optgroup>
-      <optgroup label="网易 4D">{catalog.skins.filter(s => s.kind === "netease4d").map(s => <option key={s.path} value={s.path}>{s.name}</option>)}</optgroup>
-      <optgroup label="自定义皮肤库">{custom.filter(c => !catalog.skins.some(s => normalizeSkinPath(s.path) === normalizeSkinPath(c.path))).map(s => <option key={s.path} value={s.path}>{filename(s.path)}</option>)}</optgroup>
-    </select></EditorField>
+    <div className="mcdk-skin-layout"><div className="mcdk-skin-controls"><EditorField label="皮肤选择"><McdkChoice label="皮肤选择" value={known?.path ?? selected} disabled={disabled || working} onChange={path => { const skin = catalog.skins.find(s => s.path === path) || custom.find(s => s.path === path); select(path, skin?.slim ?? false); }} groups={[
+      { items: [{ value: "", label: "默认 Steve", badge: "Classic", icon: <UserRound size={17} /> }, ...(selected && !known ? [{ value: selected, label: filename(selected), badge: "当前配置", description: selected, icon: <Image size={17} /> }] : [])] },
+      { label: "原版免费皮肤", items: catalog.skins.filter(s => s.kind === "vanilla").map(s => ({ value: s.path, label: s.name, badge: s.slim ? "Slim" : "Classic", icon: <UserRound size={17} /> })) },
+      { label: "网易 4D", items: catalog.skins.filter(s => s.kind === "netease4d").map(s => ({ value: s.path, label: s.name, badge: "4D", icon: <Box size={17} /> })) },
+      { label: "自定义皮肤库", items: custom.filter(c => !catalog.skins.some(s => normalizeSkinPath(s.path) === normalizeSkinPath(c.path))).map(s => ({ value: s.path, label: filename(s.path), badge: s.slim ? "Slim" : "Classic", description: s.path, icon: <Image size={17} /> })) },
+    ]} /></EditorField>
     {loading && <p role="status">正在读取皮肤目录</p>}
     {!game && <p className="mcdk-empty">尚未选择游戏程序</p>}
     {catalogError && <p role="alert" className="mcdk-editor-error">{catalogError}</p>}

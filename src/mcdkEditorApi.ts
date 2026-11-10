@@ -6,8 +6,11 @@ export type ConfigSnapshot = { path: string; revision: string | null; data: Conf
 export type Skin = { name: string; path: string; texture: string; slim: boolean; kind: "vanilla" | "netease4d" };
 export type SkinCatalog = { skins: Skin[]; warnings: string[] };
 export type CustomSkin = { path: string; slim: boolean };
+export type GameInstallation = { path: string; version: string | null; source: "mcstudio" | "sibling" | "configured" };
+export type GameCatalog = { installations: GameInstallation[]; warnings: string[]; selected_path?: string | null };
 
 export const editorApi = {
+  games: (componentId: string, gameExecutablePath: string) => invoke<GameCatalog>("get_mcdk_game_installations", { componentId, gameExecutablePath }),
   load: (componentId: string) => invoke<ConfigSnapshot>("get_mcdk_config", { componentId }),
   save: (componentId: string, revision: string | null, edits: ConfigEdit[]) => invoke<ConfigSnapshot>("save_mcdk_config", { componentId, revision, edits }),
   catalog: (gameExecutablePath: string) => invoke<SkinCatalog>("get_mcdk_skin_catalog", { gameExecutablePath }),

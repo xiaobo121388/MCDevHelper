@@ -6,6 +6,20 @@ use mcdh_core::{
 use tauri::State;
 
 #[tauri::command]
+pub async fn get_mcdk_game_installations(
+    state: State<'_, AppState>,
+    component_id: String,
+    game_executable_path: String,
+) -> CommandResult<mcdh_core::game_installations::GameCatalog> {
+    let index = state.index.clone();
+    blocking(move || {
+        mcdh_core::game_installations::discover(&index, &component_id, &game_executable_path)
+    })
+    .await
+    .map_err(|e| e.payload())
+}
+
+#[tauri::command]
 pub async fn get_mcdk_config(
     state: State<'_, AppState>,
     component_id: String,

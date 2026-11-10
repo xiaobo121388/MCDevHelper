@@ -7,7 +7,7 @@ import path from "node:path";
 const output = path.resolve("target/mcdk-editor-qa");
 await mkdir(output, { recursive: true });
 const native = process.argv.includes("--native");
-const png = await readFile("src-tauri/icons/128x128.png");
+const png = await readFile(process.env.MCDH_QA_SKIN ?? "src-tauri/icons/128x128.png");
 const image = "data:image/png;base64," + png.toString("base64");
 const errors = [];
 const tabs = ["启动", "世界", "Mod 目录", "皮肤", "窗口", "调试"];
@@ -19,8 +19,21 @@ async function inspect(page, name) {
     await expect(page.locator(".mcdk-editor-content section:not([hidden])")).toBeVisible();
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
     expect(await page.locator(".mcdk-editor-content").evaluate(n => n.scrollWidth <= n.clientWidth + 1)).toBe(true);
+    if (tab === "启动" || tab === "皮肤") {
+      const label = tab === "启动" ? "游戏版本" : "皮肤选择";
+      const trigger = page.getByRole("button", { name: label, exact: true });
+      if (tab === "启动") await expect(page.getByRole("status").filter({ hasText: "正在检测本机游戏版本" })).toHaveCount(0);
+      else await expect(trigger).toContainText("Alex");
+      await trigger.click();
+      const menu = page.getByRole("menu", { name: label, exact: true });
+      await expect(menu).toBeVisible();
+      if (tab === "皮肤") await expect(page.getByRole("menuitemradio", { name: "Alex · Slim", exact: true })).toHaveAttribute("aria-checked", "true");
+      else await expect(menu.getByText("本机游戏", { exact: false })).toBeVisible();
+      expect(await menu.evaluate(n => { const b = n.getBoundingClientRect(); return b.left >= 0 && b.right <= innerWidth + 1 && b.top >= 0 && b.bottom <= innerHeight + 1 && n.scrollWidth <= n.clientWidth + 1; })).toBe(true);
+      await page.screenshot({ path: path.join(output, name + "-" + tabs.indexOf(tab) + "-menu.png") });
+      await page.keyboard.press("Escape"); await expect(menu).toHaveCount(0); await expect(trigger).toBeFocused();
+    }
     if (tab === "皮肤") {
-      await expect(page.getByRole("option", { name: "Alex · Slim", exact: true })).toBeAttached();
       await expect(page.locator(".mcdk-skin-preview img")).toBeVisible();
       await expect.poll(() => page.locator(".mcdk-skin-preview img").evaluate(img => img.naturalWidth)).toBeGreaterThan(0);
       expect(await page.locator(".mcdk-skin-preview img").evaluate(img => {
@@ -29,6 +42,15 @@ async function inspect(page, name) {
         const pixels = ctx.getImageData(0, 0, 32, 32).data;
         return new Set(Array.from({ length: 1024 }, (_, i) => pixels.slice(i * 4, i * 4 + 4).join(","))).size;
       })).toBeGreaterThan(4);
+    }
+    if (tab === "调试") {
+      const key = page.getByRole("button", { name: "脚本重载按键", exact: true });
+      await expect(key).toHaveText("F5"); await key.click(); await page.keyboard.press("F8"); await expect(key).toHaveText("F8");
+      await expect(page.getByText("有未保存的修改", { exact: true })).toBeVisible();
+      await key.click(); await page.keyboard.press("Control+s"); await expect(page.getByRole("alert")).toContainText("仅支持单个按键");
+      await expect(page.getByText("有未保存的修改", { exact: true })).toBeVisible();
+      await page.keyboard.press("Escape"); await expect(key).toHaveText("F8");
+      await key.click(); await page.keyboard.press("F5"); await expect(key).toHaveText("F5");
     }
     await page.screenshot({ path: path.join(output, name + "-" + tabs.indexOf(tab) + ".png") });
   }
@@ -56,7 +78,7 @@ async function browserTest() {
           window.isTauri = true;
           window.__TAURI_EVENT_PLUGIN_INTERNALS__ = { unregisterListener() {} };
           const callbacks = new Map(); let sequence = 1;
-          let snapshot = { path: "D:/Projects/Fixture/.mcdev.json", revision: "1", data: { game_executable_path: "D:/Game/Minecraft.Windows.exe", world_name: "测试世界", skin_info: { skin: "D:/Game/alex.png", slim: true, keep: "metadata" }, included_mod_dirs: ["./", { path: "./addon", enabled: false, hot_reload: true }] } };
+          let snapshot = { path: "D:/Projects/Fixture/.mcdev.json", revision: "1", data: { game_executable_path: "D:/MCStudioDownload/game/MinecraftPE_Netease/3.10.0.448891/Minecraft.Windows.exe", world_name: "测试世界", user_name: "Developer", debug_options: { reload_key: "116", reload_world_key: "117", reload_addon_key: "118", reload_shaders_key: "119" }, skin_info: { skin: "D:/Game/alex.png", slim: true, keep: "metadata" }, included_mod_dirs: ["./", { path: "./addon", enabled: false, hot_reload: true }] } };
           let custom = [];
           window.__TAURI_INTERNALS__ = {
             metadata: { currentWindow: { label: "dialog-mcdk-fixture" }, currentWebview: { label: "dialog-mcdk-fixture" } },
@@ -69,6 +91,7 @@ async function browserTest() {
               if (command === "get_settings") return { theme, color_preset: "fluent", developer_nickname: "QA", developer_account: "test", developer_user_id: "0" };
               if (command === "mcdk_status") return { available: true, phase: "idle", auto_update: false };
               if (command === "get_mcdk_config") return structuredClone(snapshot);
+              if (command === "get_mcdk_game_installations") return { warnings: [], installations: ["3.10.0.448891", "3.10.0.436581", "3.9.0.401155"].map(version => ({ version, source: "mcstudio", path: "D:/MCStudioDownload/game/MinecraftPE_Netease/" + version + "/Minecraft.Windows.exe" })) };
               if (command === "save_mcdk_config") {
                 if (args.revision !== snapshot.revision) throw new Error("stale revision");
                 for (const edit of args.edits) { let target = snapshot.data; for (const part of edit.path.slice(0, -1)) target = target[part] ??= {}; target[edit.path.at(-1)] = edit.value; }
@@ -80,6 +103,7 @@ async function browserTest() {
               if (command === "get_mcdk_skin_catalog") return { warnings: [], skins: [
                 { name: "Steve", path: "D:/Game/steve.png", texture: "steve.png", slim: false, kind: "vanilla" },
                 { name: "Alex", path: "D:/Game/alex.png", texture: "alex.png", slim: true, kind: "vanilla" },
+                ...["Ari", "Efe", "Kai", "Makena", "Noor", "Sunny", "Zuri"].map(name => ({ name, path: "D:/Game/" + name + ".png", texture: name + ".png", slim: true, kind: "vanilla" })),
                 { name: "4D测试皮肤", path: "D:/4D/skin.zip", texture: "skin.zip", slim: false, kind: "netease4d" },
               ] };
               if (command === "launch_component_game") throw new Error("QA must never launch a game");
@@ -90,6 +114,14 @@ async function browserTest() {
         const page = await context.newPage(); page.on("pageerror", error => errors.push(error.message));
         await page.goto("http://127.0.0.1:" + server.address().port);
         await inspect(page, name + "-" + theme);
+        await page.getByRole("button", { name: "启动", exact: true }).click();
+        await page.getByRole("button", { name: "游戏版本", exact: true }).focus();
+        await page.keyboard.press("ArrowDown");
+        await expect(page.getByRole("menuitemradio", { name: "未指定版本", exact: true })).toBeFocused();
+        await page.keyboard.press("End");
+        await expect(page.getByRole("menuitemradio", { name: "3.9.0.401155 · MCStudio", exact: true })).toBeFocused();
+        await page.keyboard.press("Enter");
+        await expect(page.getByRole("textbox", { name: "游戏程序", exact: true })).toHaveValue("D:/MCStudioDownload/game/MinecraftPE_Netease/3.9.0.401155/Minecraft.Windows.exe");
         await page.getByRole("button", { name: "世界", exact: true }).click();
         await page.getByRole("textbox", { name: "世界名称", exact: true }).fill("已修改世界");
         await page.getByRole("button", { name: "保存", exact: true }).click();
@@ -104,10 +136,15 @@ async function browserTest() {
 async function nativeTest() {
   const data = await mkdtemp(path.join(output, "native-"));
   const game = path.join(data, "games/bin/1.0.0/Minecraft.Windows.exe");
+  const nextGame = path.join(data, "games/bin/1.1.0/Minecraft.Windows.exe");
   const vanilla = path.join(path.dirname(game), "data/skin_packs/vanilla");
-  await mkdir(vanilla, { recursive: true }); await writeFile(game, "QA fixture: not executable");
-  await writeFile(path.join(vanilla, "alex.png"), png); await writeFile(path.join(data, "custom.png"), png);
-  await writeFile(path.join(vanilla, "skins.json"), JSON.stringify({ skins: [{ type: "free", localization_name: "Alex", geometry: "geometry.humanoid.customSlim", texture: "alex.png" }] }));
+  for (const executable of [game, nextGame]) {
+    const skins = path.join(path.dirname(executable), "data/skin_packs/vanilla");
+    await mkdir(skins, { recursive: true }); await writeFile(executable, "QA fixture: not executable");
+    await writeFile(path.join(skins, "alex.png"), png);
+    await writeFile(path.join(skins, "skins.json"), JSON.stringify({ skins: [{ type: "free", localization_name: "Alex", geometry: "geometry.humanoid.customSlim", texture: "alex.png" }] }));
+  }
+  await writeFile(path.join(data, "custom.png"), png);
   const endpoint = "http://127.0.0.1:9238";
   let occupied = false;
   try { await fetch(endpoint + "/json/version", { signal: AbortSignal.timeout(500) }); occupied = true; } catch { /* Port is available. */ }
@@ -132,8 +169,14 @@ async function nativeTest() {
       await invoke("set_mcdk_auto_update", { enabled: false });
       return (await invoke("create_component", { request: { name: "MCDK Editor QA", kind: "addon", destination, mcs_compatible: false } })).component;
     }, data);
+    if (process.env.MCDH_QA_GAME) {
+      const local = await main.evaluate(args => window.__TAURI_INTERNALS__.invoke("get_mcdk_game_installations", args), { componentId: component.id, gameExecutablePath: process.env.MCDH_QA_GAME });
+      expect(local.installations.length).toBeGreaterThan(0);
+      expect(local.selected_path.toLowerCase().replaceAll("\\", "/")).toBe(process.env.MCDH_QA_GAME.toLowerCase().replaceAll("\\", "/"));
+      console.log("Read-only local game versions: " + local.installations.map(item => item.version ?? "custom").join(", "));
+    }
     const configPath = path.join(component.path, ".mcdev.json");
-    await writeFile(configPath, "\ufeff{\r\n// QA comment\r\n" + JSON.stringify({ game_executable_path: game, world_name: "QA world", skin_info: { skin: path.join(vanilla, "alex.png"), slim: true, retained: 42 }, extension_field: "keep" }).slice(1, -1) + ",\r\n}\r\n");
+    await writeFile(configPath, "\ufeff{\r\n// QA comment\r\n" + JSON.stringify({ game_executable_path: game, world_name: "QA world", debug_options: { reload_key: "116" }, skin_info: { skin: path.join(vanilla, "alex.png"), slim: true, retained: 42 }, extension_field: "keep" }).slice(1, -1) + ",\r\n}\r\n");
     await main.getByRole("button", { name: "刷新组件", exact: true }).click();
     await expect(main.getByRole("button", { name: "MCDK 可视化配置", exact: true })).toHaveCount(0);
     await main.getByRole("button", { name: "配置 " + component.name, exact: true }).click();
@@ -150,15 +193,25 @@ async function nativeTest() {
       return false;
     }, { timeout: 20000 }).toBe(true);
     await inspect(editor, "native");
+    await editor.getByRole("button", { name: "脚本重载按键", exact: true }).click(); await editor.keyboard.press("F8");
+    await editor.getByRole("button", { name: "启动", exact: true }).click();
+    await editor.getByRole("button", { name: "游戏版本", exact: true }).click();
+    await editor.getByRole("menuitemradio", { name: "1.1.0 · 本地", exact: true }).click();
+    await expect(editor.getByRole("textbox", { name: "游戏程序", exact: true })).toHaveValue(nextGame);
     await editor.getByRole("button", { name: "世界", exact: true }).click();
     await editor.getByRole("textbox", { name: "世界名称", exact: true }).fill("Native saved world");
     await editor.getByRole("button", { name: "保存", exact: true }).click();
     await expect(editor.getByText("配置已保存", { exact: true })).toBeVisible();
     const saved = await readFile(configPath, "utf8"); expect(saved.startsWith("\ufeff")).toBe(true); expect(saved).toContain("// QA comment"); expect(saved).toContain("Native saved world"); expect(saved).toContain('"retained":42');
+    const persisted = await main.evaluate(componentId => window.__TAURI_INTERNALS__.invoke("get_mcdk_config", { componentId }), component.id);
+    expect(persisted.data.game_executable_path).toBe(nextGame); expect(persisted.data.debug_options.reload_key).toBe("119");
+    await editor.getByRole("button", { name: "重新加载配置", exact: true }).click();
+    await editor.getByRole("button", { name: "调试", exact: true }).click();
+    await expect(editor.getByRole("button", { name: "脚本重载按键", exact: true })).toHaveText("F8");
     await editor.getByRole("button", { name: "皮肤", exact: true }).click();
     await editor.getByRole("textbox", { name: "添加皮肤路径" }).fill(path.join(data, "custom.png"));
     await editor.getByRole("button", { name: "加入皮肤库", exact: true }).click();
-    await expect(editor.getByRole("option", { name: "custom.png", exact: true })).toBeAttached();
+    await expect(editor.getByRole("button", { name: "皮肤选择", exact: true })).toContainText("custom.png");
     await editor.getByRole("button", { name: "保存", exact: true }).click();
     await expect(editor.getByText("配置已保存", { exact: true })).toBeVisible();
     expect(await main.evaluate(componentId => window.__TAURI_INTERNALS__.invoke("get_mcdk_skin_library", { componentId }), component.id)).toHaveLength(1);
@@ -177,6 +230,7 @@ async function nativeTest() {
       return false;
     }).toBe(true);
     await confirmation.getByRole("button", { name: "取消", exact: true }).click();
+    await expect.poll(() => confirmation.isClosed()).toBe(true);
     await expect(editor.getByRole("textbox", { name: "世界名称", exact: true })).toHaveValue("stale must not save");
     await editor.getByRole("button", { name: "关闭窗口", exact: true }).click();
     confirmation = undefined;

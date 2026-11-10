@@ -3,9 +3,11 @@ import { FolderOpen, Plus, Trash2, X } from "lucide-react";
 import type { ReactNode } from "react";
 import { errorMessage } from "./api";
 import { valueAt, type ConfigData } from "./mcdkEditorApi";
+import { McdkGamePicker } from "./McdkGamePicker";
+import { McdkKeyBinding } from "./McdkKeyBinding";
 
 export type Change = (key: string, value: unknown) => void;
-type Props = { data: ConfigData; change: Change };
+type Props = { data: ConfigData; change: Change; disabled?: boolean };
 export const defaults: ConfigData = {
   world_name: "MC_DEV_WORLD", world_folder_name: "MC_DEV_WORLD", world_seed: null, world_type: 1, game_mode: 1,
   included_mod_dirs: ["./"], auto_join_game: true, include_debug_mod: true, auto_hot_reload_mods: true,
@@ -36,12 +38,8 @@ export function WorldFields(props: Props) {
     <h3>实验性玩法</h3><div className="mcdk-check-grid">{[["data_driven_biomes", "自定义生物群系"], ["upcoming_creator_features", "即将推出的创作者功能"], ["experimental_creator_cameras", "实验性摄像机"], ["gametest", "Beta API"], ["deferred_technical_preview", "延迟渲染技术预览"]].map(([name, label]) => <Toggle key={name} {...props} name={"experiment_options." + name} label={label} />)}</div></>;
 }
 
-export function LaunchFields(props: Props & { onError: (message: string) => void }) {
-  const browse = async () => {
-    try { const path = await open({ directory: false, multiple: false, filters: [{ name: "Minecraft", extensions: ["exe"] }] }); if (typeof path === "string") props.change("game_executable_path", path); }
-    catch (e) { props.onError(errorMessage(e)); }
-  };
-  return <><h2>启动配置</h2><EditorField label="游戏程序"><span className="mcdk-input-action"><input value={String(props.data.game_executable_path ?? "")} onChange={e => props.change("game_executable_path", e.target.value)} placeholder="Minecraft.Windows.exe" /><button type="button" title="选择游戏程序" aria-label="选择游戏程序" onClick={() => void browse()}><FolderOpen size={16} /></button></span></EditorField>
+export function LaunchFields(props: Props & { componentId: string }) {
+  return <><h2>启动配置</h2><McdkGamePicker componentId={props.componentId} value={String(props.data.game_executable_path ?? "")} change={props.change} disabled={props.disabled} />
     <div className="mcdk-field-grid"><TextField {...props} name="user_name" label="玩家名称" /><SelectField {...props} name="log_protocol" label="日志协议" options={["默认日志", "备用日志协议"]} /></div>
     <h3>启动选项</h3><div className="mcdk-check-grid">{[["reset_world", "每次重置世界", false], ["auto_join_game", "自动进入游戏", true], ["include_debug_mod", "加载调试 Mod", true]].map(([name, label, fallback]) => <Toggle key={String(name)} {...props} name={String(name)} label={String(label)} fallback={Boolean(fallback)} />)}</div>
     <h3>自动热重载</h3><div className="mcdk-check-grid">{[["mods", "Python / Mod"], ["ui", "JSON UI"], ["shaders", "Shader"], ["materials", "材质"], ["particles", "粒子"]].map(([name, label]) => <Toggle key={name} {...props} name={"auto_hot_reload_" + name} label={label} fallback={name === "mods"} />)}</div></>;
@@ -81,7 +79,7 @@ function VectorField(props: Props & { name: string; label: string; axes: string[
 }
 
 export function AdvancedFields(props: Props) {
-  return <><h2>调试配置</h2><h3>热重载按键</h3><div className="mcdk-field-grid">{[["reload_key", "脚本重载"], ["reload_world_key", "世界重载"], ["reload_addon_key", "Addon 重载"], ["reload_shaders_key", "Shader 重载"]].map(([key, label]) => <EditorField key={key} label={label}><span className="mcdk-input-action"><input aria-label={label + "按键"} value={String(valueAt(props.data, "debug_options." + key) ?? "")} placeholder="未设置" readOnly onKeyDown={e => { if (e.key === "Tab" || e.key === "Escape") return; e.preventDefault(); props.change("debug_options." + key, String(e.keyCode)); }} /><button type="button" title={"清除" + label + "按键"} aria-label={"清除" + label + "按键"} onClick={() => props.change("debug_options." + key, "")}><X size={16} /></button></span></EditorField>)}</div>
+  return <><h2>调试配置</h2><h3>热重载按键</h3><div className="mcdk-field-grid">{[["reload_key", "脚本重载"], ["reload_world_key", "世界重载"], ["reload_addon_key", "Addon 重载"], ["reload_shaders_key", "Shader 重载"]].map(([key, label]) => <div className="mcdk-field" key={key}><span>{label}</span><McdkKeyBinding label={label} value={valueAt(props.data, "debug_options." + key)} disabled={props.disabled} onChange={value => props.change("debug_options." + key, value)} /></div>)}</div>
     <Toggle {...props} name="debug_options.reload_key_global" label="全局重载按键" />
     <h3>MCDK MCP 服务</h3><Toggle {...props} name="mcp_server_config.enabled" label="启用 MCP 服务" />
     <div className="mcdk-field-grid"><TextField {...props} name="mcp_server_config.server_ip" label="监听地址" fallback="localhost" /><EditorField label="监听端口"><input type="number" min={1} max={65535} required value={Number(valueAt(props.data, "mcp_server_config.server_port") ?? 19133)} onChange={e => props.change("mcp_server_config.server_port", Number(e.target.value))} /></EditorField></div></>;

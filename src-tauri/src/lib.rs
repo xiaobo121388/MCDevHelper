@@ -473,6 +473,7 @@ pub fn run() {
             app_version,
             mcdk_status,
             mcdk_editor::get_mcdk_config,
+            mcdk_editor::get_mcdk_game_installations,
             mcdk_editor::save_mcdk_config,
             mcdk_editor::get_mcdk_skin_catalog,
             mcdk_editor::get_mcdk_skin_preview,

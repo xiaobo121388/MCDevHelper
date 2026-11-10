@@ -27,6 +27,7 @@ export function McdkEditor({ componentId, onClose, running = false, canLaunch = 
   const discardApproved = useRef(false);
   const dirty = Object.keys(edits).length > 0;
   const locked = busy || skinBusy;
+  const controlsDisabled = locked || running || loading || !snapshot;
   const data = useMemo(() => applyEdits(snapshot?.data ?? {}, Object.values(edits)), [snapshot, edits]);
   const load = useCallback(async () => {
     const id = ++request.current; setLoading(true); setError(""); setNotice("");
@@ -94,21 +95,21 @@ export function McdkEditor({ componentId, onClose, running = false, canLaunch = 
   }, [locked, running, dirty]);
   return <form className="mcdk-editor" ref={form} onSubmit={submit}>
     <header className="mcdk-editor-heading"><div><h1>MCDK 可视化配置</h1><p title={snapshot?.path}>{snapshot?.path ?? componentId}</p></div><button type="button" title="关闭配置" aria-label="关闭配置" onClick={() => void close()} disabled={locked}><X size={19} /></button></header>
-    <div className="mcdk-editor-toolbar"><span role="status">{loading ? "正在加载" : running ? "游戏运行中 · 只读" : dirty ? "有未保存的修改" : snapshot?.revision ? "已保存" : "新配置"}</span><div>
+    <div className="mcdk-editor-toolbar"><span role="status" className={dirty ? "mcdk-save-status is-dirty" : "mcdk-save-status"}>{loading ? "正在加载" : running ? "游戏运行中 · 只读" : dirty ? "有未保存的修改" : snapshot?.revision ? "已保存" : "新配置"}</span><div>
       <button type="button" title="重新加载配置" aria-label="重新加载配置" disabled={locked || loading} onClick={() => void reload()}><RefreshCw size={16} /></button>
       <button type="submit" className="button secondary" disabled={locked || loading || running || !snapshot || (!dirty && !!snapshot.revision)}>{busy ? <LoaderCircle size={16} className="spin" /> : <Save size={16} />}保存</button>
       <button type="submit" value="launch" className="button primary" disabled={locked || loading || running || !snapshot || !canLaunch}><Play size={16} />保存并启动</button>
     </div></div>
     {error && <div className="mcdk-editor-error" role="alert">{error}</div>}{notice && <div className="mcdk-editor-notice" role="status">{notice}</div>}
     <div className="mcdk-editor-body"><nav className="mcdk-editor-tabs" aria-label="配置分类">{tabs.map(({ id, label, icon: Icon }) => <button type="button" key={id} aria-current={tab === id ? "page" : undefined} onClick={() => setTab(id)}><Icon size={17} /><span>{label}</span></button>)}</nav>
-      <fieldset className="mcdk-editor-content" disabled={locked || running || loading || !snapshot}>
+      <fieldset className="mcdk-editor-content" disabled={controlsDisabled}>
         {loading ? <div className="mcdk-empty" role="status">正在读取 .mcdev.json</div> : snapshot && <>
-          <section hidden={tab !== "launch"}><LaunchFields data={data} change={change} onError={setError} /></section>
+          <section hidden={tab !== "launch"}><LaunchFields componentId={componentId} data={data} change={change} disabled={controlsDisabled || tab !== "launch"} /></section>
           <section hidden={tab !== "world"}><WorldFields data={data} change={change} /></section>
           <section hidden={tab !== "mods"}><ModFields data={data} change={change} onError={setError} /></section>
-          <section hidden={tab !== "skin"}><McdkSkinPicker componentId={componentId} data={data} change={change} onBusy={setSkinBusy} /></section>
+          <section hidden={tab !== "skin"}><McdkSkinPicker componentId={componentId} data={data} change={change} onBusy={setSkinBusy} disabled={controlsDisabled || tab !== "skin"} /></section>
           <section hidden={tab !== "window"}><WindowFields data={data} change={change} /></section>
-          <section hidden={tab !== "debug"}><AdvancedFields data={data} change={change} /></section>
+          <section hidden={tab !== "debug"}><AdvancedFields data={data} change={change} disabled={controlsDisabled || tab !== "debug"} /></section>
         </>}
       </fieldset>
     </div>

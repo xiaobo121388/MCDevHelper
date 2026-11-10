@@ -1,70 +1,109 @@
 .mcdk-editor { display: flex; flex-direction: column; flex: 1; min-height: 0; min-width: 0; background: var(--panel); }
-.mcdk-editor button { cursor: pointer; }
+.mcdk-editor button { cursor: pointer; font: inherit; }
 .mcdk-editor button:disabled { cursor: default; opacity: .5; }
-.mcdk-editor button:not(.button) { display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; min-height: 32px; min-width: 32px; border: 1px solid transparent; border-radius: 4px; background: transparent; color: var(--text); }
-.mcdk-editor button:not(.button):hover { background: var(--control-hover); }
-.mcdk-editor input:not([type=checkbox]):not([type=range]):not([type=color]), .mcdk-editor select { width: 100%; min-width: 0; height: 34px; padding: 5px 8px; border: 1px solid var(--control-border); border-radius: 4px; background: var(--control-bg); color: var(--text); font: inherit; }
+.mcdk-editor button:not(.button) { display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; min-height: 34px; min-width: 34px; border: 1px solid transparent; border-radius: 5px; background: transparent; color: var(--text); }
+.mcdk-editor button:not(.button):hover:not(:disabled) { background: var(--control-hover); }
+.mcdk-editor input:not([type=checkbox]):not([type=range]):not([type=color]), .mcdk-editor select { width: 100%; min-width: 0; height: 36px; padding: 7px 10px; border: 1px solid var(--control-border); border-radius: 5px; background: var(--control-bg); color: var(--text); font: inherit; box-shadow: 0 1px 1px rgb(0 0 0 / 2%); }
+.mcdk-editor input::placeholder { color: var(--placeholder); }
 .mcdk-editor input[type=checkbox] { width: 16px; height: 16px; flex: 0 0 16px; accent-color: var(--accent); }
-.mcdk-editor input[type=color] { height: 34px; width: 70px; border: 1px solid var(--control-border); background: var(--control-bg); border-radius: 4px; }
+.mcdk-editor input[type=color] { height: 36px; width: 70px; border: 1px solid var(--control-border); background: var(--control-bg); border-radius: 5px; }
 .mcdk-editor input[type=range] { width: 100%; min-width: 40px; accent-color: var(--accent); }
 .mcdk-editor :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-.mcdk-editor-heading { display: flex; justify-content: space-between; gap: 16px; padding: 18px 22px 12px; }
+.mcdk-editor-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; padding: 18px 24px 10px; }
 .mcdk-editor-heading > div { min-width: 0; }
-.mcdk-editor-heading h1 { margin: 0; font-size: 19px; font-weight: 650; }
-.mcdk-editor-heading p { margin: 6px 0 0; color: var(--muted); font-size: 11px; overflow-wrap: anywhere; }
-.mcdk-editor-toolbar { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; padding: 10px 22px; border-bottom: 1px solid var(--border); }
-.mcdk-editor-toolbar > span { color: var(--muted); font-size: 12px; }
-.mcdk-editor-toolbar > div { display: flex; align-items: center; gap: 6px; }
+.mcdk-editor-heading h1 { margin: 0; font-size: 17px; font-weight: 650; line-height: 25px; }
+.mcdk-editor-heading p { margin: 4px 0 0; color: var(--muted); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mcdk-editor-toolbar { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; padding: 10px 24px 14px; border-bottom: 1px solid var(--border); }
+.mcdk-save-status { display: inline-flex; align-items: center; gap: 7px; color: var(--muted); font-size: 12px; }
+.mcdk-save-status::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--muted); }
+.mcdk-save-status.is-dirty::before { background: var(--warning-text); }
+.mcdk-editor-toolbar > div { display: flex; align-items: center; gap: 7px; }
 .mcdk-editor-body { display: flex; flex: 1; min-height: 0; }
-.mcdk-editor-tabs { display: flex; flex-direction: column; width: 150px; flex-shrink: 0; padding: 12px 8px; border-right: 1px solid var(--border); background: var(--panel-soft); gap: 4px; }
-.mcdk-editor-tabs button { justify-content: flex-start !important; gap: 10px; padding: 10px 12px; font-size: 13px; }
-.mcdk-editor-tabs button[aria-current=page] { color: var(--accent); background: var(--accent-soft); font-weight: 600; }
-.mcdk-editor-content { min-width: 0; flex: 1; overflow: auto; margin: 0; padding: 24px; border: 0; }
+.mcdk-editor-tabs { display: flex; flex-direction: column; width: 142px; flex-shrink: 0; padding: 16px 10px; border-right: 1px solid var(--border); background: var(--bg); gap: 4px; }
+.mcdk-editor-tabs button { position: relative; justify-content: flex-start !important; gap: 10px; padding: 10px 12px; font-size: 13px; }
+.mcdk-editor .mcdk-editor-tabs button[aria-current=page] { color: var(--accent); background: var(--accent-soft); font-weight: 600; }
+.mcdk-editor-tabs button[aria-current=page]::before { content: ""; position: absolute; left: 0; width: 3px; height: 16px; background: var(--accent); border-radius: 2px; }
+.mcdk-editor-content { min-width: 0; flex: 1; overflow: auto; margin: 0; padding: 26px 28px; border: 0; }
+.mcdk-editor-content section { max-width: 960px; margin: 0 auto; }
 .mcdk-editor-content section[hidden] { display: none; }
-.mcdk-editor h2 { font-size: 16px; margin: 0 0 20px; font-weight: 600; }
-.mcdk-editor h3 { font-size: 13px; margin: 28px 0 14px; padding-top: 18px; border-top: 1px solid var(--border); font-weight: 600; }
-.mcdk-editor h3 > span { float: right; color: var(--muted); font-weight: 400; }
-.mcdk-field { display: flex; flex-direction: column; gap: 7px; min-width: 0; font-size: 12px; margin-bottom: 16px; }
-.mcdk-field > span:first-child { color: var(--muted); }
-.mcdk-field-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px 20px; }
-.mcdk-check-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px 20px; margin-bottom: 22px; }
-.mcdk-check { display: flex; align-items: center; gap: 8px; font-size: 12px; min-height: 22px; }
+.mcdk-editor h2 { font-size: 15px; line-height: 22px; margin: 0 0 22px; font-weight: 650; }
+.mcdk-editor h3 { display: flex; justify-content: space-between; align-items: center; font-size: 12px; margin: 26px 0 16px; padding-top: 18px; border-top: 1px solid var(--border); font-weight: 650; }
+.mcdk-editor h2 + h3 { padding-top: 0; border: 0; margin-top: 0; }
+.mcdk-editor h3 > span { color: var(--muted); font-size: 11px; font-weight: 400; }
+.mcdk-field { display: flex; flex-direction: column; gap: 8px; min-width: 0; font-size: 12px; margin-bottom: 18px; }
+.mcdk-field > span:first-child { color: var(--text); }
+.mcdk-field-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 24px; }
+.mcdk-check-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 24px; margin-bottom: 22px; }
+.mcdk-check { display: flex; align-items: center; gap: 10px; font-size: 12px; min-height: 26px; cursor: pointer; }
+.mcdk-check + .mcdk-field-grid { margin-top: 16px; }
+.mcdk-check input[type=checkbox] { appearance: none; position: relative; width: 28px; height: 16px; flex: 0 0 28px; margin: 0; border-radius: 9px; border: 1px solid var(--control-border); background: var(--panel-soft); cursor: pointer; }
+.mcdk-check input[type=checkbox]::after { content: ""; position: absolute; top: 3px; left: 3px; width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
+.mcdk-check input[type=checkbox]:checked { background: var(--accent); border-color: var(--accent); }
+.mcdk-check input[type=checkbox]:checked::after { left: 15px; background: var(--accent-contrast); }
+.mcdk-editor fieldset:disabled .mcdk-check { cursor: default; opacity: .6; }
 .mcdk-input-action { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .mcdk-input-action > input { min-width: 0; }
-.mcdk-input-action > output { min-width: 28px; font-size: 12px; }
+.mcdk-input-action > output { min-width: 30px; font-size: 12px; text-align: right; }
 .mcdk-section-heading { display: flex; justify-content: space-between; align-items: flex-start; }
 .mcdk-mod-list { display: flex; flex-direction: column; }
-.mcdk-mod-row { display: grid; grid-template-columns: minmax(100px, 1fr) auto auto 32px; align-items: center; gap: 12px; padding: 12px 0; border-bottom: 1px solid var(--border); }
+.mcdk-mod-row { display: grid; grid-template-columns: minmax(100px, 1fr) auto auto 34px; align-items: center; gap: 12px; padding: 12px 0; border-bottom: 1px solid var(--border); }
 .mcdk-mod-row > label { display: flex; align-items: center; gap: 5px; white-space: nowrap; font-size: 12px; }
-.mcdk-editor-error, .mcdk-editor-warning, .mcdk-editor-notice { padding: 10px 14px; margin: 8px 16px; border-left: 3px solid var(--danger); color: var(--danger); background: var(--panel-soft); overflow-wrap: anywhere; font-size: 12px; }
+.mcdk-editor-error, .mcdk-editor-warning, .mcdk-editor-notice { padding: 10px 12px; margin: 8px 16px; border-left: 3px solid var(--danger); color: var(--danger); background: var(--panel-soft); overflow-wrap: anywhere; font-size: 12px; }
+.mcdk-editor-content .mcdk-editor-error, .mcdk-editor-content .mcdk-editor-warning { margin: 10px 0; }
 .mcdk-editor-warning { border-color: var(--warning-text); color: var(--warning-text); }
 .mcdk-editor-notice { border-color: #26834b; color: var(--text); }
-.mcdk-empty { color: var(--muted); padding: 12px 0; font-size: 12px; }
-.mcdk-skin-layout { display: grid; grid-template-columns: minmax(0, 1fr) 192px; gap: 24px; }
+.mcdk-empty, .mcdk-field-status { color: var(--muted); font-size: 12px; }
+.mcdk-empty { padding: 12px 0; }
+.mcdk-field-status { margin: -6px 0 16px; }
+.mcdk-skin-layout { display: grid; grid-template-columns: minmax(0, 1fr) 180px; gap: 28px; align-items: start; }
 .mcdk-skin-controls { min-width: 0; }
 .mcdk-skin-preview { margin: 0; min-width: 0; }
-.mcdk-skin-preview > div { display: flex; align-items: center; justify-content: center; aspect-ratio: 1; color: var(--muted); background-color: var(--panel-soft); border: 1px solid var(--border); border-radius: 4px; }
+.mcdk-skin-preview > div { display: flex; align-items: center; justify-content: center; aspect-ratio: 1; overflow: hidden; color: var(--muted); background: var(--bg); border: 1px solid var(--border); border-radius: 6px; }
 .mcdk-skin-preview img { width: 100%; height: 100%; object-fit: contain; image-rendering: pixelated; }
-.mcdk-skin-preview figcaption { padding-top: 9px; font-size: 12px; text-align: center; overflow-wrap: anywhere; }
-.mcdk-skin-model { color: var(--muted); font-size: 12px; }
+.mcdk-skin-preview figcaption { padding-top: 10px; font-size: 12px; text-align: center; overflow-wrap: anywhere; }
+.mcdk-skin-model { display: inline-block; margin: 0; padding: 3px 8px; background: var(--panel-soft); border: 1px solid var(--border); border-radius: 4px; color: var(--muted); font-size: 11px; }
 .mcdk-skin-library { list-style: none; padding: 0; margin: 12px 0; }
 .mcdk-skin-library li { display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--border); padding: 5px 0; }
 .mcdk-skin-library .mcdk-skin-name { min-width: 0; justify-content: flex-start; flex-wrap: wrap; overflow-wrap: anywhere; gap: 8px; padding: 6px; }
 .mcdk-skin-name small { color: var(--muted); }
+.mcdk-editor button.mcdk-choice-trigger, .mcdk-editor button.mcdk-key-trigger { width: 100%; min-width: 0; flex: 1; min-height: 38px; justify-content: flex-start; gap: 10px; padding: 8px 10px; border: 1px solid var(--control-border); background: var(--control-bg); border-radius: 5px; }
+.mcdk-editor button.mcdk-choice-trigger[data-state=open] { border-color: var(--accent); }
+.mcdk-choice-text { display: flex; align-items: center; flex: 1; min-width: 0; gap: 8px; text-align: left; }
+.mcdk-choice-text > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mcdk-choice-text small { flex-shrink: 0; margin-left: auto; padding: 1px 5px; font-size: 10px; line-height: 16px; border-radius: 3px; background: var(--panel-soft); color: var(--muted); border: 1px solid var(--border); }
+.mcdk-choice-icon { display: inline-flex; align-items: center; justify-content: center; width: 20px; flex: 0 0 20px; color: var(--muted); }
+.mcdk-choice-menu { z-index: 100; width: var(--radix-dropdown-menu-trigger-width); min-width: min(320px, calc(100vw - 20px)); max-width: calc(100vw - 20px); max-height: min(380px, var(--radix-dropdown-menu-content-available-height)); padding: 5px; overflow: auto; overscroll-behavior: contain; color: var(--text); font-size: 12px; background: var(--panel); border: 1px solid var(--control-border); border-radius: 7px; box-shadow: 0 8px 26px rgb(0 0 0 / 16%); }
+.mcdk-choice-group { display: flex; justify-content: space-between; margin: 5px 7px 3px; padding: 7px 2px; color: var(--muted); font-size: 11px; font-weight: 600; }
+.mcdk-choice-group span { font-weight: 400; }
+.mcdk-choice-item { display: flex; align-items: center; gap: 9px; min-height: 36px; padding: 8px; border-radius: 4px; outline: none; cursor: pointer; user-select: none; }
+.mcdk-choice-item[data-highlighted] { background: var(--control-hover); }
+.mcdk-choice-item[data-state=checked] { background: var(--accent-soft); }
+.mcdk-choice-copy { flex: 1; min-width: 0; }
+.mcdk-choice-description { display: block; margin-top: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: 10px; }
+.mcdk-choice-indicator { display: inline-flex; align-items: center; width: 16px; flex: 0 0 16px; color: var(--accent); }
+.mcdk-editor button.mcdk-key-trigger { min-height: 38px; }
+.mcdk-key-trigger > svg { color: var(--muted); }
+.mcdk-key-trigger kbd { min-width: 0; overflow-wrap: anywhere; font: 600 12px "Cascadia Code", Consolas, "Microsoft YaHei UI", monospace; }
+.mcdk-editor button.mcdk-key-trigger[aria-pressed=true] { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
+.mcdk-key-error { display: block; margin-top: 7px; font-size: 11px; color: var(--danger); }
 @media (max-width: 700px) {
   .mcdk-editor-body { flex-direction: column; }
-  .mcdk-editor-tabs { width: 100%; flex-direction: row; overflow-x: auto; padding: 6px; border-right: 0; border-bottom: 1px solid var(--border); gap: 2px; }
-  .mcdk-editor-tabs button { padding: 8px; gap: 5px; white-space: nowrap; font-size: 12px; }
-  .mcdk-editor-content { padding: 18px 14px; }
-  .mcdk-editor-heading, .mcdk-editor-toolbar { padding-left: 14px; padding-right: 14px; }
-  .mcdk-skin-layout { grid-template-columns: minmax(0, 1fr) 128px; gap: 14px; }
-  .mcdk-field-grid, .mcdk-check-grid { gap: 12px; }
-  .mcdk-mod-row { grid-template-columns: 1fr 1fr 32px; }
+  .mcdk-editor-tabs { width: 100%; flex-direction: row; overflow-x: auto; padding: 6px 10px; border-right: 0; border-bottom: 1px solid var(--border); gap: 3px; }
+  .mcdk-editor-tabs button { padding: 8px; gap: 6px; white-space: nowrap; font-size: 12px; }
+  .mcdk-editor-tabs button[aria-current=page]::before { left: 8px; right: 8px; bottom: 0; width: auto; height: 2px; }
+  .mcdk-editor-content { padding: 20px 18px; }
+  .mcdk-editor-heading, .mcdk-editor-toolbar { padding-left: 18px; padding-right: 18px; }
+  .mcdk-skin-layout { grid-template-columns: minmax(0, 1fr) 128px; gap: 20px; }
+  .mcdk-field-grid { column-gap: 18px; }
+  .mcdk-check-grid { gap: 12px 18px; }
+  .mcdk-mod-row { grid-template-columns: 1fr 1fr 34px; }
   .mcdk-mod-row > .mcdk-input-action { grid-column: 1 / -1; }
 }
 @media (max-width: 420px) {
   .mcdk-field-grid { grid-template-columns: minmax(0, 1fr); }
   .mcdk-skin-layout { grid-template-columns: minmax(0, 1fr); }
-  .mcdk-skin-preview { width: 160px; justify-self: center; }
+  .mcdk-skin-preview { width: 152px; justify-self: center; }
+  .mcdk-editor-tabs { justify-content: space-between; padding: 6px; }
   .mcdk-editor-tabs button { flex-direction: column; min-width: 48px !important; gap: 4px; }
+  .mcdk-editor-toolbar { row-gap: 10px; }
 }
