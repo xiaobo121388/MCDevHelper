@@ -12,6 +12,10 @@ pub(crate) enum DialogRequest {
     Create,
     Import,
     Warnings,
+    McdkEditor {
+        #[serde(rename = "componentId")]
+        component_id: String,
+    },
     PluginPanel {
         #[serde(rename = "pluginId")]
         plugin_id: String,
@@ -72,6 +76,11 @@ impl DialogRequest {
             Self::Create => ("dialog-create".into(), "新建组件", 600., 640.),
             Self::Import => ("dialog-import".into(), "导入组件", 620., 660.),
             Self::Warnings => ("dialog-warnings".into(), "扫描问题", 760., 620.),
+            Self::McdkEditor { component_id } => {
+                let mut hash = DefaultHasher::new();
+                component_id.hash(&mut hash);
+                (format!("dialog-mcdk-{:x}", hash.finish()), "MCDK 可视化配置", 1000., 760.)
+            },
             Self::PluginPanel { plugin_id, panel_id, fingerprint, component_id } => {
                 let mut hash = DefaultHasher::new();
                 (plugin_id, panel_id, fingerprint, component_id).hash(&mut hash);

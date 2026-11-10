@@ -1,0 +1,70 @@
+.mcdk-editor { display: flex; flex-direction: column; flex: 1; min-height: 0; min-width: 0; background: var(--panel); }
+.mcdk-editor button { cursor: pointer; }
+.mcdk-editor button:disabled { cursor: default; opacity: .5; }
+.mcdk-editor button:not(.button) { display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; min-height: 32px; min-width: 32px; border: 1px solid transparent; border-radius: 4px; background: transparent; color: var(--text); }
+.mcdk-editor button:not(.button):hover { background: var(--control-hover); }
+.mcdk-editor input:not([type=checkbox]):not([type=range]):not([type=color]), .mcdk-editor select { width: 100%; min-width: 0; height: 34px; padding: 5px 8px; border: 1px solid var(--control-border); border-radius: 4px; background: var(--control-bg); color: var(--text); font: inherit; }
+.mcdk-editor input[type=checkbox] { width: 16px; height: 16px; flex: 0 0 16px; accent-color: var(--accent); }
+.mcdk-editor input[type=color] { height: 34px; width: 70px; border: 1px solid var(--control-border); background: var(--control-bg); border-radius: 4px; }
+.mcdk-editor input[type=range] { width: 100%; min-width: 40px; accent-color: var(--accent); }
+.mcdk-editor :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.mcdk-editor-heading { display: flex; justify-content: space-between; gap: 16px; padding: 18px 22px 12px; }
+.mcdk-editor-heading > div { min-width: 0; }
+.mcdk-editor-heading h1 { margin: 0; font-size: 19px; font-weight: 650; }
+.mcdk-editor-heading p { margin: 6px 0 0; color: var(--muted); font-size: 11px; overflow-wrap: anywhere; }
+.mcdk-editor-toolbar { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; padding: 10px 22px; border-bottom: 1px solid var(--border); }
+.mcdk-editor-toolbar > span { color: var(--muted); font-size: 12px; }
+.mcdk-editor-toolbar > div { display: flex; align-items: center; gap: 6px; }
+.mcdk-editor-body { display: flex; flex: 1; min-height: 0; }
+.mcdk-editor-tabs { display: flex; flex-direction: column; width: 150px; flex-shrink: 0; padding: 12px 8px; border-right: 1px solid var(--border); background: var(--panel-soft); gap: 4px; }
+.mcdk-editor-tabs button { justify-content: flex-start !important; gap: 10px; padding: 10px 12px; font-size: 13px; }
+.mcdk-editor-tabs button[aria-current=page] { color: var(--accent); background: var(--accent-soft); font-weight: 600; }
+.mcdk-editor-content { min-width: 0; flex: 1; overflow: auto; margin: 0; padding: 24px; border: 0; }
+.mcdk-editor-content section[hidden] { display: none; }
+.mcdk-editor h2 { font-size: 16px; margin: 0 0 20px; font-weight: 600; }
+.mcdk-editor h3 { font-size: 13px; margin: 28px 0 14px; padding-top: 18px; border-top: 1px solid var(--border); font-weight: 600; }
+.mcdk-editor h3 > span { float: right; color: var(--muted); font-weight: 400; }
+.mcdk-field { display: flex; flex-direction: column; gap: 7px; min-width: 0; font-size: 12px; margin-bottom: 16px; }
+.mcdk-field > span:first-child { color: var(--muted); }
+.mcdk-field-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px 20px; }
+.mcdk-check-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px 20px; margin-bottom: 22px; }
+.mcdk-check { display: flex; align-items: center; gap: 8px; font-size: 12px; min-height: 22px; }
+.mcdk-input-action { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.mcdk-input-action > input { min-width: 0; }
+.mcdk-input-action > output { min-width: 28px; font-size: 12px; }
+.mcdk-section-heading { display: flex; justify-content: space-between; align-items: flex-start; }
+.mcdk-mod-list { display: flex; flex-direction: column; }
+.mcdk-mod-row { display: grid; grid-template-columns: minmax(100px, 1fr) auto auto 32px; align-items: center; gap: 12px; padding: 12px 0; border-bottom: 1px solid var(--border); }
+.mcdk-mod-row > label { display: flex; align-items: center; gap: 5px; white-space: nowrap; font-size: 12px; }
+.mcdk-editor-error, .mcdk-editor-warning, .mcdk-editor-notice { padding: 10px 14px; margin: 8px 16px; border-left: 3px solid var(--danger); color: var(--danger); background: var(--panel-soft); overflow-wrap: anywhere; font-size: 12px; }
+.mcdk-editor-warning { border-color: var(--warning-text); color: var(--warning-text); }
+.mcdk-editor-notice { border-color: #26834b; color: var(--text); }
+.mcdk-empty { color: var(--muted); padding: 12px 0; font-size: 12px; }
+.mcdk-skin-layout { display: grid; grid-template-columns: minmax(0, 1fr) 192px; gap: 24px; }
+.mcdk-skin-controls { min-width: 0; }
+.mcdk-skin-preview { margin: 0; min-width: 0; }
+.mcdk-skin-preview > div { display: flex; align-items: center; justify-content: center; aspect-ratio: 1; color: var(--muted); background-color: var(--panel-soft); border: 1px solid var(--border); border-radius: 4px; }
+.mcdk-skin-preview img { width: 100%; height: 100%; object-fit: contain; image-rendering: pixelated; }
+.mcdk-skin-preview figcaption { padding-top: 9px; font-size: 12px; text-align: center; overflow-wrap: anywhere; }
+.mcdk-skin-model { color: var(--muted); font-size: 12px; }
+.mcdk-skin-library { list-style: none; padding: 0; margin: 12px 0; }
+.mcdk-skin-library li { display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--border); padding: 5px 0; }
+.mcdk-skin-library .mcdk-skin-name { min-width: 0; justify-content: flex-start; flex-wrap: wrap; overflow-wrap: anywhere; gap: 8px; padding: 6px; }
+.mcdk-skin-name small { color: var(--muted); }
+@media (max-width: 700px) {
+  .mcdk-editor-body { flex-direction: column; }
+  .mcdk-editor-tabs { width: 100%; flex-direction: row; overflow-x: auto; padding: 6px; border-right: 0; border-bottom: 1px solid var(--border); gap: 2px; }
+  .mcdk-editor-tabs button { padding: 8px; gap: 5px; white-space: nowrap; font-size: 12px; }
+  .mcdk-editor-content { padding: 18px 14px; }
+  .mcdk-editor-heading, .mcdk-editor-toolbar { padding-left: 14px; padding-right: 14px; }
+  .mcdk-skin-layout { grid-template-columns: minmax(0, 1fr) 128px; gap: 14px; }
+  .mcdk-field-grid, .mcdk-check-grid { gap: 12px; }
+  .mcdk-mod-row { grid-template-columns: 1fr 1fr 32px; }
+  .mcdk-mod-row > .mcdk-input-action { grid-column: 1 / -1; }
+}
+@media (max-width: 420px) {
+  .mcdk-field-grid { grid-template-columns: minmax(0, 1fr); }
+  .mcdk-skin-layout { grid-template-columns: minmax(0, 1fr); }
+  .mcdk-skin-preview { width: 160px; justify-self: center; }
+  .mcdk-editor-tabs button { flex-direction: column; min-width: 48px !important; gap: 4px; }
+}

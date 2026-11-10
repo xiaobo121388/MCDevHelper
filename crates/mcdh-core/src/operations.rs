@@ -1589,7 +1589,7 @@ fn update_jsonc_property(path: &Path, name: &str, value: CstInputValue) -> Resul
     document.write(path)
 }
 
-fn atomic_write(path: &Path, content: &[u8]) -> Result<()> {
+pub(crate) fn atomic_write(path: &Path, content: &[u8]) -> Result<()> {
     let parent = path
         .parent()
         .ok_or_else(|| CoreError::InvalidInput("JSON 文件没有父目录".into()))?;

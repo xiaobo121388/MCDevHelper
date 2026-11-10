@@ -5,6 +5,8 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+base64 = "0.22"
+png = "0.18"
 encoding_rs.workspace = true
 chrono.workspace = true
 directories.workspace = true

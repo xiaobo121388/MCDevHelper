@@ -19,6 +19,7 @@ use mcdh_core::custom_export::CustomExportService;
 mod mcdk_manager;
 mod mcdk_release;
 mod mcdk_launch;
+mod mcdk_editor;
 mod app_update;
 mod custom_export;
 mod windows;
@@ -471,6 +472,12 @@ pub fn run() {
             get_plugin_logs,
             app_version,
             mcdk_status,
+            mcdk_editor::get_mcdk_config,
+            mcdk_editor::save_mcdk_config,
+            mcdk_editor::get_mcdk_skin_catalog,
+            mcdk_editor::get_mcdk_skin_preview,
+            mcdk_editor::get_mcdk_skin_library,
+            mcdk_editor::update_mcdk_skin_library,
             launch_component_game,
             set_mcdk_auto_update,
             check_mcdk_update,

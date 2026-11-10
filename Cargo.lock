@@ -2300,11 +2300,13 @@ dependencies = [
 name = "mcdh-core"
 version = "1.4.1"
 dependencies = [
+ "base64 0.22.1",
  "chrono",
  "directories",
  "encoding_rs",
  "fs2",
  "jsonc-parser",
+ "png 0.18.1",
  "rusqlite",
  "semver",
  "serde",

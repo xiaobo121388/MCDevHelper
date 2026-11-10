@@ -188,6 +188,7 @@ Generation command: `pnpm license-report`
 | pkg-config | 0.3.33 | MIT OR Apache-2.0 |
 | plist | 1.10.0 | MIT |
 | png | 0.17.16 | MIT OR Apache-2.0 |
+| png | 0.18.1 | MIT OR Apache-2.0 |
 | potential_utf | 0.1.5 | Unicode-3.0 |
 | powerfmt | 0.2.0 | MIT OR Apache-2.0 |
 | precomputed-hash | 0.1.1 | MIT |
@@ -486,6 +487,34 @@ THE SOFTWARE.
 
 
 ## Notes
+
+### MC Dev Tools visual configuration and skin catalog
+
+The MCDK visual configuration and skin catalog are adapted from Dofes/mcdev-tools and xiaobo121388 PR #10. See docs/mcdk-editor.md for pinned revisions and scope.
+
+~~~text
+MIT License
+
+Copyright (c) 2025 dofes
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+~~~
 
 - MCDH bundles MCDevTool MCDK 1.6.1 (BSD-3-Clause) as an unmodified executable from https://github.com/GitHub-Zero123/MCDevTool. See the accompanying mcdk/licenses directory for the full upstream and third-party notices (cpp-mcp, NBT, BinaryStream, zlib, nlohmann/json, cpp-httplib and CLI11).
 - MCDH does not bundle the Minecraft game executable. It does not copy BDSAddonManager source code.

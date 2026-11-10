@@ -7,6 +7,7 @@ import { applyAppearance } from "./appearance";
 import { ComponentDialog, CreateDialog, DEFAULT_SETTINGS, ImportDialog, Modal, readIgnoredWarningKeys, SettingsDialog, StartupUpdateDialog, warningKey, WarningsDialog, writeIgnoredWarningKeys } from "./App";
 import { UpdateProgress, useAppUpdate } from "./AppUpdate";
 import { useMcdk } from "./Mcdk";
+import { McdkEditor } from "./McdkEditor";
 import { WindowChrome } from "./WindowChrome";
 import { ExportDirectoryForm } from "./ExportLocation";
 import { PluginPanelHost } from "./PluginPanelHost";
@@ -14,7 +15,7 @@ import type { PluginPanelRequest } from "./pluginTypes";
 import { closeDialogWindow, confirmAction, nativeWindows, notifySettings, notifyWorkspace, openDialogWindow, SETTINGS_CHANGED, WORKSPACE_CHANGED, type DialogRequest, type WorkspaceChange } from "./windows";
 import type { AppSettings, ComponentSummary, DiscoveryWarning, OperationResult, SourceRecord } from "./types";
 
-const titles = { settings: "设置", create: "新建组件", import: "导入组件", warnings: "扫描问题", component: "组件配置", startup: "版本更新", confirm: "确认操作", export_directory: "导出目录配置", plugin_panel: "插件工具" };
+const titles = { settings: "设置", create: "新建组件", import: "导入组件", warnings: "扫描问题", component: "组件配置", startup: "版本更新", confirm: "确认操作", export_directory: "导出目录配置", plugin_panel: "插件工具", mcdk_editor: "MCDK 可视化配置" };
 
 export function DialogApp({ request }: { request: DialogRequest }) {
   const initialComponent = request.kind === "component" && request.initialComponent?.id === request.componentId ? request.initialComponent : null;
@@ -118,6 +119,7 @@ export function DialogApp({ request }: { request: DialogRequest }) {
     {updater.progress ? <UpdateProgress progress={updater.progress} standalone /> : loading ? <div className="window-loading" role="status"><LoaderCircle className="spin" size={22} />正在加载</div> : error ?
       <div className="window-load-error" role="alert"><TriangleAlert size={24} /><p>{error}</p><button className="button secondary" onClick={() => { setLoading(true); void load(); }}>重试</button></div> : <>
         {request.kind === "settings" && <SettingsDialog settings={settings} mcdk={mcdk} updater={updater} onSettings={onSettings} onClose={close} onChanged={changed} onNotice={setNotice} onOpenPluginPanel={openPluginPanel} />}
+        {request.kind === "mcdk_editor" && <McdkEditor componentId={request.componentId} onClose={close} running={mcdk.status?.session?.component_id === request.componentId} canLaunch={!!mcdk.status?.available && !mcdk.status?.session} />}
         {request.kind === "create" && <CreateDialog sources={sources} settings={settings} onConfigurePaths={() => { void openDialogWindow({ kind: "settings" }).catch((cause) => setNotice(errorMessage(cause))); }} onClose={close} onDone={done} />}
         {request.kind === "import" && <ImportDialog onClose={close} onDone={done} />}
         {request.kind === "component" && component && <ComponentDialog component={component} running={mcdk.status?.session?.component_id === component.id} onClose={close} onDone={done} onNotice={setNotice} />}

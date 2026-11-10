@@ -17,6 +17,7 @@ export type ExportDirectoryRequest = {
   owner: string;
 };
 export type DialogRequest =
+  | { kind: "mcdk_editor"; componentId: string }
   | ({ kind: "plugin_panel" } & PluginPanelRequest)
   | { kind: "settings" | "create" | "import" | "warnings" }
   | { kind: "component"; componentId: string; initialComponent?: ComponentSummary; initialSettings?: AppSettings }
