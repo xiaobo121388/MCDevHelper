@@ -12,7 +12,7 @@ describe("releaseNotesFor", () => {
   it("provides release notes for the packaged version", () => {
     const notes = releaseNotesFor(version);
     expect(notes.length).toBeGreaterThan(1);
-    for (const topic of ["标题栏", "独立窗口", "加载", "重载", "兼容", "MCP"]) {
+    for (const topic of ["MCDK", "配置详情", "游戏版本", "按键", "皮肤", "独立窗口", "MCP", "只读"]) {
       expect(notes.some((note) => note.includes(topic))).toBe(true);
     }
     expect(new Set(notes).size).toBe(notes.length);
@@ -41,6 +41,9 @@ describe("releaseNotesFor", () => {
   });
 
   it("preserves historical notes and handles unknown versions", () => {
+    for (const topic of ["标题栏", "独立窗口", "加载", "重载", "兼容", "MCP"]) {
+      expect(releaseNotesFor("1.4.1").some((note) => note.includes(topic))).toBe(true);
+    }
     for (const topic of ["GitHub", "本地导入", "面板", "MCP", "设置", "开关", "清空", "全权限"]) {
       expect(releaseNotesFor("1.4.0").some((note) => note.includes(topic))).toBe(true);
     }

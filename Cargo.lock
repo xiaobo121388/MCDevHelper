@@ -2298,7 +2298,7 @@ dependencies = [
 
 [[package]]
 name = "mcdh-core"
-version = "1.4.1"
+version = "1.5.0"
 dependencies = [
  "base64 0.22.1",
  "chrono",
@@ -2322,7 +2322,7 @@ dependencies = [
 
 [[package]]
 name = "mcdh-desktop"
-version = "1.4.1"
+version = "1.5.0"
 dependencies = [
  "chrono",
  "mcdh-core",
@@ -2346,7 +2346,7 @@ dependencies = [
 
 [[package]]
 name = "mcdh-mcp"
-version = "1.4.1"
+version = "1.5.0"
 dependencies = [
  "anyhow",
  "jsonschema",
@@ -2363,7 +2363,7 @@ dependencies = [
 
 [[package]]
 name = "mcdh-plugins"
-version = "1.4.1"
+version = "1.5.0"
 dependencies = [
  "chrono",
  "fs2",
